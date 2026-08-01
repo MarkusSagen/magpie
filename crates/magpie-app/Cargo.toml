@@ -1,0 +1,18 @@
+[package]
+name = "magpie-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+magpie-core = { path = "../magpie-core" }
+magpie-platform = { path = "../magpie-platform" }
+slint = "1.8"
+tray-icon = "0.19"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "5"
+image = "0.25"
+
+[build-dependencies]
+slint-build = "1.8"
