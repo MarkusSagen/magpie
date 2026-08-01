@@ -6,3 +6,10 @@ resolver = "2"
 edition = "2021"
 version = "0.1.0"
 license = "MIT"
+
+[profile.release]
+opt-level = "z"    # smallest binary; switch to "s" if runtime speed regresses
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

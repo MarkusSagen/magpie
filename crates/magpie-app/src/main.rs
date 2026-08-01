@@ -6,6 +6,7 @@
 slint::include_modules!();
 
 mod app_state;
+mod cli;
 mod config;
 mod grouping;
 mod image_cache;
@@ -14,5 +15,11 @@ mod runtime;
 mod viewmodel;
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let code = cli::run_command(cli::parse_args(&args));
+    if code >= 0 {
+        std::process::exit(code);
+    }
+    // code == -1: launch the GUI.
     runtime::start();
 }
