@@ -3362,6 +3362,7 @@ version = "0.1.0"
 dependencies = [
  "active-win-pos-rs",
  "arboard",
+ "blake3",
  "enigo",
  "global-hotkey",
  "magpie-core",
