@@ -1,6 +1,7 @@
 pub mod detect;
 pub mod metrics;
 pub mod model;
+pub mod store;
 
 #[cfg(test)]
 mod smoke {
