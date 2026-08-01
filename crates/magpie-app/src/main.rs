@@ -6,5 +6,6 @@ fn main() {
 }
 
 mod config;
+mod grouping;
 mod image_cache;
 mod viewmodel;
