@@ -1,6 +1,6 @@
 use crate::detect::{detect_text_kind, Kind};
 use crate::metrics::text_metrics;
-use crate::model::{content_hash, AppInfo, Content};
+use crate::model::{content_hash, AppInfo, CaptureEvent, Content};
 use rusqlite::Connection;
 use std::path::Path;
 
@@ -108,6 +108,64 @@ impl Store {
             |r| r.get(0),
         )
     }
+
+    pub fn ingest(&self, ev: &CaptureEvent, images: &dyn ImageStore) -> Result<Ingested> {
+        let p = prepare(&ev.content, images)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let app_id: Option<i64> = match &ev.source_app {
+            Some(a) => Some(self.upsert_app(a)?),
+            None => None,
+        };
+
+        let existing: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM entries WHERE content_hash = ?1",
+                [&p.hash],
+                |r| r.get(0),
+            )
+            .ok();
+
+        let entry_id = match existing {
+            Some(id) => {
+                self.conn.execute(
+                    "UPDATE entries
+                       SET copy_count = copy_count + 1,
+                           last_copied_at_ms = ?2
+                     WHERE id = ?1",
+                    rusqlite::params![id, ev.copied_at_ms],
+                )?;
+                id
+            }
+            None => {
+                self.conn.execute(
+                    "INSERT INTO entries
+                       (content_hash, kind, preview_text, full_text, image_path,
+                        byte_size, char_count, word_count, line_count,
+                        first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11)",
+                    rusqlite::params![
+                        p.hash, p.kind.as_str(), p.preview_text, p.full_text, p.image_path,
+                        p.byte_size, p.char_count, p.word_count, p.line_count,
+                        ev.copied_at_ms, app_id
+                    ],
+                )?;
+                self.conn.last_insert_rowid()
+            }
+        };
+
+        self.conn.execute(
+            "INSERT INTO copy_events (entry_id, copied_at_ms, source_app_id) VALUES (?1, ?2, ?3)",
+            rusqlite::params![entry_id, ev.copied_at_ms, app_id],
+        )?;
+
+        Ok(Ingested { entry_id, is_new: existing.is_none() })
+    }
+}
+
+pub struct Ingested {
+    pub entry_id: i64,
+    pub is_new: bool,
 }
 
 pub fn open(path: &Path) -> Result<Store> {
@@ -162,6 +220,65 @@ mod tests {
         let p = prepare(&Content::Files(vec!["/a".into(), "/b".into()]), &FakeImages).unwrap();
         assert_eq!(p.kind.as_str(), "file");
         assert_eq!(p.full_text, "/a\n/b");
+    }
+
+    #[test]
+    fn ingest_new_text_creates_entry_and_event() {
+        use crate::model::{CaptureEvent, Content};
+        let s = open_in_memory().unwrap();
+        let ev = CaptureEvent {
+            content: Content::Text("hello".into()),
+            source_app: None,
+            copied_at_ms: 1000,
+        };
+        let out = s.ingest(&ev, &FakeImages).unwrap();
+        assert!(out.is_new);
+
+        let (cc, first, last): (i64, i64, i64) = s.conn.query_row(
+            "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
+            [out.entry_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((cc, first, last), (1, 1000, 1000));
+
+        let events: i64 = s.conn.query_row(
+            "SELECT count(*) FROM copy_events WHERE entry_id=?1",
+            [out.entry_id], |r| r.get(0)).unwrap();
+        assert_eq!(events, 1);
+    }
+
+    #[test]
+    fn ingest_records_source_app() {
+        use crate::model::{AppInfo, CaptureEvent, Content};
+        let s = open_in_memory().unwrap();
+        let ev = CaptureEvent {
+            content: Content::Text("x".into()),
+            source_app: Some(AppInfo { identifier: "com.ghostty".into(), display_name: "Ghostty".into(), icon_path: None }),
+            copied_at_ms: 5,
+        };
+        let out = s.ingest(&ev, &FakeImages).unwrap();
+        let app_id: Option<i64> = s.conn.query_row(
+            "SELECT source_app_id FROM entries WHERE id=?1", [out.entry_id], |r| r.get(0)).unwrap();
+        assert!(app_id.is_some());
+    }
+
+    #[test]
+    fn ingest_duplicate_bumps_count_and_last_time_only() {
+        use crate::model::{CaptureEvent, Content};
+        let s = open_in_memory().unwrap();
+        let mk = |ms| CaptureEvent { content: Content::Text("same".into()), source_app: None, copied_at_ms: ms };
+
+        let a = s.ingest(&mk(100), &FakeImages).unwrap();
+        let b = s.ingest(&mk(200), &FakeImages).unwrap();
+        assert_eq!(a.entry_id, b.entry_id);
+        assert!(a.is_new && !b.is_new);
+
+        let (cc, first, last): (i64, i64, i64) = s.conn.query_row(
+            "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
+            [a.entry_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((cc, first, last), (2, 100, 200));
+
+        let events: i64 = s.conn.query_row(
+            "SELECT count(*) FROM copy_events WHERE entry_id=?1", [a.entry_id], |r| r.get(0)).unwrap();
+        assert_eq!(events, 2);
     }
 
     #[test]
