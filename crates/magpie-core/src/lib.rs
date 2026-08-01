@@ -1,13 +1,25 @@
+//! `magpie-core` — storage, content-type detection, and search for the Magpie
+//! clipboard manager. Platform- and UI-agnostic; time is injected as
+//! `copied_at_ms`, and image bytes are written through the `ImageStore` trait.
+//!
+//! ```
+//! use magpie_core::{open_in_memory, CaptureEvent, Content, default_query, ImageStore};
+//! struct NoImages;
+//! impl ImageStore for NoImages {
+//!     fn put(&self, h: &str, _b: &[u8]) -> std::io::Result<String> { Ok(h.into()) }
+//! }
+//! let s = open_in_memory().unwrap();
+//! s.ingest(&CaptureEvent { content: Content::Text("hi".into()), source_app: None, copied_at_ms: 1 }, &NoImages).unwrap();
+//! assert_eq!(s.search(&default_query()).unwrap().len(), 1);
+//! ```
+
 pub mod detect;
 pub mod metrics;
 pub mod model;
 pub mod search;
 pub mod store;
 
-#[cfg(test)]
-mod smoke {
-    #[test]
-    fn workspace_builds() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub use detect::Kind;
+pub use model::{AppInfo, CaptureEvent, Content, Entry};
+pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
+pub use store::{open, open_in_memory, ImageStore, Ingested, Store};

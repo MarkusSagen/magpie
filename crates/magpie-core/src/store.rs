@@ -167,6 +167,14 @@ impl Store {
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }
+
+    pub fn set_pinned(&self, entry_id: i64, pinned: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE entries SET pinned = ?2 WHERE id = ?1",
+            rusqlite::params![entry_id, pinned as i64],
+        )?;
+        Ok(())
+    }
 }
 
 pub struct Ingested {
@@ -226,6 +234,19 @@ mod tests {
         let p = prepare(&Content::Files(vec!["/a".into(), "/b".into()]), &FakeImages).unwrap();
         assert_eq!(p.kind.as_str(), "file");
         assert_eq!(p.full_text, "/a\n/b");
+    }
+
+    #[test]
+    fn set_pinned_persists() {
+        use crate::model::{CaptureEvent, Content};
+        let s = open_in_memory().unwrap();
+        let out = s.ingest(&CaptureEvent {
+            content: Content::Text("keep me".into()), source_app: None, copied_at_ms: 1,
+        }, &FakeImages).unwrap();
+        s.set_pinned(out.entry_id, true).unwrap();
+        let pinned: i64 = s.conn.query_row(
+            "SELECT pinned FROM entries WHERE id=?1", [out.entry_id], |r| r.get(0)).unwrap();
+        assert_eq!(pinned, 1);
     }
 
     #[test]
