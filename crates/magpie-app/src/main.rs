@@ -8,4 +8,5 @@ fn main() {
 mod config;
 mod grouping;
 mod image_cache;
+mod paste_action;
 mod viewmodel;
