@@ -1,6 +1,6 @@
-use crate::app_state::{current_results, ingest_event, AppState};
-use crate::config::Config;
-use crate::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
+use magpie_app::app_state::{current_results, ingest_event, AppState};
+use magpie_app::config::Config;
+use magpie_app::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
 use crate::{EntryRow, LauncherWindow};
 use magpie_core::{open, Entry};
 use magpie_platform::os::hotkeys::Hotkeys;
@@ -33,10 +33,10 @@ pub fn build_state() -> Arc<AppState> {
     let store = open(&dir.join("magpie.sqlite3")).expect("open db");
     Arc::new(AppState {
         store: std::sync::Mutex::new(store),
-        images: crate::image_cache::FsImageStore {
+        images: magpie_app::image_cache::FsImageStore {
             dir: dir.join("images"),
         },
-        ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
+        ui: std::sync::Mutex::new(magpie_app::viewmodel::UiState::new()),
     })
 }
 
@@ -169,7 +169,7 @@ fn spawn_hotkeys(
 }
 
 pub fn start() {
-    let cfg = crate::config::load_or_default(&data_dir().join("config.toml"));
+    let cfg = magpie_app::config::load_or_default(&data_dir().join("config.toml"));
     let mut denylist = default_app_denylist();
     denylist.extend(cfg.app_denylist.clone());
 
