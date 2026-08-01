@@ -17,6 +17,9 @@ impl Kind {
             Kind::File => "file",
         }
     }
+    // Intentionally infallible-into-Option (not the fallible `FromStr` contract);
+    // used to hydrate the `kind` column, which only ever holds our own strings.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Kind> {
         Some(match s {
             "text" => Kind::Text,
