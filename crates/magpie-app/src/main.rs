@@ -5,6 +5,7 @@ fn main() {
     println!("magpie-app placeholder");
 }
 
+mod app_state;
 mod config;
 mod grouping;
 mod image_cache;
