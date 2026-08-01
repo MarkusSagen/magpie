@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/magpie-core"]
+members = ["crates/magpie-core", "crates/magpie-platform"]
 resolver = "2"
 
 [workspace.package]
