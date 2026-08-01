@@ -31,7 +31,7 @@ pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let s = toml::to_string_pretty(cfg).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let s = toml::to_string_pretty(cfg).map_err(std::io::Error::other)?;
     std::fs::write(path, s)
 }
 
@@ -51,9 +51,7 @@ mod tests {
     fn save_then_load_roundtrips() {
         let dir = std::env::temp_dir().join(format!("magpie-cfg-{}", std::process::id()));
         let path = dir.join("config.toml");
-        let mut c = Config::default();
-        c.paste_on_select = false;
-        c.app_denylist = vec!["Secret".into()];
+        let c = Config { paste_on_select: false, app_denylist: vec!["Secret".into()], ..Config::default() };
         save(&c, &path).unwrap();
         let loaded = load_or_default(&path);
         assert!(!loaded.paste_on_select);

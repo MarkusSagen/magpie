@@ -4,7 +4,7 @@ use magpie_core::{default_query, Kind, SearchMode, SearchQuery, Sort, TimeRange}
 pub enum TypeFilter { All, Text, Link, Color, Email, Image, File }
 
 impl TypeFilter {
-    pub fn to_kind(&self) -> Option<Kind> {
+    pub fn to_kind(self) -> Option<Kind> {
         match self {
             TypeFilter::All => None,
             TypeFilter::Text => Some(Kind::Text),

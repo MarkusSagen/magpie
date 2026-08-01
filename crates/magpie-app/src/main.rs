@@ -1,15 +1,18 @@
-// Removed in the final runtime-wiring task once every module is consumed by main.
+// v1 wires a subset of a deliberately complete data model + helpers: section
+// grouping, thumbnails, config save, and the full filter/sort space are ready
+// for the Phase-1 UI but not all rendered by the minimal launcher yet.
 #![allow(dead_code)]
 
 slint::include_modules!();
-
-fn main() {
-    println!("magpie-app placeholder");
-}
 
 mod app_state;
 mod config;
 mod grouping;
 mod image_cache;
 mod paste_action;
+mod runtime;
 mod viewmodel;
+
+fn main() {
+    runtime::start();
+}

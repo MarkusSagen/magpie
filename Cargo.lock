@@ -3335,6 +3335,7 @@ name = "magpie-app"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "global-hotkey",
  "image",
  "magpie-core",
  "magpie-platform",

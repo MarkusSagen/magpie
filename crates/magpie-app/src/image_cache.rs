@@ -17,7 +17,7 @@ impl FsImageStore {
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad rgba dims"))?;
         let thumb = image::imageops::thumbnail(&img, max_edge.min(w), max_edge.min(h));
         let path = self.dir.join(format!("{hash}.thumb.png"));
-        thumb.save(&path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        thumb.save(&path).map_err(std::io::Error::other)?;
         Ok(path.to_string_lossy().into_owned())
     }
 }
