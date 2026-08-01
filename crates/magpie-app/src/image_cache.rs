@@ -11,7 +11,14 @@ impl FsImageStore {
     }
 
     /// Downscale RGBA to a PNG thumbnail (longest edge = `max_edge`) at `<hash>.thumb.png`.
-    pub fn write_thumbnail(&self, hash: &str, w: u32, h: u32, rgba: &[u8], max_edge: u32) -> std::io::Result<String> {
+    pub fn write_thumbnail(
+        &self,
+        hash: &str,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+        max_edge: u32,
+    ) -> std::io::Result<String> {
         self.ensure_dir()?;
         let img = image::RgbaImage::from_raw(w, h, rgba.to_vec())
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad rgba dims"))?;
@@ -56,7 +63,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = FsImageStore { dir: dir.clone() };
         // 2x2 RGBA red image
-        let rgba = vec![255, 0, 0, 255,  255, 0, 0, 255,  255, 0, 0, 255,  255, 0, 0, 255];
+        let rgba = vec![
+            255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+        ];
         let path = store.write_thumbnail("deadbeef", 2, 2, &rgba, 64).unwrap();
         assert!(std::path::Path::new(&path).exists());
         assert!(path.ends_with("deadbeef.thumb.png"));

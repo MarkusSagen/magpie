@@ -23,7 +23,9 @@ pub struct WinClipboard {
 
 impl WinClipboard {
     pub fn new() -> Result<Self, String> {
-        Ok(WinClipboard { inner: arboard::Clipboard::new().map_err(|e| e.to_string())? })
+        Ok(WinClipboard {
+            inner: arboard::Clipboard::new().map_err(|e| e.to_string())?,
+        })
     }
 }
 
@@ -33,7 +35,11 @@ impl Clipboard for WinClipboard {
         let concealed = format_available("ExcludeClipboardContentFromMonitorProcessing")
             || format_available("CanIncludeInClipboardHistory");
         let content = if let Ok(text) = self.inner.get_text() {
-            if text.is_empty() { None } else { Some(Content::Text(text)) }
+            if text.is_empty() {
+                None
+            } else {
+                Some(Content::Text(text))
+            }
         } else if let Ok(img) = self.inner.get_image() {
             let mut bytes = Vec::with_capacity(8 + img.bytes.len());
             bytes.extend_from_slice(&(img.width as u32).to_le_bytes());
@@ -43,17 +49,25 @@ impl Clipboard for WinClipboard {
         } else {
             None
         };
-        ClipboardSnapshot { content, change_token, concealed }
+        ClipboardSnapshot {
+            content,
+            change_token,
+            concealed,
+        }
     }
 
     fn set_text(&mut self, text: &str) -> Result<(), String> {
-        self.inner.set_text(text.to_string()).map_err(|e| e.to_string())
+        self.inner
+            .set_text(text.to_string())
+            .map_err(|e| e.to_string())
     }
 
     fn set_content(&mut self, content: &Content) -> Result<(), String> {
         match content {
             Content::Text(t) => self.inner.set_text(t.clone()).map_err(|e| e.to_string()),
-            Content::Rich { text, .. } => self.inner.set_text(text.clone()).map_err(|e| e.to_string()),
+            Content::Rich { text, .. } => {
+                self.inner.set_text(text.clone()).map_err(|e| e.to_string())
+            }
             Content::Files(p) => self.inner.set_text(p.join("\n")).map_err(|e| e.to_string()),
             Content::Image { .. } => Err("image set not supported in v1".into()),
         }

@@ -1,7 +1,15 @@
 use magpie_core::{default_query, Kind, SearchMode, SearchQuery, Sort, TimeRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeFilter { All, Text, Link, Color, Email, Image, File }
+pub enum TypeFilter {
+    All,
+    Text,
+    Link,
+    Color,
+    Email,
+    Image,
+    File,
+}
 
 impl TypeFilter {
     pub fn to_kind(self) -> Option<Kind> {
@@ -18,7 +26,11 @@ impl TypeFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimeFilter { All, Today, Last7Days }
+pub enum TimeFilter {
+    All,
+    Today,
+    Last7Days,
+}
 
 pub struct UiState {
     pub text: String,
@@ -59,8 +71,14 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
     q.sort = ui.sort;
     q.time = match ui.time_filter {
         TimeFilter::All => TimeRange::default(),
-        TimeFilter::Today => TimeRange { since_ms: Some(now_ms - now_ms.rem_euclid(DAY_MS)), until_ms: None },
-        TimeFilter::Last7Days => TimeRange { since_ms: Some(now_ms - 7 * DAY_MS), until_ms: None },
+        TimeFilter::Today => TimeRange {
+            since_ms: Some(now_ms - now_ms.rem_euclid(DAY_MS)),
+            until_ms: None,
+        },
+        TimeFilter::Last7Days => TimeRange {
+            since_ms: Some(now_ms - 7 * DAY_MS),
+            until_ms: None,
+        },
     };
     q
 }

@@ -6,12 +6,20 @@ pub struct TextMetrics {
 
 pub fn text_metrics(s: &str) -> TextMetrics {
     if s.is_empty() {
-        return TextMetrics { char_count: 0, word_count: 0, line_count: 0 };
+        return TextMetrics {
+            char_count: 0,
+            word_count: 0,
+            line_count: 0,
+        };
     }
     let char_count = s.chars().count() as i64;
     let word_count = s.split_whitespace().count() as i64;
     let line_count = 1 + s.matches('\n').count() as i64;
-    TextMetrics { char_count, word_count, line_count }
+    TextMetrics {
+        char_count,
+        word_count,
+        line_count,
+    }
 }
 
 #[cfg(test)]

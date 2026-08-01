@@ -51,7 +51,11 @@ mod tests {
     fn save_then_load_roundtrips() {
         let dir = std::env::temp_dir().join(format!("magpie-cfg-{}", std::process::id()));
         let path = dir.join("config.toml");
-        let c = Config { paste_on_select: false, app_denylist: vec!["Secret".into()], ..Config::default() };
+        let c = Config {
+            paste_on_select: false,
+            app_denylist: vec!["Secret".into()],
+            ..Config::default()
+        };
         save(&c, &path).unwrap();
         let loaded = load_or_default(&path);
         assert!(!loaded.paste_on_select);

@@ -9,8 +9,8 @@ pub mod traits;
 pub mod watcher;
 
 pub use defaults::{default_app_denylist, default_ignore_regexes};
-pub use os::factory::{platform_autostart, platform_clipboard};
 pub use hotkey::{parse_hotkey, HotkeySpec, Mods};
+pub use os::factory::{platform_autostart, platform_clipboard};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 pub use watcher::Watcher;

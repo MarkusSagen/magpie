@@ -7,9 +7,9 @@ pub mod factory;
 pub mod linux;
 
 #[cfg(target_os = "windows")]
-pub mod windows;
-#[cfg(target_os = "windows")]
 pub mod autostart_windows;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(target_os = "macos")]
 pub mod autostart;

@@ -17,7 +17,11 @@ impl SourceApp for ActiveWinSource {
                 } else {
                     w.app_name
                 };
-                Some(AppInfo { identifier: ident, display_name: name, icon_path: None })
+                Some(AppInfo {
+                    identifier: ident,
+                    display_name: name,
+                    icon_path: None,
+                })
             }
             Err(_) => None,
         }

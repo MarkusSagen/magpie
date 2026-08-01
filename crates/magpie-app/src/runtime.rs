@@ -6,7 +6,9 @@ use magpie_core::{open, Entry};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
-use magpie_platform::{default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Watcher};
+use magpie_platform::{
+    default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Watcher,
+};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +22,9 @@ pub fn now_ms() -> i64 {
 }
 
 pub fn data_dir() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("magpie")
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("magpie")
 }
 
 pub fn build_state() -> Arc<AppState> {
@@ -29,14 +33,20 @@ pub fn build_state() -> Arc<AppState> {
     let store = open(&dir.join("magpie.sqlite3")).expect("open db");
     Arc::new(AppState {
         store: std::sync::Mutex::new(store),
-        images: crate::image_cache::FsImageStore { dir: dir.join("images") },
+        images: crate::image_cache::FsImageStore {
+            dir: dir.join("images"),
+        },
         ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
     })
 }
 
 fn preview_title(e: &Entry) -> String {
     let line = e.full_text.lines().next().unwrap_or("").trim();
-    if line.is_empty() { e.kind.as_str().to_string() } else { line.chars().take(80).collect() }
+    if line.is_empty() {
+        e.kind.as_str().to_string()
+    } else {
+        line.chars().take(80).collect()
+    }
 }
 
 fn to_rows(entries: &[Entry]) -> Vec<EntryRow> {
@@ -53,7 +63,10 @@ fn to_rows(entries: &[Entry]) -> Vec<EntryRow> {
 /// Recompute results from the current UI state and push them into the window.
 fn refresh(ui: &LauncherWindow, state: &AppState) {
     let results = current_results(state, now_ms());
-    let detail = results.first().map(|e| e.full_text.clone()).unwrap_or_default();
+    let detail = results
+        .first()
+        .map(|e| e.full_text.clone())
+        .unwrap_or_default();
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results))));
     ui.set_detail_text(SharedString::from(detail));
 }
@@ -92,7 +105,11 @@ enum HotAction {
 }
 
 /// Register launcher + quick-paste hotkeys and drain their events on a thread.
-fn spawn_hotkeys(cfg: &Config, state: Arc<AppState>, weak: slint::Weak<LauncherWindow>) -> Result<Hotkeys, String> {
+fn spawn_hotkeys(
+    cfg: &Config,
+    state: Arc<AppState>,
+    weak: slint::Weak<LauncherWindow>,
+) -> Result<Hotkeys, String> {
     let hk = Hotkeys::new()?;
     let mut actions: HashMap<u32, HotAction> = HashMap::new();
 
@@ -132,7 +149,13 @@ fn spawn_hotkeys(cfg: &Config, state: Arc<AppState>, weak: slint::Weak<LauncherW
                         let recent = current_results(&state, now_ms());
                         if let Some(entry) = resolve_quick_paste(&recent, *slot) {
                             if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                                let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
+                                let _ = perform_paste(
+                                    &mut clip,
+                                    &EnigoPaster,
+                                    entry,
+                                    PasteKind::Formatted,
+                                    auto,
+                                );
                             }
                         }
                     }
@@ -174,7 +197,8 @@ pub fn start() {
             let recent = current_results(&s, now_ms());
             if let Some(entry) = recent.get(idx as usize) {
                 if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                    let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
+                    let _ =
+                        perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
                 }
             }
         });
@@ -185,7 +209,8 @@ pub fn start() {
             let recent = current_results(&s, now_ms());
             if let Some(entry) = recent.get(idx as usize) {
                 if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                    let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::PlainText, false);
+                    let _ =
+                        perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::PlainText, false);
                 }
             }
         });

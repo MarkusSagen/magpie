@@ -47,10 +47,18 @@ mod tests {
     struct Fake(u64);
     impl Clipboard for Fake {
         fn snapshot(&mut self) -> ClipboardSnapshot {
-            ClipboardSnapshot { content: None, change_token: self.0, concealed: false }
+            ClipboardSnapshot {
+                content: None,
+                change_token: self.0,
+                concealed: false,
+            }
         }
-        fn set_text(&mut self, _t: &str) -> Result<(), String> { Ok(()) }
-        fn set_content(&mut self, _c: &Content) -> Result<(), String> { Ok(()) }
+        fn set_text(&mut self, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_content(&mut self, _c: &Content) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     #[test]

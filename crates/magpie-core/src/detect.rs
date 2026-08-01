@@ -1,8 +1,17 @@
-use std::sync::OnceLock;
 use regex::Regex;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind { Text, Link, Color, Email, Rtf, Html, Image, File }
+pub enum Kind {
+    Text,
+    Link,
+    Color,
+    Email,
+    Rtf,
+    Html,
+    Image,
+    File,
+}
 
 impl Kind {
     pub fn as_str(&self) -> &'static str {
@@ -52,9 +61,15 @@ fn color_re() -> &'static Regex {
 
 pub fn detect_text_kind(s: &str) -> Kind {
     let t = s.trim();
-    if url_re().is_match(t) { return Kind::Link; }
-    if email_re().is_match(t) { return Kind::Email; }
-    if color_re().is_match(t) { return Kind::Color; }
+    if url_re().is_match(t) {
+        return Kind::Link;
+    }
+    if email_re().is_match(t) {
+        return Kind::Email;
+    }
+    if color_re().is_match(t) {
+        return Kind::Color;
+    }
     Kind::Text
 }
 
@@ -64,8 +79,16 @@ mod tests {
 
     #[test]
     fn kind_string_roundtrip() {
-        for k in [Kind::Text, Kind::Link, Kind::Color, Kind::Email,
-                  Kind::Rtf, Kind::Html, Kind::Image, Kind::File] {
+        for k in [
+            Kind::Text,
+            Kind::Link,
+            Kind::Color,
+            Kind::Email,
+            Kind::Rtf,
+            Kind::Html,
+            Kind::Image,
+            Kind::File,
+        ] {
             assert_eq!(Kind::from_str(k.as_str()), Some(k));
         }
         assert_eq!(Kind::from_str("nope"), None);
@@ -73,7 +96,10 @@ mod tests {
 
     #[test]
     fn detects_url() {
-        assert!(matches!(detect_text_kind("https://example.com/x"), Kind::Link));
+        assert!(matches!(
+            detect_text_kind("https://example.com/x"),
+            Kind::Link
+        ));
         assert!(matches!(detect_text_kind("  http://a.b  "), Kind::Link));
     }
 

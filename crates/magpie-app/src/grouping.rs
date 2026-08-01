@@ -3,7 +3,11 @@ use magpie_core::Entry;
 const DAY_MS: i64 = 86_400_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Section { Today, Yesterday, Older }
+pub enum Section {
+    Today,
+    Yesterday,
+    Older,
+}
 
 impl Section {
     pub fn label(&self) -> &'static str {
@@ -37,9 +41,15 @@ pub fn group(entries: &[Entry], now_ms: i64) -> Vec<(Section, Vec<usize>)> {
         }
     }
     let mut out = Vec::new();
-    if !today.is_empty() { out.push((Section::Today, today)); }
-    if !yesterday.is_empty() { out.push((Section::Yesterday, yesterday)); }
-    if !older.is_empty() { out.push((Section::Older, older)); }
+    if !today.is_empty() {
+        out.push((Section::Today, today));
+    }
+    if !yesterday.is_empty() {
+        out.push((Section::Yesterday, yesterday));
+    }
+    if !older.is_empty() {
+        out.push((Section::Older, older));
+    }
     out
 }
 
@@ -61,10 +71,21 @@ mod tests {
     fn group_orders_and_indexes() {
         use magpie_core::{Entry, Kind};
         let mk = |id: i64, ms: i64| Entry {
-            id, content_hash: format!("h{id}"), kind: Kind::Text, preview_text: "".into(),
-            full_text: "".into(), image_path: None, byte_size: 0, char_count: 0, word_count: 0,
-            line_count: 0, first_copied_at_ms: ms, last_copied_at_ms: ms, copy_count: 1,
-            pinned: false, source_app_id: None,
+            id,
+            content_hash: format!("h{id}"),
+            kind: Kind::Text,
+            preview_text: "".into(),
+            full_text: "".into(),
+            image_path: None,
+            byte_size: 0,
+            char_count: 0,
+            word_count: 0,
+            line_count: 0,
+            first_copied_at_ms: ms,
+            last_copied_at_ms: ms,
+            copy_count: 1,
+            pinned: false,
+            source_app_id: None,
         };
         let now = 10 * DAY + 1;
         let entries = vec![mk(1, 10 * DAY), mk(2, 9 * DAY), mk(3, DAY)];

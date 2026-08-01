@@ -7,13 +7,25 @@ use regex::RegexBuilder;
 use rusqlite::types::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchMode { Word, Exact, Fuzzy, Regex }
+pub enum SearchMode {
+    Word,
+    Exact,
+    Fuzzy,
+    Regex,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Sort { Recency, MostCopied, Alphabetical }
+pub enum Sort {
+    Recency,
+    MostCopied,
+    Alphabetical,
+}
 
 #[derive(Debug, Clone, Default)]
-pub struct TimeRange { pub since_ms: Option<i64>, pub until_ms: Option<i64> }
+pub struct TimeRange {
+    pub since_ms: Option<i64>,
+    pub until_ms: Option<i64>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SearchQuery {
@@ -62,7 +74,8 @@ fn entry_cols_prefixed() -> String {
         .join(", ")
 }
 
-pub(crate) const ENTRY_COLUMNS: &str = "id, content_hash, kind, preview_text, full_text, image_path, \
+pub(crate) const ENTRY_COLUMNS: &str =
+    "id, content_hash, kind, preview_text, full_text, image_path, \
     byte_size, char_count, word_count, line_count, first_copied_at_ms, last_copied_at_ms, \
     copy_count, pinned, source_app_id";
 
@@ -89,9 +102,8 @@ pub(crate) fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
 
 impl Store {
     pub fn recent(&self, limit: i64) -> Result<Vec<Entry>> {
-        let sql = format!(
-            "SELECT {ENTRY_COLUMNS} FROM entries ORDER BY last_copied_at_ms DESC LIMIT ?1"
-        );
+        let sql =
+            format!("SELECT {ENTRY_COLUMNS} FROM entries ORDER BY last_copied_at_ms DESC LIMIT ?1");
         let mut stmt = self.conn().prepare(&sql)?;
         let rows = stmt.query_map([limit], row_to_entry)?;
         rows.collect()
@@ -112,16 +124,27 @@ impl Store {
         for e in self.candidates(q)? {
             let hay = e.full_text.to_lowercase();
             if let Some(score) = matcher.fuzzy_match(&e.full_text, needle) {
-                let boost = if hay.contains(&needle_lc) { 1_000_000 } else { 0 };
+                let boost = if hay.contains(&needle_lc) {
+                    1_000_000
+                } else {
+                    0
+                };
                 scored.push((boost + score, e));
             }
         }
         scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-        Ok(scored.into_iter().take(q.limit as usize).map(|(_, e)| e).collect())
+        Ok(scored
+            .into_iter()
+            .take(q.limit as usize)
+            .map(|(_, e)| e)
+            .collect())
     }
 
     fn search_regex(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
-        let re = match RegexBuilder::new(q.text.trim()).case_insensitive(true).build() {
+        let re = match RegexBuilder::new(q.text.trim())
+            .case_insensitive(true)
+            .build()
+        {
             Ok(re) => re,
             Err(_) => return Ok(Vec::new()),
         };
@@ -158,7 +181,8 @@ impl Store {
                 }
                 _ => {
                     clauses.push(
-                        "e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)".to_string(),
+                        "e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)"
+                            .to_string(),
                     );
                     params.push(Value::Text(fts_match(trimmed)));
                 }
@@ -181,7 +205,11 @@ impl Store {
             params.push(Value::Integer(until));
         }
 
-        let where_sql = if clauses.is_empty() { "1=1".to_string() } else { clauses.join(" AND ") };
+        let where_sql = if clauses.is_empty() {
+            "1=1".to_string()
+        } else {
+            clauses.join(" AND ")
+        };
         let sql = format!(
             "SELECT {cols} FROM entries e WHERE {where_sql} ORDER BY {order} LIMIT ?",
             cols = entry_cols_prefixed(),
@@ -202,11 +230,17 @@ mod tests {
 
     struct FakeImages;
     impl ImageStore for FakeImages {
-        fn put(&self, hash: &str, _b: &[u8]) -> std::io::Result<String> { Ok(format!("/c/{hash}")) }
+        fn put(&self, hash: &str, _b: &[u8]) -> std::io::Result<String> {
+            Ok(format!("/c/{hash}"))
+        }
     }
 
     fn text_ev(t: &str, ms: i64) -> CaptureEvent {
-        CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: ms }
+        CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: None,
+            copied_at_ms: ms,
+        }
     }
 
     #[test]
@@ -230,7 +264,11 @@ mod tests {
     fn app_ev(t: &str, ms: i64, ident: &str) -> CaptureEvent {
         CaptureEvent {
             content: Content::Text(t.into()),
-            source_app: Some(AppInfo { identifier: ident.into(), display_name: ident.into(), icon_path: None }),
+            source_app: Some(AppInfo {
+                identifier: ident.into(),
+                display_name: ident.into(),
+                icon_path: None,
+            }),
             copied_at_ms: ms,
         }
     }
@@ -238,7 +276,8 @@ mod tests {
     #[test]
     fn word_mode_ands_terms() {
         let s = open_in_memory().unwrap();
-        s.ingest(&text_ev("alpha beta gamma", 1), &FakeImages).unwrap();
+        s.ingest(&text_ev("alpha beta gamma", 1), &FakeImages)
+            .unwrap();
         s.ingest(&text_ev("alpha only", 2), &FakeImages).unwrap();
         let mut q = default_query();
         q.text = "alpha gamma".into();
@@ -260,7 +299,8 @@ mod tests {
     #[test]
     fn filter_by_kind() {
         let s = open_in_memory().unwrap();
-        s.ingest(&text_ev("plain text here", 1), &FakeImages).unwrap();
+        s.ingest(&text_ev("plain text here", 1), &FakeImages)
+            .unwrap();
         s.ingest(&text_ev("https://x.io", 2), &FakeImages).unwrap();
         let mut q = default_query();
         q.kind = Some(Kind::Link);
@@ -272,10 +312,18 @@ mod tests {
     #[test]
     fn filter_by_app_and_time() {
         let s = open_in_memory().unwrap();
-        s.ingest(&app_ev("from ghostty", 1000, "com.ghostty"), &FakeImages).unwrap();
-        s.ingest(&app_ev("from safari", 2000, "com.safari"), &FakeImages).unwrap();
-        let ghostty_id: i64 = s.conn().query_row(
-            "SELECT id FROM apps WHERE identifier='com.ghostty'", [], |r| r.get(0)).unwrap();
+        s.ingest(&app_ev("from ghostty", 1000, "com.ghostty"), &FakeImages)
+            .unwrap();
+        s.ingest(&app_ev("from safari", 2000, "com.safari"), &FakeImages)
+            .unwrap();
+        let ghostty_id: i64 = s
+            .conn()
+            .query_row(
+                "SELECT id FROM apps WHERE identifier='com.ghostty'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         let mut q = default_query();
         q.source_app_id = Some(ghostty_id);
         assert_eq!(s.search(&q).unwrap().len(), 1);
@@ -304,8 +352,10 @@ mod tests {
     fn word_text_and_kind_filter_combine() {
         // Guards param ordering: text query AND a filter must both apply.
         let s = open_in_memory().unwrap();
-        s.ingest(&text_ev("https://alpha.example", 1), &FakeImages).unwrap(); // link, token 'alpha'
-        s.ingest(&text_ev("alpha plain note", 2), &FakeImages).unwrap();       // text, token 'alpha'
+        s.ingest(&text_ev("https://alpha.example", 1), &FakeImages)
+            .unwrap(); // link, token 'alpha'
+        s.ingest(&text_ev("alpha plain note", 2), &FakeImages)
+            .unwrap(); // text, token 'alpha'
         let mut q = default_query();
         q.text = "alpha".into();
         q.kind = Some(Kind::Link);
@@ -317,8 +367,8 @@ mod tests {
     #[test]
     fn fuzzy_matches_noncontiguous_and_ranks_substring_first() {
         let s = open_in_memory().unwrap();
-        s.ingest(&text_ev("foo bar baz", 1), &FakeImages).unwrap();  // fuzzy 'fbb'
-        s.ingest(&text_ev("fbb exact", 2), &FakeImages).unwrap();    // substring 'fbb'
+        s.ingest(&text_ev("foo bar baz", 1), &FakeImages).unwrap(); // fuzzy 'fbb'
+        s.ingest(&text_ev("fbb exact", 2), &FakeImages).unwrap(); // substring 'fbb'
         s.ingest(&text_ev("nothing", 3), &FakeImages).unwrap();
         let mut q = default_query();
         q.mode = SearchMode::Fuzzy;

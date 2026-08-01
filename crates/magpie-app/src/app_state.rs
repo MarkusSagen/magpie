@@ -11,7 +11,10 @@ pub struct AppState {
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
     let store = state.store.lock().map_err(|e| e.to_string())?;
-    store.ingest(ev, &state.images).map(|_| ()).map_err(|e| e.to_string())
+    store
+        .ingest(ev, &state.images)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 pub fn current_results(state: &AppState, now_ms: i64) -> Vec<Entry> {
@@ -30,7 +33,9 @@ mod tests {
     fn state() -> AppState {
         AppState {
             store: std::sync::Mutex::new(open_in_memory().unwrap()),
-            images: crate::image_cache::FsImageStore { dir: std::env::temp_dir().join("magpie-appstate-test") },
+            images: crate::image_cache::FsImageStore {
+                dir: std::env::temp_dir().join("magpie-appstate-test"),
+            },
             ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
         }
     }
@@ -38,7 +43,15 @@ mod tests {
     #[test]
     fn ingest_then_query_returns_entry() {
         let s = state();
-        ingest_event(&s, &CaptureEvent { content: Content::Text("hello".into()), source_app: None, copied_at_ms: 1 }).unwrap();
+        ingest_event(
+            &s,
+            &CaptureEvent {
+                content: Content::Text("hello".into()),
+                source_app: None,
+                copied_at_ms: 1,
+            },
+        )
+        .unwrap();
         let rows = current_results(&s, 1_000);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].full_text, "hello");
@@ -47,8 +60,24 @@ mod tests {
     #[test]
     fn ui_text_filter_applies() {
         let s = state();
-        ingest_event(&s, &CaptureEvent { content: Content::Text("alpha".into()), source_app: None, copied_at_ms: 1 }).unwrap();
-        ingest_event(&s, &CaptureEvent { content: Content::Text("beta".into()), source_app: None, copied_at_ms: 2 }).unwrap();
+        ingest_event(
+            &s,
+            &CaptureEvent {
+                content: Content::Text("alpha".into()),
+                source_app: None,
+                copied_at_ms: 1,
+            },
+        )
+        .unwrap();
+        ingest_event(
+            &s,
+            &CaptureEvent {
+                content: Content::Text("beta".into()),
+                source_app: None,
+                copied_at_ms: 2,
+            },
+        )
+        .unwrap();
         s.ui.lock().unwrap().text = "alpha".into();
         let rows = current_results(&s, 1_000);
         assert_eq!(rows.len(), 1);

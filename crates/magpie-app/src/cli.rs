@@ -1,5 +1,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Command { Run, InstallAutostart, UninstallAutostart, Help }
+pub enum Command {
+    Run,
+    InstallAutostart,
+    UninstallAutostart,
+    Help,
+}
 
 pub fn parse_args(args: &[String]) -> Command {
     for a in args {
@@ -64,12 +69,20 @@ fn set_autostart(on: bool) -> i32 {
 mod tests {
     use super::*;
 
-    fn v(items: &[&str]) -> Vec<String> { items.iter().map(|s| s.to_string()).collect() }
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
 
     #[test]
     fn parses_known_flags() {
-        assert!(matches!(parse_args(&v(&["--install-autostart"])), Command::InstallAutostart));
-        assert!(matches!(parse_args(&v(&["--uninstall-autostart"])), Command::UninstallAutostart));
+        assert!(matches!(
+            parse_args(&v(&["--install-autostart"])),
+            Command::InstallAutostart
+        ));
+        assert!(matches!(
+            parse_args(&v(&["--uninstall-autostart"])),
+            Command::UninstallAutostart
+        ));
         assert!(matches!(parse_args(&v(&["--help"])), Command::Help));
         assert!(matches!(parse_args(&v(&["-h"])), Command::Help));
     }

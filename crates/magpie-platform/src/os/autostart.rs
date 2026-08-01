@@ -55,7 +55,10 @@ mod tests {
 
     #[test]
     fn plist_contains_label_program_and_runatload() {
-        let xml = launch_agent_plist("io.magpie.agent", "/Applications/Magpie.app/Contents/MacOS/magpie");
+        let xml = launch_agent_plist(
+            "io.magpie.agent",
+            "/Applications/Magpie.app/Contents/MacOS/magpie",
+        );
         assert!(xml.contains("io.magpie.agent"));
         assert!(xml.contains("/Applications/Magpie.app/Contents/MacOS/magpie"));
         assert!(xml.contains("RunAtLoad"));
@@ -63,10 +66,15 @@ mod tests {
 
     #[test]
     fn set_enabled_writes_and_removes_plist() {
-        let dir = std::env::temp_dir().join(format!("magpie-autostart-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("magpie-autostart-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let plist = dir.join("io.magpie.agent.plist");
-        let a = MacAutostart { plist_path: plist.clone(), label: "io.magpie.agent".into(), program: "/bin/magpie".into() };
+        let a = MacAutostart {
+            plist_path: plist.clone(),
+            label: "io.magpie.agent".into(),
+            program: "/bin/magpie".into(),
+        };
         assert!(!a.is_enabled());
         a.set_enabled(true).unwrap();
         assert!(a.is_enabled() && plist.exists());

@@ -10,8 +10,14 @@ pub struct AppInfo {
 #[derive(Debug, Clone)]
 pub enum Content {
     Text(String),
-    Rich { text: String, html: Option<String>, rtf: Option<String> },
-    Image { bytes: Vec<u8> },
+    Rich {
+        text: String,
+        html: Option<String>,
+        rtf: Option<String>,
+    },
+    Image {
+        bytes: Vec<u8>,
+    },
     Files(Vec<String>),
 }
 
@@ -44,12 +50,24 @@ pub struct Entry {
 pub fn content_hash(content: &Content) -> String {
     let mut h = blake3::Hasher::new();
     match content {
-        Content::Text(t) => { h.update(b"text\0"); h.update(t.as_bytes()); }
-        Content::Rich { text, .. } => { h.update(b"text\0"); h.update(text.as_bytes()); }
-        Content::Image { bytes } => { h.update(b"image\0"); h.update(bytes); }
+        Content::Text(t) => {
+            h.update(b"text\0");
+            h.update(t.as_bytes());
+        }
+        Content::Rich { text, .. } => {
+            h.update(b"text\0");
+            h.update(text.as_bytes());
+        }
+        Content::Image { bytes } => {
+            h.update(b"image\0");
+            h.update(bytes);
+        }
         Content::Files(paths) => {
             h.update(b"files\0");
-            for p in paths { h.update(p.as_bytes()); h.update(b"\0"); }
+            for p in paths {
+                h.update(p.as_bytes());
+                h.update(b"\0");
+            }
         }
     }
     h.finalize().to_hex().to_string()
@@ -85,11 +103,17 @@ mod tests {
     #[test]
     fn image_hashes_by_bytes() {
         assert_eq!(
-            content_hash(&Content::Image { bytes: vec![1, 2, 3] }),
-            content_hash(&Content::Image { bytes: vec![1, 2, 3] }),
+            content_hash(&Content::Image {
+                bytes: vec![1, 2, 3]
+            }),
+            content_hash(&Content::Image {
+                bytes: vec![1, 2, 3]
+            }),
         );
         assert_ne!(
-            content_hash(&Content::Image { bytes: vec![1, 2, 3] }),
+            content_hash(&Content::Image {
+                bytes: vec![1, 2, 3]
+            }),
             content_hash(&Content::Image { bytes: vec![9] }),
         );
     }

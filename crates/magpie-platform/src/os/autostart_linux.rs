@@ -28,7 +28,8 @@ impl Autostart for LinuxAutostart {
             if let Some(parent) = self.desktop_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            std::fs::write(&self.desktop_path, desktop_entry(&self.name, &self.exec)).map_err(|e| e.to_string())
+            std::fs::write(&self.desktop_path, desktop_entry(&self.name, &self.exec))
+                .map_err(|e| e.to_string())
         } else {
             match std::fs::remove_file(&self.desktop_path) {
                 Ok(()) => Ok(()),
@@ -56,7 +57,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("magpie-xdg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("magpie.desktop");
-        let a = LinuxAutostart { desktop_path: path.clone(), name: "Magpie".into(), exec: "/usr/bin/magpie".into() };
+        let a = LinuxAutostart {
+            desktop_path: path.clone(),
+            name: "Magpie".into(),
+            exec: "/usr/bin/magpie".into(),
+        };
         assert!(!a.is_enabled());
         a.set_enabled(true).unwrap();
         assert!(a.is_enabled() && path.exists());

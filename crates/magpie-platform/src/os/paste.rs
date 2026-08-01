@@ -11,9 +11,15 @@ impl Paster for EnigoPaster {
         #[cfg(not(target_os = "macos"))]
         let modifier = Key::Control;
 
-        enigo.key(modifier, Direction::Press).map_err(|e| e.to_string())?;
-        enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
-        enigo.key(modifier, Direction::Release).map_err(|e| e.to_string())?;
+        enigo
+            .key(modifier, Direction::Press)
+            .map_err(|e| e.to_string())?;
+        enigo
+            .key(Key::Unicode('v'), Direction::Click)
+            .map_err(|e| e.to_string())?;
+        enigo
+            .key(modifier, Direction::Release)
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }

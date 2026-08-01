@@ -145,9 +145,17 @@ impl Store {
                         first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id)
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11)",
                     rusqlite::params![
-                        p.hash, p.kind.as_str(), p.preview_text, p.full_text, p.image_path,
-                        p.byte_size, p.char_count, p.word_count, p.line_count,
-                        ev.copied_at_ms, app_id
+                        p.hash,
+                        p.kind.as_str(),
+                        p.preview_text,
+                        p.full_text,
+                        p.image_path,
+                        p.byte_size,
+                        p.char_count,
+                        p.word_count,
+                        p.line_count,
+                        ev.copied_at_ms,
+                        app_id
                     ],
                 )?;
                 self.conn.last_insert_rowid()
@@ -159,7 +167,10 @@ impl Store {
             rusqlite::params![entry_id, ev.copied_at_ms, app_id],
         )?;
 
-        Ok(Ingested { entry_id, is_new: existing.is_none() })
+        Ok(Ingested {
+            entry_id,
+            is_new: existing.is_none(),
+        })
     }
 }
 
@@ -221,7 +232,13 @@ mod tests {
     #[test]
     fn prepare_image_uses_store_and_zero_text() {
         use crate::model::Content;
-        let p = prepare(&Content::Image { bytes: vec![1, 2, 3, 4] }, &FakeImages).unwrap();
+        let p = prepare(
+            &Content::Image {
+                bytes: vec![1, 2, 3, 4],
+            },
+            &FakeImages,
+        )
+        .unwrap();
         assert_eq!(p.kind.as_str(), "image");
         assert_eq!(p.byte_size, 4);
         assert_eq!(p.full_text, "");
@@ -240,12 +257,25 @@ mod tests {
     fn set_pinned_persists() {
         use crate::model::{CaptureEvent, Content};
         let s = open_in_memory().unwrap();
-        let out = s.ingest(&CaptureEvent {
-            content: Content::Text("keep me".into()), source_app: None, copied_at_ms: 1,
-        }, &FakeImages).unwrap();
+        let out = s
+            .ingest(
+                &CaptureEvent {
+                    content: Content::Text("keep me".into()),
+                    source_app: None,
+                    copied_at_ms: 1,
+                },
+                &FakeImages,
+            )
+            .unwrap();
         s.set_pinned(out.entry_id, true).unwrap();
-        let pinned: i64 = s.conn.query_row(
-            "SELECT pinned FROM entries WHERE id=?1", [out.entry_id], |r| r.get(0)).unwrap();
+        let pinned: i64 = s
+            .conn
+            .query_row(
+                "SELECT pinned FROM entries WHERE id=?1",
+                [out.entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(pinned, 1);
     }
 
@@ -261,14 +291,24 @@ mod tests {
         let out = s.ingest(&ev, &FakeImages).unwrap();
         assert!(out.is_new);
 
-        let (cc, first, last): (i64, i64, i64) = s.conn.query_row(
-            "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
-            [out.entry_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let (cc, first, last): (i64, i64, i64) = s
+            .conn
+            .query_row(
+                "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
+                [out.entry_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
         assert_eq!((cc, first, last), (1, 1000, 1000));
 
-        let events: i64 = s.conn.query_row(
-            "SELECT count(*) FROM copy_events WHERE entry_id=?1",
-            [out.entry_id], |r| r.get(0)).unwrap();
+        let events: i64 = s
+            .conn
+            .query_row(
+                "SELECT count(*) FROM copy_events WHERE entry_id=?1",
+                [out.entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(events, 1);
     }
 
@@ -278,12 +318,22 @@ mod tests {
         let s = open_in_memory().unwrap();
         let ev = CaptureEvent {
             content: Content::Text("x".into()),
-            source_app: Some(AppInfo { identifier: "com.ghostty".into(), display_name: "Ghostty".into(), icon_path: None }),
+            source_app: Some(AppInfo {
+                identifier: "com.ghostty".into(),
+                display_name: "Ghostty".into(),
+                icon_path: None,
+            }),
             copied_at_ms: 5,
         };
         let out = s.ingest(&ev, &FakeImages).unwrap();
-        let app_id: Option<i64> = s.conn.query_row(
-            "SELECT source_app_id FROM entries WHERE id=?1", [out.entry_id], |r| r.get(0)).unwrap();
+        let app_id: Option<i64> = s
+            .conn
+            .query_row(
+                "SELECT source_app_id FROM entries WHERE id=?1",
+                [out.entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert!(app_id.is_some());
     }
 
@@ -291,20 +341,35 @@ mod tests {
     fn ingest_duplicate_bumps_count_and_last_time_only() {
         use crate::model::{CaptureEvent, Content};
         let s = open_in_memory().unwrap();
-        let mk = |ms| CaptureEvent { content: Content::Text("same".into()), source_app: None, copied_at_ms: ms };
+        let mk = |ms| CaptureEvent {
+            content: Content::Text("same".into()),
+            source_app: None,
+            copied_at_ms: ms,
+        };
 
         let a = s.ingest(&mk(100), &FakeImages).unwrap();
         let b = s.ingest(&mk(200), &FakeImages).unwrap();
         assert_eq!(a.entry_id, b.entry_id);
         assert!(a.is_new && !b.is_new);
 
-        let (cc, first, last): (i64, i64, i64) = s.conn.query_row(
-            "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
-            [a.entry_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let (cc, first, last): (i64, i64, i64) = s
+            .conn
+            .query_row(
+                "SELECT copy_count, first_copied_at_ms, last_copied_at_ms FROM entries WHERE id=?1",
+                [a.entry_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
         assert_eq!((cc, first, last), (2, 100, 200));
 
-        let events: i64 = s.conn.query_row(
-            "SELECT count(*) FROM copy_events WHERE entry_id=?1", [a.entry_id], |r| r.get(0)).unwrap();
+        let events: i64 = s
+            .conn
+            .query_row(
+                "SELECT count(*) FROM copy_events WHERE entry_id=?1",
+                [a.entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(events, 2);
     }
 
@@ -328,13 +393,25 @@ mod tests {
     fn upsert_app_is_idempotent_by_identifier() {
         use crate::model::AppInfo;
         let s = open_in_memory().unwrap();
-        let a = AppInfo { identifier: "com.ghostty".into(), display_name: "Ghostty".into(), icon_path: None };
+        let a = AppInfo {
+            identifier: "com.ghostty".into(),
+            display_name: "Ghostty".into(),
+            icon_path: None,
+        };
         let id1 = s.upsert_app(&a).unwrap();
-        let a2 = AppInfo { identifier: "com.ghostty".into(), display_name: "Ghostty 2".into(), icon_path: Some("/i.png".into()) };
+        let a2 = AppInfo {
+            identifier: "com.ghostty".into(),
+            display_name: "Ghostty 2".into(),
+            icon_path: Some("/i.png".into()),
+        };
         let id2 = s.upsert_app(&a2).unwrap();
         assert_eq!(id1, id2);
-        let name: String = s.conn.query_row(
-            "SELECT display_name FROM apps WHERE id=?1", [id1], |r| r.get(0)).unwrap();
+        let name: String = s
+            .conn
+            .query_row("SELECT display_name FROM apps WHERE id=?1", [id1], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(name, "Ghostty 2");
     }
 

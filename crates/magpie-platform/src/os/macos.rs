@@ -26,7 +26,9 @@ impl MacClipboard {
 
     fn is_concealed() -> bool {
         let pb = NSPasteboard::generalPasteboard();
-        let Some(types) = pb.types() else { return false };
+        let Some(types) = pb.types() else {
+            return false;
+        };
         types.iter().any(|t| {
             let s = t.to_string();
             CONCEALED_TYPES.iter().any(|c| *c == s)
@@ -39,24 +41,41 @@ impl Clipboard for MacClipboard {
         let change_token = Self::change_count() as u64;
         let concealed = Self::is_concealed();
         let content = if let Ok(text) = self.inner.get_text() {
-            if text.is_empty() { None } else { Some(Content::Text(text)) }
+            if text.is_empty() {
+                None
+            } else {
+                Some(Content::Text(text))
+            }
         } else if let Ok(img) = self.inner.get_image() {
-            Some(Content::Image { bytes: tagged_rgba(&img) })
+            Some(Content::Image {
+                bytes: tagged_rgba(&img),
+            })
         } else {
             None
         };
-        ClipboardSnapshot { content, change_token, concealed }
+        ClipboardSnapshot {
+            content,
+            change_token,
+            concealed,
+        }
     }
 
     fn set_text(&mut self, text: &str) -> Result<(), String> {
-        self.inner.set_text(text.to_string()).map_err(|e| e.to_string())
+        self.inner
+            .set_text(text.to_string())
+            .map_err(|e| e.to_string())
     }
 
     fn set_content(&mut self, content: &Content) -> Result<(), String> {
         match content {
             Content::Text(t) => self.inner.set_text(t.clone()).map_err(|e| e.to_string()),
-            Content::Rich { text, .. } => self.inner.set_text(text.clone()).map_err(|e| e.to_string()),
-            Content::Files(paths) => self.inner.set_text(paths.join("\n")).map_err(|e| e.to_string()),
+            Content::Rich { text, .. } => {
+                self.inner.set_text(text.clone()).map_err(|e| e.to_string())
+            }
+            Content::Files(paths) => self
+                .inner
+                .set_text(paths.join("\n"))
+                .map_err(|e| e.to_string()),
             Content::Image { .. } => Err("image set not supported in v1".into()),
         }
     }
