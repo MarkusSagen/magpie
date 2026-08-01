@@ -1261,6 +1261,20 @@ git commit -m "feat(core): entry hydration + recent() listing"
         assert_eq!(rows[0].full_text, "twice");
         assert_eq!(rows[0].copy_count, 2);
     }
+
+    #[test]
+    fn word_text_and_kind_filter_combine() {
+        // Guards param ordering: text query AND a filter must both apply.
+        let s = open_in_memory().unwrap();
+        s.ingest(&text_ev("https://alpha.example", 1), &FakeImages).unwrap(); // link, token 'alpha'
+        s.ingest(&text_ev("alpha plain note", 2), &FakeImages).unwrap();       // text, token 'alpha'
+        let mut q = default_query();
+        q.text = "alpha".into();
+        q.kind = Some(Kind::Link);
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind.as_str(), "link");
+    }
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1323,67 +1337,52 @@ fn fts_match(text: &str) -> String {
 
 impl Store {
     pub fn search(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
-        let mut wheres: Vec<String> = Vec::new();
+        // Every clause is pushed to `clauses` and its param(s) to `params` in the
+        // SAME order, then joined with AND. The word-mode text query uses an FTS
+        // subquery so its MATCH param is just another positional `?` in sequence —
+        // no special-case ordering. (Fuzzy/Regex are dispatched in Task 12 before
+        // this SQL path runs.)
+        let mut clauses: Vec<String> = Vec::new();
         let mut params: Vec<Value> = Vec::new();
-        let mut from_fts = false;
 
         let trimmed = q.text.trim();
         if !trimmed.is_empty() {
             match q.mode {
                 SearchMode::Exact => {
-                    wheres.push("e.full_text LIKE ?".to_string());
+                    clauses.push("e.full_text LIKE ?".to_string());
                     params.push(Value::Text(format!("%{}%", trimmed)));
                 }
-                // Word / Fuzzy / Regex all use FTS here; 12 refines Fuzzy/Regex.
                 _ => {
-                    from_fts = true;
+                    clauses.push(
+                        "e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)".to_string(),
+                    );
                     params.push(Value::Text(fts_match(trimmed)));
                 }
             }
         }
-
         if let Some(k) = q.kind {
-            wheres.push("e.kind = ?".to_string());
+            clauses.push("e.kind = ?".to_string());
             params.push(Value::Text(k.as_str().to_string()));
         }
         if let Some(app) = q.source_app_id {
-            wheres.push("e.source_app_id = ?".to_string());
+            clauses.push("e.source_app_id = ?".to_string());
             params.push(Value::Integer(app));
         }
         if let Some(since) = q.time.since_ms {
-            wheres.push("e.last_copied_at_ms >= ?".to_string());
+            clauses.push("e.last_copied_at_ms >= ?".to_string());
             params.push(Value::Integer(since));
         }
         if let Some(until) = q.time.until_ms {
-            wheres.push("e.last_copied_at_ms <= ?".to_string());
+            clauses.push("e.last_copied_at_ms <= ?".to_string());
             params.push(Value::Integer(until));
         }
 
-        let base = if from_fts {
-            // FTS MATCH must be the first bound param; it was pushed first above.
-            format!(
-                "SELECT {cols} FROM entries e \
-                 JOIN entries_fts f ON f.rowid = e.id \
-                 WHERE f.full_text MATCH ?",
-                cols = entry_cols_prefixed()
-            )
-        } else {
-            format!("SELECT {cols} FROM entries e WHERE 1=1", cols = entry_cols_prefixed())
-        };
-
-        let mut sql = base;
-        // When from_fts, the MATCH `?` already consumed param[0]; remaining wheres
-        // were pushed after it, so their order matches. When not from_fts, all
-        // wheres map to params in push order.
-        let extra_start = if from_fts { 1 } else { 0 };
-        for w in &wheres[extra_start.min(wheres.len())..] {
-            sql.push_str(" AND ");
-            sql.push_str(w);
-        }
-        // Guard: the exact-mode LIKE lives in wheres[0] when not from_fts, already covered above.
-        sql.push_str(" ORDER BY ");
-        sql.push_str(order_clause(q.sort));
-        sql.push_str(" LIMIT ?");
+        let where_sql = if clauses.is_empty() { "1=1".to_string() } else { clauses.join(" AND ") };
+        let sql = format!(
+            "SELECT {cols} FROM entries e WHERE {where_sql} ORDER BY {order} LIMIT ?",
+            cols = entry_cols_prefixed(),
+            order = order_clause(q.sort),
+        );
         params.push(Value::Integer(q.limit));
 
         let mut stmt = self.conn().prepare(&sql)?;
@@ -1400,8 +1399,6 @@ fn entry_cols_prefixed() -> String {
         .join(", ")
 }
 ```
-
-> Implementation note for the engineer: the WHERE assembly above is fiddly because the FTS `MATCH` param must bind first. If you find the slice bookkeeping error-prone, use this simpler, equivalent structure instead: build a `Vec<(clause, Value)>` for the non-text filters, then compose the SQL as `SELECT ... WHERE <text-clause?> <AND filter-clauses...>` pushing params in exactly the textual order they appear. The tests in Step 1 are the contract — make them pass.
 
 - [ ] **Step 4: Run to verify they pass**
 
