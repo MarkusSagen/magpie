@@ -61,7 +61,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
 /// Poll the clipboard on a background thread; refresh the window on each capture.
 fn spawn_watcher(state: Arc<AppState>, denylist: Vec<String>, weak: slint::Weak<LauncherWindow>) {
     std::thread::spawn(move || {
-        let clip = match magpie_platform::os::macos::MacClipboard::new() {
+        let clip = match magpie_platform::platform_clipboard() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -131,7 +131,7 @@ fn spawn_hotkeys(cfg: &Config, state: Arc<AppState>, weak: slint::Weak<LauncherW
                     Some(HotAction::QuickPaste(slot)) => {
                         let recent = current_results(&state, now_ms());
                         if let Some(entry) = resolve_quick_paste(&recent, *slot) {
-                            if let Ok(mut clip) = magpie_platform::os::macos::MacClipboard::new() {
+                            if let Ok(mut clip) = magpie_platform::platform_clipboard() {
                                 let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
                             }
                         }
@@ -173,7 +173,7 @@ pub fn start() {
         ui.on_activate(move |idx| {
             let recent = current_results(&s, now_ms());
             if let Some(entry) = recent.get(idx as usize) {
-                if let Ok(mut clip) = magpie_platform::os::macos::MacClipboard::new() {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
                     let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
                 }
             }
@@ -184,7 +184,7 @@ pub fn start() {
         ui.on_copy_only(move |idx| {
             let recent = current_results(&s, now_ms());
             if let Some(entry) = recent.get(idx as usize) {
-                if let Ok(mut clip) = magpie_platform::os::macos::MacClipboard::new() {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
                     let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::PlainText, false);
                 }
             }

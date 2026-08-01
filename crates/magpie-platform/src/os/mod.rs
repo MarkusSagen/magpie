@@ -3,6 +3,7 @@ pub mod paste;
 pub mod source_app;
 
 pub mod autostart_linux;
+pub mod factory;
 pub mod linux;
 
 #[cfg(target_os = "windows")]
