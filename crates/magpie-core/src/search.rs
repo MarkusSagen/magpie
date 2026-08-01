@@ -1,6 +1,9 @@
 use crate::detect::Kind;
 use crate::model::Entry;
 use crate::store::{Result, Store};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
+use regex::RegexBuilder;
 use rusqlite::types::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +97,50 @@ impl Store {
         rows.collect()
     }
 
+    fn candidates(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
+        let mut base = q.clone();
+        base.text = String::new(); // drop text; keep kind/app/time/sort
+        base.limit = 100_000; // wide net; we cap after ranking
+        self.search(&base)
+    }
+
+    fn search_fuzzy(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
+        let matcher = SkimMatcherV2::default().ignore_case();
+        let needle = q.text.trim();
+        let needle_lc = needle.to_lowercase();
+        let mut scored: Vec<(i64, Entry)> = Vec::new();
+        for e in self.candidates(q)? {
+            let hay = e.full_text.to_lowercase();
+            if let Some(score) = matcher.fuzzy_match(&e.full_text, needle) {
+                let boost = if hay.contains(&needle_lc) { 1_000_000 } else { 0 };
+                scored.push((boost + score, e));
+            }
+        }
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(scored.into_iter().take(q.limit as usize).map(|(_, e)| e).collect())
+    }
+
+    fn search_regex(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
+        let re = match RegexBuilder::new(q.text.trim()).case_insensitive(true).build() {
+            Ok(re) => re,
+            Err(_) => return Ok(Vec::new()),
+        };
+        Ok(self
+            .candidates(q)?
+            .into_iter()
+            .filter(|e| re.is_match(&e.full_text))
+            .take(q.limit as usize)
+            .collect())
+    }
+
     pub fn search(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
+        if !q.text.trim().is_empty() {
+            match q.mode {
+                SearchMode::Fuzzy => return self.search_fuzzy(q),
+                SearchMode::Regex => return self.search_regex(q),
+                _ => {}
+            }
+        }
         // Every clause is pushed to `clauses` and its param(s) to `params` in the
         // SAME order, then joined with AND. The word-mode text query uses an FTS
         // subquery so its MATCH param is just another positional `?` in sequence —
@@ -266,5 +312,33 @@ mod tests {
         let rows = s.search(&q).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind.as_str(), "link");
+    }
+
+    #[test]
+    fn fuzzy_matches_noncontiguous_and_ranks_substring_first() {
+        let s = open_in_memory().unwrap();
+        s.ingest(&text_ev("foo bar baz", 1), &FakeImages).unwrap();  // fuzzy 'fbb'
+        s.ingest(&text_ev("fbb exact", 2), &FakeImages).unwrap();    // substring 'fbb'
+        s.ingest(&text_ev("nothing", 3), &FakeImages).unwrap();
+        let mut q = default_query();
+        q.mode = SearchMode::Fuzzy;
+        q.text = "fbb".into();
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].full_text, "fbb exact"); // substring ranked above fuzzy-only
+    }
+
+    #[test]
+    fn regex_mode_filters_and_bad_regex_is_empty() {
+        let s = open_in_memory().unwrap();
+        s.ingest(&text_ev("order-123", 1), &FakeImages).unwrap();
+        s.ingest(&text_ev("order-abc", 2), &FakeImages).unwrap();
+        let mut q = default_query();
+        q.mode = SearchMode::Regex;
+        q.text = r"order-\d+".into();
+        assert_eq!(s.search(&q).unwrap().len(), 1);
+
+        q.text = r"order-(".into(); // invalid
+        assert_eq!(s.search(&q).unwrap().len(), 0);
     }
 }
