@@ -163,6 +163,12 @@ impl Store {
     }
 }
 
+impl Store {
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+}
+
 pub struct Ingested {
     pub entry_id: i64,
     pub is_new: bool,
