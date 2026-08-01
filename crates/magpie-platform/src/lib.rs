@@ -4,6 +4,7 @@
 pub mod hotkey;
 pub mod policy;
 pub mod traits;
+pub mod watcher;
 
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 
