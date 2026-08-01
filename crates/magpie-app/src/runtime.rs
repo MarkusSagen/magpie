@@ -1,7 +1,7 @@
+use crate::{EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
-use crate::{EntryRow, LauncherWindow};
 use magpie_core::{open, Entry};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;

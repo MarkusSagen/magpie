@@ -11,7 +11,11 @@ fn snap(text: Option<&str>, concealed: bool) -> ClipboardSnapshot {
     }
 }
 fn app(id: &str) -> AppInfo {
-    AppInfo { identifier: id.into(), display_name: id.into(), icon_path: None }
+    AppInfo {
+        identifier: id.into(),
+        display_name: id.into(),
+        icon_path: None,
+    }
 }
 
 fn policy() -> CapturePolicy {
@@ -34,7 +38,10 @@ fn precedence_paused_beats_everything() {
 fn precedence_empty_beats_concealed_and_rest() {
     let p = policy();
     // No content -> Empty regardless of concealed flag.
-    assert_eq!(p.decide(&snap(None, true), Some(&app("1Password"))), Decision::Skip(SkipReason::Empty));
+    assert_eq!(
+        p.decide(&snap(None, true), Some(&app("1Password"))),
+        Decision::Skip(SkipReason::Empty)
+    );
 }
 
 #[test]
@@ -61,7 +68,10 @@ fn regex_applies_when_nothing_higher_matches() {
 #[test]
 fn clean_copy_is_kept() {
     let p = policy();
-    assert_eq!(p.decide(&snap(Some("a normal note"), false), Some(&app("Ghostty"))), Decision::Keep);
+    assert_eq!(
+        p.decide(&snap(Some("a normal note"), false), Some(&app("Ghostty"))),
+        Decision::Keep
+    );
 }
 
 #[test]
@@ -73,8 +83,20 @@ fn no_source_app_is_fine_when_not_denylisted() {
 #[test]
 fn image_content_is_kept_unless_concealed() {
     let p = policy();
-    let s = ClipboardSnapshot { content: Some(Content::Image { bytes: vec![1, 2, 3] }), change_token: 5, concealed: false };
+    let s = ClipboardSnapshot {
+        content: Some(Content::Image {
+            bytes: vec![1, 2, 3],
+        }),
+        change_token: 5,
+        concealed: false,
+    };
     assert_eq!(p.decide(&s, Some(&app("Preview"))), Decision::Keep);
-    let s2 = ClipboardSnapshot { content: Some(Content::Image { bytes: vec![1, 2, 3] }), change_token: 6, concealed: true };
+    let s2 = ClipboardSnapshot {
+        content: Some(Content::Image {
+            bytes: vec![1, 2, 3],
+        }),
+        change_token: 6,
+        concealed: true,
+    };
     assert_eq!(p.decide(&s2, None), Decision::Skip(SkipReason::Concealed));
 }

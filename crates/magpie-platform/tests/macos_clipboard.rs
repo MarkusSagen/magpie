@@ -17,7 +17,10 @@ fn clipboard_roundtrip_and_change_token() {
     let payload = "magpie-roundtrip-⚡-42";
     c.set_text(payload).unwrap();
     let after = c.snapshot();
-    assert!(after.change_token >= before, "changeCount does not go backwards on write");
+    assert!(
+        after.change_token >= before,
+        "changeCount does not go backwards on write"
+    );
     match &after.content {
         Some(Content::Text(t)) => assert_eq!(t, payload),
         _ => panic!("expected our text back from the pasteboard"),
@@ -25,7 +28,8 @@ fn clipboard_roundtrip_and_change_token() {
     assert!(!after.concealed, "our own write is not marked concealed");
 
     // 2) set_content(Files) lands as newline-joined text in v1.
-    c.set_content(&Content::Files(vec!["/tmp/a".into(), "/tmp/b".into()])).unwrap();
+    c.set_content(&Content::Files(vec!["/tmp/a".into(), "/tmp/b".into()]))
+        .unwrap();
     match c.snapshot().content {
         Some(Content::Text(t)) => assert_eq!(t, "/tmp/a\n/tmp/b"),
         _ => panic!("files should round-trip as newline-joined text in v1"),

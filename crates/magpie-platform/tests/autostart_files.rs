@@ -23,7 +23,11 @@ fn linux_desktop_entry_content_is_valid() {
 fn linux_autostart_enable_disable_is_idempotent() {
     let dir = tmp("linux");
     let path = dir.join("magpie.desktop");
-    let a = LinuxAutostart { desktop_path: path.clone(), name: "Magpie".into(), exec: "/bin/magpie".into() };
+    let a = LinuxAutostart {
+        desktop_path: path.clone(),
+        name: "Magpie".into(),
+        exec: "/bin/magpie".into(),
+    };
 
     assert!(!a.is_enabled());
     a.set_enabled(true).unwrap();
@@ -44,13 +48,20 @@ fn linux_autostart_enable_disable_is_idempotent() {
 fn macos_launchagent_plist_write_remove() {
     use magpie_platform::os::autostart::{launch_agent_plist, MacAutostart};
 
-    let xml = launch_agent_plist("io.magpie.agent", "/Applications/Magpie.app/Contents/MacOS/magpie");
+    let xml = launch_agent_plist(
+        "io.magpie.agent",
+        "/Applications/Magpie.app/Contents/MacOS/magpie",
+    );
     assert!(xml.contains("<key>RunAtLoad</key>"));
     assert!(xml.contains("io.magpie.agent"));
 
     let dir = tmp("macos");
     let plist = dir.join("io.magpie.agent.plist");
-    let a = MacAutostart { plist_path: plist.clone(), label: "io.magpie.agent".into(), program: "/bin/magpie".into() };
+    let a = MacAutostart {
+        plist_path: plist.clone(),
+        label: "io.magpie.agent".into(),
+        program: "/bin/magpie".into(),
+    };
     assert!(!a.is_enabled());
     a.set_enabled(true).unwrap();
     assert!(a.is_enabled() && plist.exists());

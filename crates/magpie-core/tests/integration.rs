@@ -19,7 +19,10 @@ impl TempImages {
     fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("magpie-core-it-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        TempImages { dir, writes: AtomicUsize::new(0) }
+        TempImages {
+            dir,
+            writes: AtomicUsize::new(0),
+        }
     }
     fn writes(&self) -> usize {
         self.writes.load(Ordering::SeqCst)
@@ -49,12 +52,20 @@ impl ImageStore for Noop {
 }
 
 fn text(s: &str, ms: i64) -> CaptureEvent {
-    CaptureEvent { content: Content::Text(s.into()), source_app: None, copied_at_ms: ms }
+    CaptureEvent {
+        content: Content::Text(s.into()),
+        source_app: None,
+        copied_at_ms: ms,
+    }
 }
 fn text_from(s: &str, ms: i64, app: &str) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
-        source_app: Some(AppInfo { identifier: app.into(), display_name: app.into(), icon_path: None }),
+        source_app: Some(AppInfo {
+            identifier: app.into(),
+            display_name: app.into(),
+            icon_path: None,
+        }),
         copied_at_ms: ms,
     }
 }
@@ -70,9 +81,12 @@ fn ingest_all(store: &Store, evs: &[CaptureEvent]) {
 fn full_lifecycle_dedup_and_event_log() {
     let s = open_in_memory().unwrap();
     // Same content copied three times from two apps; a distinct second entry once.
-    s.ingest(&text_from("hello", 100, "com.ghostty"), &Noop).unwrap();
-    s.ingest(&text_from("hello", 200, "com.safari"), &Noop).unwrap();
-    s.ingest(&text_from("hello", 300, "com.ghostty"), &Noop).unwrap();
+    s.ingest(&text_from("hello", 100, "com.ghostty"), &Noop)
+        .unwrap();
+    s.ingest(&text_from("hello", 200, "com.safari"), &Noop)
+        .unwrap();
+    s.ingest(&text_from("hello", 300, "com.ghostty"), &Noop)
+        .unwrap();
     s.ingest(&text("world", 400), &Noop).unwrap();
 
     let rows = s.recent(10).unwrap();
@@ -89,14 +103,17 @@ fn full_lifecycle_dedup_and_event_log() {
 #[test]
 fn most_copied_sort_orders_by_frequency() {
     let s = open_in_memory().unwrap();
-    ingest_all(&s, &[
-        text("once", 1),
-        text("thrice", 2),
-        text("thrice", 3),
-        text("thrice", 4),
-        text("twice", 5),
-        text("twice", 6),
-    ]);
+    ingest_all(
+        &s,
+        &[
+            text("once", 1),
+            text("thrice", 2),
+            text("thrice", 3),
+            text("thrice", 4),
+            text("twice", 5),
+            text("twice", 6),
+        ],
+    );
     let mut q = default_query();
     q.sort = Sort::MostCopied;
     let rows = s.search(&q).unwrap();
@@ -111,11 +128,14 @@ fn most_copied_sort_orders_by_frequency() {
 #[test]
 fn filter_by_source_app() {
     let s = open_in_memory().unwrap();
-    ingest_all(&s, &[
-        text_from("from ghostty a", 1, "com.ghostty"),
-        text_from("from ghostty b", 2, "com.ghostty"),
-        text_from("from safari", 3, "com.safari"),
-    ]);
+    ingest_all(
+        &s,
+        &[
+            text_from("from ghostty a", 1, "com.ghostty"),
+            text_from("from ghostty b", 2, "com.ghostty"),
+            text_from("from safari", 3, "com.safari"),
+        ],
+    );
     let ghostty: i64 = s
         .search(&default_query())
         .unwrap()
@@ -151,18 +171,34 @@ fn filter_by_time_range_since_and_until() {
 #[test]
 fn content_types_detected_persisted_and_filterable() {
     let s = open_in_memory().unwrap();
-    ingest_all(&s, &[
-        text("plain words here", 1),
-        text("https://example.com/x", 2),
-        text("me@example.io", 3),
-        text("#1a2b3c", 4),
-    ]);
-    s.ingest(&CaptureEvent { content: Content::Files(vec!["/a".into(), "/b".into()]), source_app: None, copied_at_ms: 5 }, &Noop).unwrap();
+    ingest_all(
+        &s,
+        &[
+            text("plain words here", 1),
+            text("https://example.com/x", 2),
+            text("me@example.io", 3),
+            text("#1a2b3c", 4),
+        ],
+    );
+    s.ingest(
+        &CaptureEvent {
+            content: Content::Files(vec!["/a".into(), "/b".into()]),
+            source_app: None,
+            copied_at_ms: 5,
+        },
+        &Noop,
+    )
+    .unwrap();
 
     let check = |kind: Kind, expect: usize| {
         let mut q = default_query();
         q.kind = Some(kind);
-        assert_eq!(s.search(&q).unwrap().len(), expect, "kind {:?}", kind.as_str());
+        assert_eq!(
+            s.search(&q).unwrap().len(),
+            expect,
+            "kind {:?}",
+            kind.as_str()
+        );
     };
     check(Kind::Text, 1);
     check(Kind::Link, 1);
@@ -177,10 +213,30 @@ fn content_types_detected_persisted_and_filterable() {
 fn image_ingestion_dedups_and_stores_path() {
     let images = TempImages::new("img");
     let s = open_in_memory().unwrap();
-    let png = Content::Image { bytes: vec![9, 8, 7, 6, 5] };
+    let png = Content::Image {
+        bytes: vec![9, 8, 7, 6, 5],
+    };
 
-    let a = s.ingest(&CaptureEvent { content: png.clone(), source_app: None, copied_at_ms: 1 }, &images).unwrap();
-    let b = s.ingest(&CaptureEvent { content: png.clone(), source_app: None, copied_at_ms: 2 }, &images).unwrap();
+    let a = s
+        .ingest(
+            &CaptureEvent {
+                content: png.clone(),
+                source_app: None,
+                copied_at_ms: 1,
+            },
+            &images,
+        )
+        .unwrap();
+    let b = s
+        .ingest(
+            &CaptureEvent {
+                content: png.clone(),
+                source_app: None,
+                copied_at_ms: 2,
+            },
+            &images,
+        )
+        .unwrap();
     assert_eq!(a.entry_id, b.entry_id, "identical image dedups");
     assert!(a.is_new && !b.is_new);
     assert_eq!(images.writes(), 1, "content-addressed store writes once");
@@ -199,14 +255,17 @@ fn image_ingestion_dedups_and_stores_path() {
 #[test]
 fn search_modes_end_to_end() {
     let s = open_in_memory().unwrap();
-    ingest_all(&s, &[
-        text("alpha beta gamma", 1),
-        text("alpha only", 2),
-        text("fbb exact match", 3),
-        text("foo bar baz", 4),
-        text("order-12345", 5),
-        text("order-abcde", 6),
-    ]);
+    ingest_all(
+        &s,
+        &[
+            text("alpha beta gamma", 1),
+            text("alpha only", 2),
+            text("fbb exact match", 3),
+            text("foo bar baz", 4),
+            text("order-12345", 5),
+            text("order-abcde", 6),
+        ],
+    );
 
     // word: AND of terms, order-independent
     let mut w = default_query();
@@ -243,10 +302,13 @@ fn search_modes_end_to_end() {
 #[test]
 fn fts_handles_punctuation_and_quotes() {
     let s = open_in_memory().unwrap();
-    ingest_all(&s, &[
-        text(r#"he said "hello, world!" loudly"#, 1),
-        text("unrelated content", 2),
-    ]);
+    ingest_all(
+        &s,
+        &[
+            text(r#"he said "hello, world!" loudly"#, 1),
+            text("unrelated content", 2),
+        ],
+    );
     let mut q = default_query();
     q.text = "hello world".into();
     let rows = s.search(&q).unwrap();
@@ -272,7 +334,11 @@ fn unicode_content_metrics_and_search() {
 fn large_history_search_and_limit() {
     let s = open_in_memory().unwrap();
     for i in 0..800 {
-        s.ingest(&text(&format!("entry number {i} needle{}", i % 7), i as i64), &Noop).unwrap();
+        s.ingest(
+            &text(&format!("entry number {i} needle{}", i % 7), i as i64),
+            &Noop,
+        )
+        .unwrap();
     }
     // limit respected
     let mut q = default_query();
@@ -284,7 +350,9 @@ fn large_history_search_and_limit() {
     n.text = "needle3".into();
     n.limit = 1000;
     let hits = s.search(&n).unwrap();
-    assert_eq!(hits.len(), 800 / 7 + if 800 % 7 > 3 { 1 } else { 0 });
+    // "needle3" was appended when i % 7 == 3, across i in 0..800.
+    let expected = (0..800).filter(|i| i % 7 == 3).count();
+    assert_eq!(hits.len(), expected);
     assert!(hits.iter().all(|e| e.full_text.contains("needle3")));
 }
 
@@ -334,11 +402,19 @@ fn data_persists_across_reopen() {
 #[test]
 fn rich_text_dedups_with_plain_text_of_same_body() {
     let s = open_in_memory().unwrap();
-    s.ingest(&CaptureEvent {
-        content: Content::Rich { text: "shared body".into(), html: Some("<b>shared body</b>".into()), rtf: None },
-        source_app: None,
-        copied_at_ms: 1,
-    }, &Noop).unwrap();
+    s.ingest(
+        &CaptureEvent {
+            content: Content::Rich {
+                text: "shared body".into(),
+                html: Some("<b>shared body</b>".into()),
+                rtf: None,
+            },
+            source_app: None,
+            copied_at_ms: 1,
+        },
+        &Noop,
+    )
+    .unwrap();
     s.ingest(&text("shared body", 2), &Noop).unwrap();
 
     let rows = s.recent(10).unwrap();

@@ -25,10 +25,19 @@ struct Step {
 }
 
 fn app(name: &str) -> Option<AppInfo> {
-    Some(AppInfo { identifier: name.into(), display_name: name.into(), icon_path: None })
+    Some(AppInfo {
+        identifier: name.into(),
+        display_name: name.into(),
+        icon_path: None,
+    })
 }
 fn tstep(text: &str, token: u64, appname: &str) -> Step {
-    Step { content: Some(Content::Text(text.into())), token, concealed: false, app: app(appname) }
+    Step {
+        content: Some(Content::Text(text.into())),
+        token,
+        concealed: false,
+        app: app(appname),
+    }
 }
 
 struct FakeClip {
@@ -39,7 +48,11 @@ impl Clipboard for FakeClip {
     fn snapshot(&mut self) -> ClipboardSnapshot {
         let i = self.cursor.load(Ordering::SeqCst).min(self.steps.len() - 1);
         let s = &self.steps[i];
-        ClipboardSnapshot { content: s.content.clone(), change_token: s.token, concealed: s.concealed }
+        ClipboardSnapshot {
+            content: s.content.clone(),
+            change_token: s.token,
+            concealed: s.concealed,
+        }
     }
     fn set_text(&mut self, _t: &str) -> Result<(), String> {
         Ok(())
@@ -66,8 +79,14 @@ fn run_session(steps: Vec<Step>, policy: CapturePolicy) -> Store {
     let steps = Arc::new(steps);
     let cursor = Arc::new(AtomicUsize::new(0));
     let mut watcher = Watcher::new(
-        FakeClip { steps: steps.clone(), cursor: cursor.clone() },
-        FakeSrc { steps: steps.clone(), cursor: cursor.clone() },
+        FakeClip {
+            steps: steps.clone(),
+            cursor: cursor.clone(),
+        },
+        FakeSrc {
+            steps: steps.clone(),
+            cursor: cursor.clone(),
+        },
         policy,
     );
     for n in 0..steps.len() {
@@ -83,19 +102,30 @@ fn run_session(steps: Vec<Step>, policy: CapturePolicy) -> Store {
 fn realistic_session_captures_dedups_attributes_and_is_searchable() {
     // Mirrors the kind of history in the design screenshot.
     let steps = vec![
-        tstep("docs/superpowers/specs/2026-07-31-telemetry-env-split-design.md", 1, "Ghostty"),
+        tstep(
+            "docs/superpowers/specs/2026-07-31-telemetry-env-split-design.md",
+            1,
+            "Ghostty",
+        ),
         tstep("Vi har source_service på alla tabeller", 2, "Slack"),
         tstep("https://app.asana.com/1/1210421", 3, "Vivaldi"),
-        tstep("docs/superpowers/specs/2026-07-31-telemetry-env-split-design.md", 4, "Ghostty"), // re-copy
+        tstep(
+            "docs/superpowers/specs/2026-07-31-telemetry-env-split-design.md",
+            4,
+            "Ghostty",
+        ), // re-copy
         tstep("maybe 24h can be a good start", 5, "Slack"),
-        tstep("https://app.asana.com/1/1210421", 6, "Vivaldi"),                                  // re-copy
+        tstep("https://app.asana.com/1/1210421", 6, "Vivaldi"), // re-copy
     ];
     let store = run_session(steps, CapturePolicy::new());
 
     // 4 unique entries, two of them copied twice.
     let all = store.search(&default_query()).unwrap();
     assert_eq!(all.len(), 4);
-    let doc = all.iter().find(|e| e.full_text.starts_with("docs/")).unwrap();
+    let doc = all
+        .iter()
+        .find(|e| e.full_text.starts_with("docs/"))
+        .unwrap();
     assert_eq!(doc.copy_count, 2);
     let asana = all.iter().find(|e| e.full_text.contains("asana")).unwrap();
     assert_eq!(asana.copy_count, 2);
@@ -129,7 +159,12 @@ fn concealed_and_denylisted_copies_never_reach_the_store() {
 
     let steps = vec![
         tstep("normal note", 1, "Ghostty"),
-        Step { content: Some(Content::Text("hunter2".into())), token: 2, concealed: true, app: app("Bitwarden") },
+        Step {
+            content: Some(Content::Text("hunter2".into())),
+            token: 2,
+            concealed: true,
+            app: app("Bitwarden"),
+        },
         tstep("password: s3cr3t-from-pw-manager", 3, "1Password"), // denylisted app
         tstep("another normal note", 4, "Ghostty"),
     ];
@@ -138,7 +173,9 @@ fn concealed_and_denylisted_copies_never_reach_the_store() {
     let all = store.search(&default_query()).unwrap();
     assert_eq!(all.len(), 2, "concealed + denylisted copies are dropped");
     assert!(all.iter().all(|e| e.full_text.contains("normal note")));
-    assert!(all.iter().all(|e| !e.full_text.contains("hunter2") && !e.full_text.contains("s3cr3t")));
+    assert!(all
+        .iter()
+        .all(|e| !e.full_text.contains("hunter2") && !e.full_text.contains("s3cr3t")));
 }
 
 #[test]
@@ -167,7 +204,10 @@ fn unchanged_change_token_is_not_recaptured() {
     let store = run_session(steps, CapturePolicy::new());
     let all = store.search(&default_query()).unwrap();
     assert_eq!(all.len(), 1);
-    assert_eq!(all[0].copy_count, 1, "same token means the copy is not recounted");
+    assert_eq!(
+        all[0].copy_count, 1,
+        "same token means the copy is not recounted"
+    );
 }
 
 #[test]
