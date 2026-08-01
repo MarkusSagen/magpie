@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "magpie"
+path = "src/main.rs"
+
 [dependencies]
 magpie-core = { path = "../magpie-core" }
 magpie-platform = { path = "../magpie-platform" }
