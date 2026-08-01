@@ -1,0 +1,11 @@
+[package]
+name = "magpie-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+blake3 = "1"
+regex = "1"
+fuzzy-matcher = "0.3"
