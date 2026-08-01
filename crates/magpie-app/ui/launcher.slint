@@ -1,0 +1,66 @@
+import { LineEdit, ListView } from "std-widgets.slint";
+
+struct EntryRow {
+    title: string,
+    subtitle: string,
+    kind: string,
+}
+
+export component LauncherWindow inherits Window {
+    title: "Magpie";
+    preferred-width: 900px;
+    preferred-height: 560px;
+    background: #1e1e21;
+
+    in property <[EntryRow]> entries;
+    in-out property <string> query;
+    in-out property <int> selected: 0;
+    in property <string> detail-text;
+
+    callback search-changed(string);
+    callback activate(int);
+    callback copy-only(int);
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 8px;
+
+        search := LineEdit {
+            placeholder-text: "Type to filter entries…";
+            text <=> query;
+            edited(t) => { root.search-changed(t); }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            list := ListView {
+                min-width: 340px;
+                for row[i] in entries: Rectangle {
+                    height: 44px;
+                    background: i == root.selected ? #3a3a40 : transparent;
+                    border-radius: 6px;
+                    TouchArea {
+                        clicked => { root.selected = i; }
+                        double-clicked => { root.activate(i); }
+                    }
+                    VerticalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        Text { text: row.title; color: white; font-size: 14px; overflow: elide; }
+                        Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
+                    }
+                }
+            }
+
+            Rectangle {
+                background: #161618;
+                border-radius: 8px;
+                VerticalLayout {
+                    padding: 12px;
+                    Text { text: root.detail-text; color: #d0d0d4; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+}
