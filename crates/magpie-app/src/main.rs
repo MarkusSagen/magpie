@@ -6,3 +6,4 @@ fn main() {
 }
 
 mod config;
+mod image_cache;
