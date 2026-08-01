@@ -2,6 +2,7 @@
 //! plus the pure capture-policy and watcher logic that drives them.
 
 pub mod hotkey;
+pub mod os;
 pub mod policy;
 pub mod traits;
 pub mod watcher;
