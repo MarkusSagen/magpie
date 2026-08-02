@@ -166,6 +166,13 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     ))));
 }
 
+/// Refresh results and show the launcher window. Shared by the launcher hotkey
+/// and the tray (left-click + "Show Magpie").
+fn show_window(ui: &LauncherWindow, state: &AppState) {
+    refresh(ui, state);
+    let _ = ui.show();
+}
+
 fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
     let bars: Vec<Bar> = to_bars(items)
         .into_iter()
@@ -329,8 +336,7 @@ fn spawn_hotkeys(
                         let s = state.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = w.upgrade() {
-                                refresh(&ui, &s);
-                                let _ = ui.show();
+                                show_window(&ui, &s);
                             }
                         });
                     }
@@ -629,7 +635,7 @@ pub fn start() {
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
-    let _tray = build_tray();
+    let _tray = build_tray(weak.clone(), state.clone());
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
     // We deliberately do NOT call `ui.run()` (which would show the window on
@@ -637,33 +643,81 @@ pub fn start() {
     slint::run_event_loop().expect("run event loop");
 }
 
-/// Build a minimal tray icon with a Quit item, and drain its menu events.
-fn build_tray() -> Option<tray_icon::TrayIcon> {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-    use tray_icon::TrayIconBuilder;
+/// Build the tray icon: right-click shows a menu (Show / Quit); left-click opens
+/// the window. On Linux, tray click events are not emitted, so "Show Magpie" in
+/// the menu is the portable way to open the window.
+fn build_tray(
+    weak: slint::Weak<LauncherWindow>,
+    state: Arc<AppState>,
+) -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let menu = Menu::new();
+    let show = MenuItem::new("Show Magpie", true, None);
     let quit = MenuItem::new("Quit Magpie", true, None);
+    menu.append(&show).ok()?;
+    menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
+    let show_id = show.id().clone();
     let quit_id = quit.id().clone();
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false)
         .with_tooltip("Magpie")
         .with_title("🐦")
         .build()
         .ok()?;
 
-    std::thread::spawn(move || {
-        let rx = MenuEvent::receiver();
-        while let Ok(ev) = rx.recv() {
-            if ev.id == quit_id {
-                let _ = slint::invoke_from_event_loop(|| {
-                    let _ = slint::quit_event_loop();
-                });
+    // Menu clicks (right-click menu): Show / Quit.
+    {
+        let w = weak.clone();
+        let s = state.clone();
+        std::thread::spawn(move || {
+            let rx = MenuEvent::receiver();
+            while let Ok(ev) = rx.recv() {
+                if ev.id == quit_id {
+                    let _ = slint::invoke_from_event_loop(|| {
+                        let _ = slint::quit_event_loop();
+                    });
+                } else if ev.id == show_id {
+                    let w = w.clone();
+                    let s = s.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w.upgrade() {
+                            show_window(&ui, &s);
+                        }
+                    });
+                }
             }
-        }
-    });
+        });
+    }
+
+    // Left-click on the icon opens the window (macOS/Windows; Linux no-op).
+    {
+        let w = weak.clone();
+        let s = state.clone();
+        std::thread::spawn(move || {
+            let rx = TrayIconEvent::receiver();
+            while let Ok(ev) = rx.recv() {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = ev
+                {
+                    let w = w.clone();
+                    let s = s.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w.upgrade() {
+                            show_window(&ui, &s);
+                        }
+                    });
+                }
+            }
+        });
+    }
 
     Some(tray)
 }
