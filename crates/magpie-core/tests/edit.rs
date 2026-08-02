@@ -12,7 +12,11 @@ impl ImageStore for Noop {
 }
 fn ingest(s: &Store, t: &str, ms: i64) -> i64 {
     s.ingest(
-        &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: ms },
+        &CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: None,
+            copied_at_ms: ms,
+        },
         &Noop,
     )
     .unwrap()
@@ -32,7 +36,10 @@ fn edited_entry_is_searchable_by_new_text_and_slottable() {
     assert_eq!(hits[0].id, id);
 
     s.assign_slot(4, id).unwrap();
-    assert_eq!(s.slot_entry(4).unwrap().unwrap().full_text, "typo fixed here");
+    assert_eq!(
+        s.slot_entry(4).unwrap().unwrap().full_text,
+        "typo fixed here"
+    );
 }
 
 #[test]
@@ -41,7 +48,11 @@ fn snippet_is_pinned_and_survives_retention() {
     let snip = s.create_snippet("my reusable template", 1).unwrap();
     ingest(&s, "junk", 2);
 
-    let policy = RetentionPolicy { max_entries: None, max_age_ms: Some(0), max_image_bytes: None };
+    let policy = RetentionPolicy {
+        max_entries: None,
+        max_age_ms: Some(0),
+        max_image_bytes: None,
+    };
     s.enforce_retention(&policy, 1_000_000).unwrap();
 
     let remaining: Vec<i64> = s.recent(100).unwrap().into_iter().map(|e| e.id).collect();

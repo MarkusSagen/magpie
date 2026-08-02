@@ -96,7 +96,11 @@ mod tests {
     }
     fn ingest(s: &Store, t: &str, ms: i64) -> i64 {
         s.ingest(
-            &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: ms },
+            &CaptureEvent {
+                content: Content::Text(t.into()),
+                source_app: None,
+                copied_at_ms: ms,
+            },
             &Noop,
         )
         .unwrap()
@@ -107,7 +111,9 @@ mod tests {
     fn update_changes_text_metrics_and_reindexes_fts() {
         let s = open_in_memory().unwrap();
         let id = ingest(&s, "hello world", 1);
-        let ok = s.update_entry_text(id, "https://example.com/new", 5_000).unwrap();
+        let ok = s
+            .update_entry_text(id, "https://example.com/new", 5_000)
+            .unwrap();
         assert!(ok);
 
         let e = s.recent(1).unwrap().into_iter().next().unwrap();
@@ -130,7 +136,12 @@ mod tests {
         let _b = ingest(&s, "beta", 2);
         let ok = s.update_entry_text(a, "beta", 3).unwrap();
         assert!(!ok);
-        let e = s.recent(100).unwrap().into_iter().find(|e| e.id == a).unwrap();
+        let e = s
+            .recent(100)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == a)
+            .unwrap();
         assert_eq!(e.full_text, "alpha");
     }
 
