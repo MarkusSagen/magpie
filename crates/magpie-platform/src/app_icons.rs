@@ -74,7 +74,24 @@ fn bundle_path_from_exe(exe: &Path) -> Option<PathBuf> {
     Some(exe.to_path_buf())
 }
 
-// ---------------- non-macOS placeholder (Windows/Linux land in a later task) ----------------
+// ---------------- Windows / Linux ----------------
+//
+// These need a machine on the target OS to implement + verify (only the
+// macOS + wasm targets are installed in this dev env, so blind native code
+// can't be compile-checked and is intentionally not shipped). Until then the
+// callers fall back to the type glyph. Intended approach for each:
+//
+// - **Windows**: `SHGetFileInfoW(exe, .., SHGFI_ICON | SHGFI_LARGEICON)` → `HICON`,
+//   then `GetIconInfo` + `GetDIBits` into a 32-bit top-down BGRA buffer, swap to
+//   RGBA, encode PNG via the `image` crate, `DestroyIcon`. Needs the `windows`
+//   features `Win32_UI_Shell`, `Win32_Graphics_Gdi`, `Win32_UI_WindowsAndMessaging`.
+//   (Or a thin crate like `systemicons` that returns PNG bytes for a path.)
+// - **Linux**: derive an icon name from the exe basename / a `.desktop` lookup,
+//   resolve it in the freedesktop icon theme (e.g. the `freedesktop-icons`
+//   crate, `lookup(name).with_size(64).find()`), read the file bytes.
+//
+// `ensure_app_icon` already downscales whatever bytes are returned, so each
+// impl only needs to return native icon bytes (PNG/ICO/etc).
 
 #[cfg(not(target_os = "macos"))]
 fn app_icon_png(_exe_path: &Path) -> Option<Vec<u8>> {
