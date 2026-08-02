@@ -7,6 +7,7 @@ pub mod cli;
 pub mod config;
 pub mod grouping;
 pub mod image_cache;
+pub mod merge_view;
 pub mod paste_action;
 pub mod retention;
 pub mod stats_view;
