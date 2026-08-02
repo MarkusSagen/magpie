@@ -1,4 +1,4 @@
-import { LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 
 struct EntryRow {
     title: string,
@@ -6,6 +6,8 @@ struct EntryRow {
     kind: string,
     slot: int,
     merged: bool,
+    full: string,
+    badge: string,
 }
 
 struct Bar {
@@ -61,7 +63,6 @@ export component LauncherWindow inherits Window {
     in property <[EntryRow]> entries;
     in-out property <string> query;
     in-out property <int> selected: 0;
-    in property <string> detail-text;
 
     in-out property <string> view: "list";
     in property <[Bar]> over-time-bars;
@@ -222,6 +223,20 @@ export component LauncherWindow inherits Window {
                                 Text { text: row.title; color: white; font-size: 14px; overflow: elide; }
                                 Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
                             }
+                            if row.badge != "": Rectangle {
+                                y: 13px;
+                                height: 18px;
+                                width: 58px;
+                                background: #2a2a30;
+                                border-radius: 9px;
+                                Text {
+                                    text: row.badge;
+                                    color: #9a9aa0;
+                                    font-size: 10px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
                             Rectangle {
                                 width: 26px;
                                 y: 9px;
@@ -241,7 +256,16 @@ export component LauncherWindow inherits Window {
                     VerticalLayout {
                         padding: 12px;
                         spacing: 10px;
-                        Text { text: root.detail-text; color: #d0d0d4; wrap: word-wrap; }
+                        ScrollView {
+                            min-height: 120px;
+                            vertical-stretch: 1;
+                            Text {
+                                width: parent.visible-width;
+                                text: (entries.length > 0 && root.selected < entries.length) ? entries[root.selected].full : "";
+                                color: #d0d0d4;
+                                wrap: word-wrap;
+                            }
+                        }
 
                         if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
                             spacing: 4px;

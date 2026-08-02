@@ -99,6 +99,8 @@ fn to_rows(
                 kind: SharedString::from(e.kind.as_str()),
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
                 merged: merge_set.contains(&(i as i32)),
+                full: SharedString::from(e.full_text.clone()),
+                badge: SharedString::from(line_badge(&e.full_text)),
             }
         })
         .collect()
@@ -157,14 +159,11 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         .unwrap_or_default();
     ui.set_merge_count(merge_set.len() as i32);
 
-    let detail = results
-        .first()
-        .map(|e| e.full_text.clone())
-        .unwrap_or_default();
+    // The preview binds directly to the selected row's `full` text in the UI,
+    // so there is no separate detail string to push here.
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(
         &results, &slots, &tag_map, &merge_set,
     ))));
-    ui.set_detail_text(SharedString::from(detail));
 }
 
 fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
