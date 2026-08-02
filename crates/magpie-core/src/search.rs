@@ -36,6 +36,7 @@ pub struct SearchQuery {
     pub time: TimeRange,
     pub sort: Sort,
     pub tag: Option<String>,
+    pub pinned_only: bool,
     pub limit: i64,
 }
 
@@ -48,6 +49,7 @@ pub fn default_query() -> SearchQuery {
         time: TimeRange::default(),
         sort: Sort::Recency,
         tag: None,
+        pinned_only: false,
         limit: 200,
     }
 }
@@ -236,6 +238,9 @@ impl Store {
                 params.push(Value::Text(tag));
             }
         }
+        if q.pinned_only {
+            clauses.push("e.pinned = 1".to_string());
+        }
 
         let where_sql = if clauses.is_empty() {
             "1=1".to_string()
@@ -303,6 +308,19 @@ mod tests {
             }),
             copied_at_ms: ms,
         }
+    }
+
+    #[test]
+    fn pinned_only_filters_to_pinned_entries() {
+        let s = open_in_memory().unwrap();
+        let keep = s.ingest(&text_ev("pin me", 1), &FakeImages).unwrap().entry_id;
+        s.ingest(&text_ev("not pinned", 2), &FakeImages).unwrap();
+        s.set_pinned(keep, true).unwrap();
+        let mut q = default_query();
+        q.pinned_only = true;
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].full_text, "pin me");
     }
 
     #[test]

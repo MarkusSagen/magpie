@@ -15,6 +15,19 @@ impl Store {
         rows.collect()
     }
 
+    /// Distinct source apps that have at least one entry: `(app_id, display_name)`,
+    /// ordered by name. For the advanced-search app filter.
+    pub fn apps_in_use(&self) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT a.id, a.display_name
+             FROM apps a JOIN entries e ON e.source_app_id = a.id
+             ORDER BY a.display_name",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect()
+    }
+
     /// `(entry_id, app icon_path)` for entries whose source app has a non-null icon.
     pub fn app_icon_pairs(&self) -> Result<Vec<(i64, String)>> {
         let conn = self.conn();
@@ -65,6 +78,17 @@ mod tests {
         let _b = ingest(&s, "no app", None);
         let pairs = s.app_name_pairs().unwrap();
         assert_eq!(pairs, vec![(a, "Terminal".to_string())]);
+    }
+
+    #[test]
+    fn apps_in_use_lists_distinct_apps() {
+        let s = open_in_memory().unwrap();
+        ingest(&s, "a", Some("Ghostty"));
+        ingest(&s, "b", Some("Ghostty"));
+        ingest(&s, "c", Some("Vivaldi"));
+        ingest(&s, "d", None);
+        let apps: Vec<String> = s.apps_in_use().unwrap().into_iter().map(|(_, n)| n).collect();
+        assert_eq!(apps, vec!["Ghostty".to_string(), "Vivaldi".to_string()]);
     }
 
     #[test]
