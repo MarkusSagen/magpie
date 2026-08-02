@@ -6,6 +6,50 @@ struct EntryRow {
     kind: string,
 }
 
+struct Bar {
+    label: string,
+    display: string,
+    value_norm: float,
+}
+
+// A labeled horizontal bar: [ label ][=== track ===][ value ]
+component HBar inherits Rectangle {
+    in property <string> label;
+    in property <string> display;
+    in property <float> value_norm;
+    height: 22px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: label;
+            color: #d0d0d4;
+            font-size: 11px;
+            width: 180px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        track := Rectangle {
+            background: #2a2a30;
+            border-radius: 3px;
+            Rectangle {
+                x: 0;
+                y: 0;
+                height: parent.height;
+                width: track.width * value_norm;
+                background: #6a8cff;
+                border-radius: 3px;
+            }
+        }
+        Text {
+            text: display;
+            color: #9a9aa0;
+            font-size: 11px;
+            width: 48px;
+            vertical-alignment: center;
+        }
+    }
+}
+
 export component LauncherWindow inherits Window {
     title: "Magpie";
     preferred-width: 900px;
@@ -17,49 +61,166 @@ export component LauncherWindow inherits Window {
     in-out property <int> selected: 0;
     in property <string> detail-text;
 
+    in-out property <string> view: "list";
+    in property <[Bar]> over-time-bars;
+    in property <[Bar]> most-copied-bars;
+    in property <[Bar]> per-app-bars;
+    in property <[Bar]> by-type-bars;
+    in property <string> totals-line;
+    in-out property <int> range-index: 1;
+
     callback search-changed(string);
     callback activate(int);
     callback copy-only(int);
+    callback stats-range-changed(int);
+    callback toggle-view();
 
     VerticalLayout {
         padding: 8px;
         spacing: 8px;
 
-        search := LineEdit {
-            placeholder-text: "Type to filter entries…";
-            text <=> query;
-            edited(t) => { root.search-changed(t); }
+        // Header with a view toggle on the right.
+        HorizontalLayout {
+            alignment: end;
+            Rectangle {
+                width: 84px;
+                height: 26px;
+                background: #2a2a30;
+                border-radius: 6px;
+                TouchArea {
+                    clicked => {
+                        root.toggle-view();
+                    }
+                }
+                Text {
+                    text: root.view == "stats" ? "← Back" : "Stats";
+                    color: white;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
 
-        HorizontalLayout {
-            spacing: 12px;
+        // ---- List view ----
+        if root.view == "list": VerticalLayout {
+            spacing: 8px;
 
-            list := ListView {
-                min-width: 340px;
-                for row[i] in entries: Rectangle {
-                    height: 44px;
-                    background: i == root.selected ? #3a3a40 : transparent;
+            search := LineEdit {
+                placeholder-text: "Type to filter entries…";
+                text <=> query;
+                edited(t) => {
+                    root.search-changed(t);
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                list := ListView {
+                    min-width: 340px;
+                    for row[i] in entries: Rectangle {
+                        height: 44px;
+                        background: i == root.selected ? #3a3a40 : transparent;
+                        border-radius: 6px;
+                        TouchArea {
+                            clicked => {
+                                root.selected = i;
+                            }
+                            double-clicked => {
+                                root.activate(i);
+                            }
+                        }
+                        VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text { text: row.title; color: white; font-size: 14px; overflow: elide; }
+                            Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    background: #161618;
+                    border-radius: 8px;
+                    VerticalLayout {
+                        padding: 12px;
+                        Text { text: root.detail-text; color: #d0d0d4; wrap: word-wrap; }
+                    }
+                }
+            }
+        }
+
+        // ---- Stats view ----
+        if root.view == "stats": VerticalLayout {
+            padding: 8px;
+            spacing: 10px;
+
+            // Range selector.
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
+                    width: 56px;
+                    height: 26px;
+                    background: i == root.range-index ? #3a3a40 : #202024;
                     border-radius: 6px;
                     TouchArea {
-                        clicked => { root.selected = i; }
-                        double-clicked => { root.activate(i); }
+                        clicked => {
+                            root.range-index = i;
+                            root.stats-range-changed(i);
+                        }
                     }
-                    VerticalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        Text { text: row.title; color: white; font-size: 14px; overflow: elide; }
-                        Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
+                    Text {
+                        text: label;
+                        color: white;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
             }
 
+            Text { text: root.totals-line; color: white; font-size: 13px; }
+
+            Text { text: "Copies over time"; color: #9a9aa0; font-size: 11px; }
             Rectangle {
-                background: #161618;
-                border-radius: 8px;
-                VerticalLayout {
-                    padding: 12px;
-                    Text { text: root.detail-text; color: #d0d0d4; wrap: word-wrap; }
+                height: 64px;
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 2px;
+                    for bar in root.over-time-bars: Rectangle {
+                        width: 8px;
+                        Rectangle {
+                            width: parent.width;
+                            y: parent.height * (1.0 - bar.value_norm);
+                            height: parent.height * bar.value_norm;
+                            background: #6a8cff;
+                            border-radius: 2px;
+                        }
+                    }
                 }
+            }
+
+            Text { text: "Most copied"; color: #9a9aa0; font-size: 11px; }
+            for bar in root.most-copied-bars: HBar {
+                label: bar.label;
+                display: bar.display;
+                value_norm: bar.value_norm;
+            }
+
+            Text { text: "By app"; color: #9a9aa0; font-size: 11px; }
+            for bar in root.per-app-bars: HBar {
+                label: bar.label;
+                display: bar.display;
+                value_norm: bar.value_norm;
+            }
+
+            Text { text: "By type"; color: #9a9aa0; font-size: 11px; }
+            for bar in root.by-type-bars: HBar {
+                label: bar.label;
+                display: bar.display;
+                value_norm: bar.value_norm;
             }
         }
     }
