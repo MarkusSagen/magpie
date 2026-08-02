@@ -350,6 +350,63 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
+        ui.on_start_edit(move |index| {
+            if let Some(ui) = w.upgrade() {
+                let results = current_results(&s, now_ms());
+                if let Some(e) = results.get(index as usize) {
+                    ui.set_edit_text(SharedString::from(e.full_text.clone()));
+                    ui.set_edit_mode(SharedString::from("entry"));
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_new_snippet(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_edit_text(SharedString::from(""));
+                ui.set_edit_mode(SharedString::from("snippet"));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_save_edit(move |text| {
+            let text = text.to_string();
+            if let Some(ui) = w.upgrade() {
+                let mode = ui.get_edit_mode().to_string();
+                let idx = ui.get_selected() as usize;
+                // Compute results BEFORE locking the store (current_results also
+                // locks it) to avoid a re-entrant Mutex deadlock.
+                let results = current_results(&s, now_ms());
+                if !text.trim().is_empty() {
+                    if let Ok(store) = s.store.lock() {
+                        if mode == "entry" {
+                            if let Some(e) = results.get(idx) {
+                                let _ = store.update_entry_text(e.id, &text, now_ms());
+                            }
+                        } else if mode == "snippet" {
+                            let _ = store.create_snippet(&text, now_ms());
+                        }
+                    }
+                }
+                ui.set_edit_mode(SharedString::from("none"));
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_cancel_edit(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_edit_mode(SharedString::from("none"));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
         ui.on_toggle_view(move || {
             if let Some(ui) = w.upgrade() {
                 let to_stats = ui.get_view() != "stats";
