@@ -43,7 +43,9 @@ pub fn ensure_favicon(
     Some(path)
 }
 
-/// Real fetch: the site's own `/favicon.ico`, short timeout, size-capped.
+/// Real fetch: the site's own `/favicon.ico`, short timeout, size-capped, then
+/// normalized to a small PNG (favicons are often ICO — re-encode so the UI can
+/// always decode them and the on-disk size stays tiny).
 pub fn fetch_favicon(domain: &str) -> Option<Vec<u8>> {
     let url = format!("https://{domain}/favicon.ico");
     let resp = ureq::get(&url)
@@ -57,10 +59,13 @@ pub fn fetch_favicon(domain: &str) -> Option<Vec<u8>> {
         .read_to_end(&mut buf)
         .ok()?;
     if buf.is_empty() {
-        None
-    } else {
-        Some(buf)
+        return None;
     }
+    let img = image::load_from_memory(&buf).ok()?;
+    let small = img.thumbnail(32, 32);
+    let mut out = std::io::Cursor::new(Vec::new());
+    small.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
 }
 
 #[cfg(test)]

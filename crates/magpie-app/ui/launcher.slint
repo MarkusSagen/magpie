@@ -15,6 +15,8 @@ struct EntryRow {
     size: string,
     masked: bool,
     full_masked: string,
+    icon: image,
+    has_icon: bool,
 }
 
 struct Bar {
@@ -414,7 +416,8 @@ export component LauncherWindow inherits Window {
                                     border-radius: 2px;
                                     background: i == root.selected ? #6a8cff : transparent;
                                 }
-                                Text { text: row.glyph; font-size: 18px; vertical-alignment: center; width: 24px; horizontal-alignment: center; }
+                                if row.has-icon: Image { source: row.icon; width: 20px; height: 20px; }
+                                if !row.has-icon: Text { text: row.glyph; font-size: 18px; vertical-alignment: center; width: 24px; horizontal-alignment: center; }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
                                     padding-top: 8px;
@@ -484,7 +487,9 @@ export component LauncherWindow inherits Window {
                                 spacing: 4px;
                                 Rectangle { height: 1px; background: #2a2a30; }
                                 HorizontalLayout {
+                                    spacing: 6px;
                                     Text { text: "Application"; color: #6a6a70; font-size: 11px; width: 96px; }
+                                    if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
                                     Text { text: entries[root.selected].source; color: #d0d0d4; font-size: 11px; overflow: elide; }
                                 }
                                 HorizontalLayout {

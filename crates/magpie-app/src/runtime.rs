@@ -1,6 +1,7 @@
 use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
+use magpie_app::favicon;
 use magpie_app::format_time::relative_time;
 use magpie_app::mask_view::{mask_render, should_mask, MaskRules};
 use magpie_app::merge_view::separator_str;
@@ -89,6 +90,8 @@ fn to_rows(
     tags: &HashMap<i64, Vec<String>>,
     merge_set: &[i32],
     app_names: &HashMap<i64, String>,
+    app_icons: &HashMap<i64, String>,
+    favicon_dir: &std::path::Path,
     now: i64,
     rules: &MaskRules,
     visible: usize,
@@ -102,6 +105,24 @@ fn to_rows(
                 .cloned()
                 .unwrap_or_else(|| "—".to_string());
             let when = relative_time(e.last_copied_at_ms, now);
+            // Pick the per-entry icon: a link's cached site favicon, else the
+            // source app icon; then load it for Slint.
+            let icon_path: Option<String> = if matches!(e.kind, Kind::Link) {
+                favicon::domain_of(&e.full_text)
+                    .map(|d| favicon::favicon_cache_path(favicon_dir, &d))
+                    .filter(|p| p.exists())
+                    .and_then(|p| p.to_str().map(|s| s.to_string()))
+                    .or_else(|| app_icons.get(&e.id).cloned())
+            } else {
+                app_icons.get(&e.id).cloned()
+            };
+            let (icon_img, has_icon) = match icon_path.as_deref().map(std::path::Path::new) {
+                Some(p) => match slint::Image::load_from_path(p) {
+                    Ok(img) => (img, true),
+                    Err(_) => (slint::Image::default(), false),
+                },
+                None => (slint::Image::default(), false),
+            };
             let masked = should_mask(
                 rules,
                 app_names.get(&e.id).map(|s| s.as_str()),
@@ -148,6 +169,8 @@ fn to_rows(
                 size: SharedString::from(size),
                 masked,
                 full_masked: SharedString::from(full_masked),
+                icon: icon_img,
+                has_icon,
             }
         })
         .collect()
@@ -169,7 +192,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     let visible = state.mask_visible_chars.max(0) as usize;
     ui.set_screenshare(screenshare);
 
-    let (slots, tag_map, all_tags, app_names) = match state.store.lock() {
+    let (slots, tag_map, all_tags, app_names, app_icons) = match state.store.lock() {
         Ok(store) => {
             let slots: HashMap<i64, i64> = store
                 .slot_map()
@@ -187,9 +210,20 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            (slots, tag_map, all_tags, app_names)
+            let app_icons: HashMap<i64, String> = store
+                .app_icon_pairs()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            (slots, tag_map, all_tags, app_names, app_icons)
         }
-        Err(_) => (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new()),
+        Err(_) => (
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ),
     };
 
     let sel = ui.get_selected() as usize;
@@ -224,6 +258,8 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         &tag_map,
         &merge_set,
         &app_names,
+        &app_icons,
+        &data_dir().join("favicons"),
         now_ms(),
         &rules,
         visible,
@@ -350,6 +386,7 @@ fn spawn_watcher(
     state: Arc<AppState>,
     denylist: Vec<String>,
     retention: RetentionPolicy,
+    fetch_favicons: bool,
     weak: slint::Weak<LauncherWindow>,
 ) {
     std::thread::spawn(move || {
@@ -367,17 +404,34 @@ fn spawn_watcher(
             },
             policy,
         );
+        let push_refresh = |weak: &slint::Weak<LauncherWindow>, state: &Arc<AppState>| {
+            let w = weak.clone();
+            let s = state.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    refresh(&ui, &s);
+                }
+            });
+        };
         loop {
             if let Some(ev) = watcher.poll_once(now_ms()) {
                 if ingest_event(&state, &ev).is_ok() {
                     sweep_retention(&state, &retention);
-                    let w = weak.clone();
-                    let s = state.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = w.upgrade() {
-                            refresh(&ui, &s);
+                    push_refresh(&weak, &state);
+                    // Best-effort site favicon for link entries; refresh again once
+                    // it's cached so the icon appears without waiting on the fetch.
+                    if fetch_favicons {
+                        if let Content::Text(t) = &ev.content {
+                            if let Some(domain) = favicon::domain_of(t) {
+                                let dir = data_dir().join("favicons");
+                                if favicon::ensure_favicon(&dir, &domain, favicon::fetch_favicon)
+                                    .is_some()
+                                {
+                                    push_refresh(&weak, &state);
+                                }
+                            }
                         }
-                    });
+                    }
                 }
             }
             std::thread::sleep(Duration::from_millis(250));
@@ -831,7 +885,13 @@ pub fn start() {
     sweep_retention(&state, &retention);
 
     refresh(&ui, &state);
-    spawn_watcher(state.clone(), denylist, retention, weak.clone());
+    spawn_watcher(
+        state.clone(),
+        denylist,
+        retention,
+        cfg.fetch_link_favicons,
+        weak.clone(),
+    );
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
