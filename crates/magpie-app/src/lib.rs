@@ -8,5 +8,6 @@ pub mod config;
 pub mod grouping;
 pub mod image_cache;
 pub mod paste_action;
+pub mod retention;
 pub mod stats_view;
 pub mod viewmodel;

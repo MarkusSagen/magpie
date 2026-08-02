@@ -7,6 +7,14 @@ pub struct Config {
     pub quick_paste_hotkeys: Vec<String>,
     pub paste_on_select: bool,
     pub app_denylist: Vec<String>,
+    // Opt-in retention caps (off by default). `#[serde(default)]` keeps older
+    // config files (without these keys) loading.
+    #[serde(default)]
+    pub max_entries: Option<i64>,
+    #[serde(default)]
+    pub max_age_days: Option<i64>,
+    #[serde(default)]
+    pub max_image_mb: Option<i64>,
 }
 
 impl Default for Config {
@@ -16,6 +24,9 @@ impl Default for Config {
             quick_paste_hotkeys: (1..=9).map(|n| format!("super+ctrl+{n}")).collect(),
             paste_on_select: true,
             app_denylist: Vec::new(),
+            max_entries: None,
+            max_age_days: None,
+            max_image_mb: None,
         }
     }
 }
