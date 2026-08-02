@@ -182,7 +182,10 @@ mod tests {
         let mut ui = UiState::new();
         ui.time_filter = TimeFilter::Last30Days;
         let now = 100 * 86_400_000i64;
-        assert_eq!(to_query(&ui, now).time.since_ms, Some(now - 30 * 86_400_000));
+        assert_eq!(
+            to_query(&ui, now).time.since_ms,
+            Some(now - 30 * 86_400_000)
+        );
     }
 
     #[test]

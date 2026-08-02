@@ -87,7 +87,12 @@ mod tests {
         ingest(&s, "b", Some("Ghostty"));
         ingest(&s, "c", Some("Vivaldi"));
         ingest(&s, "d", None);
-        let apps: Vec<String> = s.apps_in_use().unwrap().into_iter().map(|(_, n)| n).collect();
+        let apps: Vec<String> = s
+            .apps_in_use()
+            .unwrap()
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
         assert_eq!(apps, vec!["Ghostty".to_string(), "Vivaldi".to_string()]);
     }
 

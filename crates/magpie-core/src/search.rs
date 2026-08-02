@@ -313,7 +313,10 @@ mod tests {
     #[test]
     fn pinned_only_filters_to_pinned_entries() {
         let s = open_in_memory().unwrap();
-        let keep = s.ingest(&text_ev("pin me", 1), &FakeImages).unwrap().entry_id;
+        let keep = s
+            .ingest(&text_ev("pin me", 1), &FakeImages)
+            .unwrap()
+            .entry_id;
         s.ingest(&text_ev("not pinned", 2), &FakeImages).unwrap();
         s.set_pinned(keep, true).unwrap();
         let mut q = default_query();
