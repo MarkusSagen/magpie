@@ -15,6 +15,7 @@
 
 pub mod detect;
 pub mod edit;
+pub mod mask_support;
 pub mod merge;
 pub mod metrics;
 pub mod model;
