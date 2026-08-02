@@ -1,8 +1,9 @@
-use crate::{EntryRow, LauncherWindow};
+use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
-use magpie_core::{open, Entry};
+use magpie_app::stats_view::{range_from_index, to_bars};
+use magpie_core::{open, Entry, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
@@ -69,6 +70,72 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         .unwrap_or_default();
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results))));
     ui.set_detail_text(SharedString::from(detail));
+}
+
+fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
+    let bars: Vec<Bar> = to_bars(items)
+        .into_iter()
+        .map(|b| Bar {
+            label: b.label.into(),
+            display: b.display.into(),
+            value_norm: b.value_norm,
+        })
+        .collect();
+    ModelRc::new(VecModel::from(bars))
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    let one_line = s.lines().next().unwrap_or("");
+    one_line.chars().take(n).collect()
+}
+
+fn empty_stats() -> Stats {
+    Stats {
+        totals: Totals { copies: 0, unique_entries: 0, distinct_apps: 0 },
+        most_copied: Vec::new(),
+        over_time: Vec::new(),
+        per_app: Vec::new(),
+        by_type: Vec::new(),
+    }
+}
+
+/// Query stats for the selected range and push all series into the window.
+fn refresh_stats(ui: &LauncherWindow, state: &AppState, range_index: i32) {
+    let range: StatsRange = range_from_index(range_index, now_ms());
+    let stats: Stats = match state.store.lock() {
+        Ok(store) => store.stats(&range, 10).unwrap_or_else(|_| empty_stats()),
+        Err(_) => empty_stats(),
+    };
+
+    let ot: Vec<(String, String, i64)> = stats
+        .over_time
+        .iter()
+        .map(|b| (String::new(), String::new(), b.count))
+        .collect();
+    let mc: Vec<(String, String, i64)> = stats
+        .most_copied
+        .iter()
+        .map(|m| (truncate(&m.preview, 40), m.count.to_string(), m.count))
+        .collect();
+    let pa: Vec<(String, String, i64)> = stats
+        .per_app
+        .iter()
+        .map(|a| (a.name.clone(), a.count.to_string(), a.count))
+        .collect();
+    let bt: Vec<(String, String, i64)> = stats
+        .by_type
+        .iter()
+        .map(|k| (k.kind.as_str().to_string(), k.count.to_string(), k.count))
+        .collect();
+
+    ui.set_over_time_bars(to_slint_bars(&ot));
+    ui.set_most_copied_bars(to_slint_bars(&mc));
+    ui.set_per_app_bars(to_slint_bars(&pa));
+    ui.set_by_type_bars(to_slint_bars(&bt));
+    ui.set_totals_line(SharedString::from(format!(
+        "{} copies · {} entries · {} apps",
+        stats.totals.copies, stats.totals.unique_entries, stats.totals.distinct_apps
+    )));
 }
 
 /// Poll the clipboard on a background thread; refresh the window on each capture.
@@ -212,6 +279,28 @@ pub fn start() {
                     let _ =
                         perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::PlainText, false);
                 }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_view(move || {
+            if let Some(ui) = w.upgrade() {
+                let to_stats = ui.get_view() != "stats";
+                ui.set_view(SharedString::from(if to_stats { "stats" } else { "list" }));
+                if to_stats {
+                    refresh_stats(&ui, &s, ui.get_range_index());
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_stats_range_changed(move |idx| {
+            if let Some(ui) = w.upgrade() {
+                refresh_stats(&ui, &s, idx);
             }
         });
     }
