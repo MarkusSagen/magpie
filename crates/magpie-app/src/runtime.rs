@@ -178,6 +178,7 @@ fn to_rows(
                     grouping::section_for(e.last_copied_at_ms, now).label(),
                 ),
                 copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
+                pinned: e.pinned,
             }
         })
         .collect()
@@ -728,20 +729,7 @@ pub fn start() {
             }
         });
     }
-    // ---- Pinned filter + speed-dial slots ----
-    {
-        let s = state.clone();
-        let w = ui.as_weak();
-        ui.on_set_pinned_only(move |on| {
-            if let Ok(mut u) = s.ui.lock() {
-                u.pinned_only = on;
-            }
-            if let Some(ui) = w.upgrade() {
-                ui.set_selected(0);
-                refresh(&ui, &s);
-            }
-        });
-    }
+    // ---- Speed-dial slots ----
     {
         let s = state.clone();
         let w = ui.as_weak();
@@ -1181,6 +1169,11 @@ pub fn start() {
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
     let _tray = build_tray(weak.clone(), state.clone());
+
+    // The red close button hides the window (Magpie keeps running as a tray daemon);
+    // "Quit Magpie" in the tray is the real exit.
+    ui.window()
+        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
     // We deliberately do NOT call `ui.run()` (which would show the window on
