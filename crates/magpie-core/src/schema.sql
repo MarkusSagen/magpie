@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS copy_events (
 CREATE INDEX IF NOT EXISTS idx_copy_events_entry ON copy_events(entry_id);
 CREATE INDEX IF NOT EXISTS idx_copy_events_time  ON copy_events(copied_at_ms);
 
+CREATE TABLE IF NOT EXISTS slots (
+  slot     INTEGER PRIMARY KEY CHECK(slot BETWEEN 1 AND 9),
+  entry_id INTEGER NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
   full_text,
   content='entries',

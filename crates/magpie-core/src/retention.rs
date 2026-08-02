@@ -22,7 +22,10 @@ pub struct Removed {
 impl Store {
     pub fn enforce_retention(&self, policy: &RetentionPolicy, now_ms: i64) -> Result<Removed> {
         if policy.is_noop() {
-            return Ok(Removed { entries_deleted: 0, image_paths: Vec::new() });
+            return Ok(Removed {
+                entries_deleted: 0,
+                image_paths: Vec::new(),
+            });
         }
         let mut victims: BTreeSet<i64> = BTreeSet::new();
 
@@ -74,7 +77,10 @@ impl Store {
     /// (FTS trigger cleans the index), all in one transaction.
     fn delete_entries(&self, victims: BTreeSet<i64>) -> Result<Removed> {
         if victims.is_empty() {
-            return Ok(Removed { entries_deleted: 0, image_paths: Vec::new() });
+            return Ok(Removed {
+                entries_deleted: 0,
+                image_paths: Vec::new(),
+            });
         }
         let ids: Vec<i64> = victims.into_iter().collect();
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -99,7 +105,10 @@ impl Store {
         )?;
         tx.commit()?;
 
-        Ok(Removed { entries_deleted: deleted, image_paths })
+        Ok(Removed {
+            entries_deleted: deleted,
+            image_paths,
+        })
     }
 }
 
@@ -116,10 +125,18 @@ mod tests {
         }
     }
     fn text(s: &str, ms: i64) -> CaptureEvent {
-        CaptureEvent { content: Content::Text(s.into()), source_app: None, copied_at_ms: ms }
+        CaptureEvent {
+            content: Content::Text(s.into()),
+            source_app: None,
+            copied_at_ms: ms,
+        }
     }
     fn image(bytes: Vec<u8>, ms: i64) -> CaptureEvent {
-        CaptureEvent { content: Content::Image { bytes }, source_app: None, copied_at_ms: ms }
+        CaptureEvent {
+            content: Content::Image { bytes },
+            source_app: None,
+            copied_at_ms: ms,
+        }
     }
     fn seed(store: &Store, evs: &[CaptureEvent]) {
         for e in evs {
@@ -127,7 +144,12 @@ mod tests {
         }
     }
     fn texts(store: &Store) -> Vec<String> {
-        store.recent(100).unwrap().into_iter().map(|e| e.full_text).collect()
+        store
+            .recent(100)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.full_text)
+            .collect()
     }
 
     #[test]
@@ -136,7 +158,11 @@ mod tests {
         seed(&s, &[text("a", 1), text("b", 2)]);
         let r = s
             .enforce_retention(
-                &RetentionPolicy { max_entries: None, max_age_ms: None, max_image_bytes: None },
+                &RetentionPolicy {
+                    max_entries: None,
+                    max_age_ms: None,
+                    max_image_bytes: None,
+                },
                 1000,
             )
             .unwrap();
@@ -152,7 +178,11 @@ mod tests {
         s.ingest(&text("recent", 9_500), &Noop).unwrap(); // after cutoff (9_000)
         s.set_pinned(old_pinned.entry_id, true).unwrap();
 
-        let policy = RetentionPolicy { max_entries: None, max_age_ms: Some(1_000), max_image_bytes: None };
+        let policy = RetentionPolicy {
+            max_entries: None,
+            max_age_ms: Some(1_000),
+            max_image_bytes: None,
+        };
         let r = s.enforce_retention(&policy, 10_000).unwrap();
         assert_eq!(r.entries_deleted, 1); // only unpinned "old"
         let remaining = texts(&s);
@@ -171,7 +201,11 @@ mod tests {
         s.ingest(&text("d", 4), &Noop).unwrap(); // newest
         s.set_pinned(a.entry_id, true).unwrap();
 
-        let policy = RetentionPolicy { max_entries: Some(2), max_age_ms: None, max_image_bytes: None };
+        let policy = RetentionPolicy {
+            max_entries: Some(2),
+            max_age_ms: None,
+            max_image_bytes: None,
+        };
         let r = s.enforce_retention(&policy, 100).unwrap();
         assert_eq!(r.entries_deleted, 1);
         let remaining = texts(&s);
@@ -191,7 +225,11 @@ mod tests {
         s.ingest(&image(vec![3u8; 100], 4), &Noop).unwrap(); // newest
         s.set_pinned(pinned_old.entry_id, true).unwrap();
 
-        let policy = RetentionPolicy { max_entries: None, max_age_ms: None, max_image_bytes: Some(150) };
+        let policy = RetentionPolicy {
+            max_entries: None,
+            max_age_ms: None,
+            max_image_bytes: Some(150),
+        };
         let r = s.enforce_retention(&policy, 1000).unwrap();
         // non-pinned images newest-first: ms4(100 ok), ms2(200>150 evict), ms1(evict)
         assert_eq!(r.entries_deleted, 2);

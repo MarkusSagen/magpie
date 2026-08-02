@@ -18,6 +18,7 @@ pub mod metrics;
 pub mod model;
 pub mod retention;
 pub mod search;
+pub mod slots;
 pub mod stats;
 pub mod store;
 
