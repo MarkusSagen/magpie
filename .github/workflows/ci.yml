@@ -1,12 +1,37 @@
 name: ci
 on: [push, pull_request]
+
 jobs:
   check:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # System deps for arboard + Slint (winit/femtovg) and a headless X server
+      # so the Linux clipboard test can actually exercise instead of skipping.
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libfontconfig1-dev \
+            xvfb xclip
+
+      - name: Test (Linux, headless X)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo test --workspace
+
+      - name: Test (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rustfmt
+        run: cargo fmt --all --check
