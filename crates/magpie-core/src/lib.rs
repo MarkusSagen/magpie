@@ -23,4 +23,5 @@ pub mod store;
 pub use detect::Kind;
 pub use model::{AppInfo, CaptureEvent, Content, Entry};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
+pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};
 pub use store::{open, open_in_memory, ImageStore, Ingested, Store};

@@ -130,6 +130,52 @@ impl Store {
         }
         Ok(out)
     }
+
+    pub(crate) fn per_app(&self, lo: i64, hi: i64, top_n: i64) -> Result<Vec<AppCount>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT a.display_name, COUNT(*) AS c
+             FROM copy_events ce JOIN apps a ON a.id = ce.source_app_id
+             WHERE ce.copied_at_ms BETWEEN ?1 AND ?2
+             GROUP BY ce.source_app_id
+             ORDER BY c DESC, a.display_name
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map([lo, hi, top_n], |r| {
+            Ok(AppCount { name: r.get(0)?, count: r.get(1)? })
+        })?;
+        rows.collect()
+    }
+
+    pub(crate) fn by_type(&self, lo: i64, hi: i64) -> Result<Vec<KindCount>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT e.kind, COUNT(*) AS c
+             FROM copy_events ce JOIN entries e ON e.id = ce.entry_id
+             WHERE ce.copied_at_ms BETWEEN ?1 AND ?2
+             GROUP BY e.kind
+             ORDER BY c DESC",
+        )?;
+        let rows = stmt.query_map([lo, hi], |r| {
+            let kind_str: String = r.get(0)?;
+            Ok(KindCount {
+                kind: Kind::from_str(&kind_str).unwrap_or(Kind::Text),
+                count: r.get(1)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Compose all series for `range` (top-N applies to most-copied and per-app).
+    pub fn stats(&self, range: &StatsRange, top_n: i64) -> Result<Stats> {
+        let lo = range.since_ms.unwrap_or(i64::MIN);
+        let hi = range.now_ms;
+        Ok(Stats {
+            totals: self.totals(lo, hi)?,
+            most_copied: self.most_copied(lo, hi, top_n)?,
+            over_time: self.over_time(lo, hi, range)?,
+            per_app: self.per_app(lo, hi, top_n)?,
+            by_type: self.by_type(lo, hi)?,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -241,5 +287,61 @@ mod tests {
         );
         let total: i64 = buckets.iter().map(|b| b.count).sum();
         assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn per_app_counts_exclude_null_apps() {
+        let s = open_in_memory().unwrap();
+        seed(
+            &s,
+            &[
+                ev("a", 1, Some("Ghostty")),
+                ev("b", 2, Some("Ghostty")),
+                ev("c", 3, Some("Safari")),
+                ev("d", 4, None),
+            ],
+        );
+        let rows = s.per_app(i64::MIN, 1000, 10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "Ghostty");
+        assert_eq!(rows[0].count, 2);
+        assert_eq!(rows[1].name, "Safari");
+    }
+
+    #[test]
+    fn by_type_counts_per_kind() {
+        let s = open_in_memory().unwrap();
+        seed(
+            &s,
+            &[
+                ev("plain words", 1, None),
+                ev("https://a.io", 2, None),
+                ev("https://a.io", 3, None),
+            ],
+        );
+        let rows = s.by_type(i64::MIN, 1000).unwrap();
+        assert_eq!(rows[0].kind.as_str(), "link");
+        assert_eq!(rows[0].count, 2);
+        assert_eq!(rows[1].kind.as_str(), "text");
+    }
+
+    #[test]
+    fn stats_composes_all_series() {
+        let s = open_in_memory().unwrap();
+        seed(
+            &s,
+            &[
+                ev("a", 1, Some("Ghostty")),
+                ev("a", 2, Some("Ghostty")),
+                ev("b", 3, None),
+            ],
+        );
+        let range = StatsRange { since_ms: None, now_ms: 1000 };
+        let st = s.stats(&range, 10).unwrap();
+        assert_eq!(st.totals.copies, 3);
+        assert_eq!(st.most_copied[0].count, 2);
+        assert_eq!(st.per_app[0].name, "Ghostty");
+        assert!(!st.by_type.is_empty());
+        assert!(!st.over_time.is_empty());
     }
 }
