@@ -22,6 +22,7 @@ pub mod search;
 pub mod slots;
 pub mod stats;
 pub mod store;
+pub mod tags;
 
 pub use detect::Kind;
 pub use model::{AppInfo, CaptureEvent, Content, Entry};

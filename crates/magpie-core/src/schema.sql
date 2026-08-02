@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS slots (
   entry_id INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS entry_tags (
+  entry_id INTEGER NOT NULL,
+  tag      TEXT NOT NULL,
+  PRIMARY KEY (entry_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
   full_text,
   content='entries',
