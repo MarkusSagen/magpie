@@ -1,2 +1,5 @@
 [toolchain]
-channel = "stable"
+# Pinned to an exact installed version so cargo never triggers a rustup channel
+# sync (which, under parallel builds + mise, was racing and failing to download).
+# Bump this to a newer installed toolchain when you upgrade Rust.
+channel = "1.97.1"

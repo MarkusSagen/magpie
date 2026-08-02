@@ -1,3 +1,4 @@
 [tools]
-rust = "stable"
+# Rust is provided by rustup (pinned via rust-toolchain.toml) — mise does not
+# manage it, to avoid mise + rustup racing to (re)install the toolchain.
 just = "latest"

@@ -381,7 +381,10 @@ pub fn start() {
     // Keep the tray icon alive for the whole run.
     let _tray = build_tray();
 
-    ui.run().expect("run event loop");
+    // Start hidden (background tray daemon); the launcher hotkey shows the window.
+    // We deliberately do NOT call `ui.run()` (which would show the window on
+    // launch) — `run_event_loop` keeps us alive with the tray icon only.
+    slint::run_event_loop().expect("run event loop");
 }
 
 /// Build a minimal tray icon with a Quit item, and drain its menu events.
