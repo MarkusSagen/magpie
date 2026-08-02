@@ -49,6 +49,24 @@ impl Store {
             }
         }
 
+        if let Some(budget) = policy.max_image_bytes {
+            let mut stmt = self.conn().prepare(
+                "SELECT id, byte_size FROM entries
+                 WHERE pinned = 0 AND kind = 'image'
+                 ORDER BY last_copied_at_ms DESC",
+            )?;
+            let rows: Vec<(i64, i64)> = stmt
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+                .collect::<Result<Vec<(i64, i64)>>>()?;
+            let mut running: i64 = 0;
+            for (id, size) in rows {
+                running += size;
+                if running > budget {
+                    victims.insert(id);
+                }
+            }
+        }
+
         self.delete_entries(victims)
     }
 
@@ -99,6 +117,9 @@ mod tests {
     }
     fn text(s: &str, ms: i64) -> CaptureEvent {
         CaptureEvent { content: Content::Text(s.into()), source_app: None, copied_at_ms: ms }
+    }
+    fn image(bytes: Vec<u8>, ms: i64) -> CaptureEvent {
+        CaptureEvent { content: Content::Image { bytes }, source_app: None, copied_at_ms: ms }
     }
     fn seed(store: &Store, evs: &[CaptureEvent]) {
         for e in evs {
@@ -159,5 +180,22 @@ mod tests {
         assert!(remaining.contains(&"c".to_string()));
         assert!(remaining.contains(&"d".to_string()));
         assert!(!remaining.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn image_bytes_evicts_oldest_images_over_budget() {
+        let s = open_in_memory().unwrap();
+        s.ingest(&image(vec![0u8; 100], 1), &Noop).unwrap(); // oldest
+        s.ingest(&image(vec![1u8; 100], 2), &Noop).unwrap();
+        let pinned_old = s.ingest(&image(vec![2u8; 100], 3), &Noop).unwrap();
+        s.ingest(&image(vec![3u8; 100], 4), &Noop).unwrap(); // newest
+        s.set_pinned(pinned_old.entry_id, true).unwrap();
+
+        let policy = RetentionPolicy { max_entries: None, max_age_ms: None, max_image_bytes: Some(150) };
+        let r = s.enforce_retention(&policy, 1000).unwrap();
+        // non-pinned images newest-first: ms4(100 ok), ms2(200>150 evict), ms1(evict)
+        assert_eq!(r.entries_deleted, 2);
+        assert_eq!(r.image_paths.len(), 2);
+        assert_eq!(s.recent(100).unwrap().len(), 2); // ms4 (fits) + pinned ms3
     }
 }
