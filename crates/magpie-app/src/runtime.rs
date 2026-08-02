@@ -1,4 +1,4 @@
-use crate::{Bar, EntryRow, LauncherWindow};
+use crate::{ActionItem, Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::favicon;
@@ -117,11 +117,12 @@ fn to_rows(
                 app_icons.get(&e.id).cloned()
             };
             let (icon_img, has_icon) = match icon_path.as_deref().map(std::path::Path::new) {
-                Some(p) => match slint::Image::load_from_path(p) {
+                // Guard on existence so a stale DB icon_path doesn't spam load errors.
+                Some(p) if p.exists() => match slint::Image::load_from_path(p) {
                     Ok(img) => (img, true),
                     Err(_) => (slint::Image::default(), false),
                 },
-                None => (slint::Image::default(), false),
+                _ => (slint::Image::default(), false),
             };
             let masked = should_mask(
                 rules,
@@ -271,6 +272,40 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
 fn show_window(ui: &LauncherWindow, state: &AppState) {
     refresh(ui, state);
     let _ = ui.show();
+}
+
+/// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
+/// `run-action`.
+const ACTIONS: &[(&str, &str, &str, &str)] = &[
+    ("paste", "📋", "Paste", "⏎"),
+    ("copy", "📄", "Copy", "⌘C"),
+    ("keep", "📎", "Paste & keep open", "⌥⏎"),
+    ("edit", "✏️", "Edit", "⌘E"),
+    ("snippet", "🧩", "New snippet", "⌘N"),
+    ("pin", "📌", "Pin / Unpin", "⌘P"),
+    ("merge", "➕", "Add to merge", "⌘M"),
+    ("delete", "🗑", "Delete", "⌃X"),
+];
+
+/// Push the ⌘K action list filtered by `query` (case-insensitive label match)
+/// and keep `action-selected` in range.
+fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
+    let q = query.to_lowercase();
+    let items: Vec<ActionItem> = ACTIONS
+        .iter()
+        .filter(|(_, _, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
+        .map(|(id, icon, label, key)| ActionItem {
+            icon: SharedString::from(*icon),
+            label: SharedString::from(*label),
+            key: SharedString::from(*key),
+            id: SharedString::from(*id),
+        })
+        .collect();
+    let len = items.len() as i32;
+    ui.set_actions(ModelRc::new(VecModel::from(items)));
+    if ui.get_action_selected() >= len {
+        ui.set_action_selected((len - 1).max(0));
+    }
 }
 
 /// Set the search query text (command-bar owns input in Rust), mirror it into the
@@ -625,6 +660,64 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 refresh(&ui, &s);
             }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_open_actions(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_actions_query(SharedString::from(""));
+                ui.set_action_selected(0);
+                set_actions_filtered(&ui, "");
+                ui.set_mode(SharedString::from("actions"));
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_actions_key_char(move |c| {
+            if let Some(ui) = w.upgrade() {
+                let q = format!("{}{}", ui.get_actions_query(), c);
+                ui.set_actions_query(SharedString::from(q.clone()));
+                ui.set_action_selected(0);
+                set_actions_filtered(&ui, &q);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_actions_backspace(move || {
+            if let Some(ui) = w.upgrade() {
+                let mut q = ui.get_actions_query().to_string();
+                q.pop();
+                ui.set_actions_query(SharedString::from(q.clone()));
+                ui.set_action_selected(0);
+                set_actions_filtered(&ui, &q);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_delete_entry(move |idx| {
+            let results = current_results(&s, now_ms());
+            if let Some(e) = results.get(idx as usize) {
+                if let Ok(store) = s.store.lock() {
+                    if let Ok(removed) = store.delete_entry(e.id) {
+                        s.images.remove_paths(&removed.image_paths);
+                    }
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let auto = cfg.paste_on_select;
+        ui.on_activate_keep(move |idx| {
+            activate_index(&s, idx as usize, auto);
         });
     }
     {

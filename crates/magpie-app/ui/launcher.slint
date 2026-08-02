@@ -25,6 +25,13 @@ struct Bar {
     value_norm: float,
 }
 
+struct ActionItem {
+    icon: string,
+    label: string,
+    key: string,
+    id: string,
+}
+
 // A labeled horizontal bar: [ label ][=== track ===][ value ]
 component HBar inherits Rectangle {
     in property <string> label;
@@ -105,6 +112,26 @@ export component LauncherWindow inherits Window {
     callback toggle-pin(int);
     callback paste-into-search();
     callback toggle-screenshare();
+    callback delete-entry(int);
+    callback activate-keep(int);
+    // ⌘K actions menu (Rust owns the filtered model; Slint dispatches by id).
+    in property <[ActionItem]> actions;
+    in-out property <string> actions-query: "";
+    callback open-actions();
+    callback actions-key-char(string);
+    callback actions-backspace();
+    callback run-action(string);
+    run-action(id) => {
+        if id == "paste" { root.activate(root.selected); }
+        else if id == "copy" { root.copy-only(root.selected); }
+        else if id == "keep" { root.activate-keep(root.selected); }
+        else if id == "edit" { root.start-edit(root.selected); }
+        else if id == "snippet" { root.new-snippet(); }
+        else if id == "pin" { root.toggle-pin(root.selected); }
+        else if id == "merge" { root.toggle-merge(root.selected); }
+        else if id == "delete" { root.delete-entry(root.selected); }
+        root.mode = "list";
+    }
 
     in-out property <string> edit-mode: "none";
     in-out property <string> edit-text;
@@ -127,21 +154,6 @@ export component LauncherWindow inherits Window {
     callback merge-paste();
     callback clear-merge();
 
-    // Run the currently-highlighted ⌘K action, then close the palette.
-    callback run-selected-action();
-    run-selected-action() => {
-        if root.action-selected == 0 {
-            root.start-edit(root.selected);
-        } else if root.action-selected == 1 {
-            root.new-snippet();
-        } else if root.action-selected == 2 {
-            root.toggle-pin(root.selected);
-        } else if root.action-selected == 3 {
-            root.toggle-merge(root.selected);
-        }
-        root.mode = "list";
-    }
-
     // Re-focus the command bar whenever we return to list mode.
     changed mode => {
         if root.mode == "list" {
@@ -156,18 +168,14 @@ export component LauncherWindow inherits Window {
                 return reject;
             }
 
-            // ---- ⌘K actions palette ----
+            // ---- ⌘K actions palette (searchable) ----
             if root.mode == "actions" {
                 if event.text == Key.UpArrow {
-                    if root.action-selected > 0 {
-                        root.action-selected -= 1;
-                    }
+                    if root.action-selected > 0 { root.action-selected -= 1; }
                     return accept;
                 }
                 if event.text == Key.DownArrow {
-                    if root.action-selected < 3 {
-                        root.action-selected += 1;
-                    }
+                    if root.action-selected < root.actions.length - 1 { root.action-selected += 1; }
                     return accept;
                 }
                 if event.text == Key.Escape {
@@ -175,18 +183,26 @@ export component LauncherWindow inherits Window {
                     return accept;
                 }
                 if event.text == Key.Return {
-                    root.run-selected-action();
+                    if root.actions.length > 0 && root.action-selected < root.actions.length {
+                        root.run-action(root.actions[root.action-selected].id);
+                    }
                     return accept;
                 }
-                if event.text == "1" { root.assign-slot(root.selected, 1); root.mode = "list"; return accept; }
-                if event.text == "2" { root.assign-slot(root.selected, 2); root.mode = "list"; return accept; }
-                if event.text == "3" { root.assign-slot(root.selected, 3); root.mode = "list"; return accept; }
-                if event.text == "4" { root.assign-slot(root.selected, 4); root.mode = "list"; return accept; }
-                if event.text == "5" { root.assign-slot(root.selected, 5); root.mode = "list"; return accept; }
-                if event.text == "6" { root.assign-slot(root.selected, 6); root.mode = "list"; return accept; }
-                if event.text == "7" { root.assign-slot(root.selected, 7); root.mode = "list"; return accept; }
-                if event.text == "8" { root.assign-slot(root.selected, 8); root.mode = "list"; return accept; }
-                if event.text == "9" { root.assign-slot(root.selected, 9); root.mode = "list"; return accept; }
+                if event.text == Key.Backspace {
+                    root.actions-backspace();
+                    return accept;
+                }
+                // any other named key -> ignore; printable -> filter query
+                if event.text == Key.Tab || event.text == Key.Delete || event.text == Key.Home
+                    || event.text == Key.End || event.text == Key.PageUp || event.text == Key.PageDown
+                    || event.text == Key.LeftArrow || event.text == Key.RightArrow
+                    || event.text == Key.Shift || event.text == Key.Control
+                    || event.text == Key.Alt || event.text == Key.Meta {
+                    return accept;
+                }
+                if event.text.character-count == 1 {
+                    root.actions-key-char(event.text);
+                }
                 return accept;
             }
 
@@ -223,7 +239,7 @@ export component LauncherWindow inherits Window {
             // ---- ⌘ shortcuts ----
             if event.modifiers.meta {
                 if event.text == "c" { root.copy-only(root.selected); return accept; }
-                if event.text == "k" { root.action-selected = 0; root.mode = "actions"; return accept; }
+                if event.text == "k" { root.open-actions(); return accept; }
                 if event.text == "e" { root.start-edit(root.selected); return accept; }
                 if event.text == "n" { root.new-snippet(); return accept; }
                 if event.text == "m" { root.toggle-merge(root.selected); return accept; }
@@ -689,48 +705,56 @@ export component LauncherWindow inherits Window {
             }
         }
 
-        // ---- ⌘K actions palette overlay ----
+        // ---- ⌘K actions palette overlay (searchable) ----
         if root.mode == "actions": Rectangle {
             background: #000000aa;
             TouchArea { clicked => { root.mode = "list"; } }
             Rectangle {
-                width: 420px;
-                height: 320px;
+                width: 440px;
+                height: 360px;
                 background: #1e1e21;
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: #3a3a40;
                 VerticalLayout {
-                    padding: 12px;
+                    padding: 10px;
                     spacing: 4px;
                     Text { text: "Actions"; color: #9a9aa0; font-size: 12px; }
-                    for a[i] in [
-                        { label: "Edit", key: "⌘E" },
-                        { label: "New snippet", key: "⌘N" },
-                        { label: "Pin / Unpin", key: "⌘P" },
-                        { label: "Add to merge", key: "⌘M" },
-                    ]: Rectangle {
-                        height: 32px;
-                        background: i == root.action-selected ? #2f2f37 : transparent;
-                        border-radius: 6px;
-                        TouchArea { clicked => { root.action-selected = i; root.run-selected-action(); } }
+                    ListView {
+                        vertical-stretch: 1;
+                        for a[i] in root.actions: Rectangle {
+                            height: 34px;
+                            background: i == root.action-selected ? #2f2f37 : transparent;
+                            border-radius: 6px;
+                            TouchArea { clicked => { root.run-action(a.id); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 10px;
+                                Text { text: a.icon; font-size: 15px; vertical-alignment: center; width: 22px; }
+                                Text { text: a.label; color: white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: a.key; color: #6a6a70; font-size: 12px; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    // Search field (keys fed by the FocusScope while actions are open).
+                    Rectangle {
+                        height: 34px;
+                        background: #161618;
+                        border-radius: 8px;
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
-                            Text { text: a.label; color: white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
-                            Text { text: a.key; color: #6a6a70; font-size: 12px; vertical-alignment: center; }
-                        }
-                    }
-                    Text { text: "Assign to slot (press 1–9)"; color: #9a9aa0; font-size: 11px; }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        for n in [1, 2, 3, 4, 5, 6, 7, 8, 9]: Rectangle {
-                            width: 40px;
-                            height: 28px;
-                            border-radius: 6px;
-                            background: (entries.length > 0 && root.selected < entries.length && entries[root.selected].slot == n) ? #6a8cff : #2a2a30;
-                            TouchArea { clicked => { root.assign-slot(root.selected, n); root.mode = "list"; } }
-                            Text { text: n; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            spacing: 6px;
+                            Text { text: "🔍"; font-size: 13px; vertical-alignment: center; }
+                            Text {
+                                text: root.actions-query == "" ? "Search actions…" : root.actions-query;
+                                color: root.actions-query == "" ? #6a6a70 : white;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
                         }
                     }
                 }
