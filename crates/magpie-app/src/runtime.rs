@@ -32,7 +32,7 @@ pub fn data_dir() -> std::path::PathBuf {
         .join("magpie")
 }
 
-pub fn build_state() -> Arc<AppState> {
+pub fn build_state(cfg: &Config) -> Arc<AppState> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir).ok();
     let store = open(&dir.join("magpie.sqlite3")).expect("open db");
@@ -43,6 +43,10 @@ pub fn build_state() -> Arc<AppState> {
         },
         ui: std::sync::Mutex::new(magpie_app::viewmodel::UiState::new()),
         merge_set: std::sync::Mutex::new(Vec::new()),
+        screenshare: std::sync::Mutex::new(false),
+        mask_apps: cfg.mask_apps.clone(),
+        mask_patterns: cfg.mask_patterns.clone(),
+        mask_visible_chars: cfg.mask_visible_chars.max(0),
     })
 }
 
@@ -424,7 +428,7 @@ pub fn start() {
     let mut denylist = default_app_denylist();
     denylist.extend(cfg.app_denylist.clone());
 
-    let state = build_state();
+    let state = build_state(&cfg);
     let ui = LauncherWindow::new().expect("create window");
     let weak = ui.as_weak();
 

@@ -9,6 +9,12 @@ pub struct AppState {
     pub ui: Mutex<UiState>,
     /// Entry indices (into the current results) queued for merge-paste.
     pub merge_set: Mutex<Vec<i32>>,
+    /// Session-only screensharing mode (masks everything). Not persisted.
+    pub screenshare: Mutex<bool>,
+    /// Masking config snapshot (from `Config`, immutable for the session).
+    pub mask_apps: Vec<String>,
+    pub mask_patterns: Vec<String>,
+    pub mask_visible_chars: i64,
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
@@ -40,6 +46,10 @@ mod tests {
             },
             ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
             merge_set: std::sync::Mutex::new(Vec::new()),
+            screenshare: std::sync::Mutex::new(false),
+            mask_apps: Vec::new(),
+            mask_patterns: Vec::new(),
+            mask_visible_chars: 3,
         }
     }
 
