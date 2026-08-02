@@ -1,6 +1,7 @@
 use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
+use magpie_app::format_time::relative_time;
 use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
@@ -81,11 +82,18 @@ fn to_rows(
     slots: &HashMap<i64, i64>,
     tags: &HashMap<i64, Vec<String>>,
     merge_set: &[i32],
+    app_names: &HashMap<i64, String>,
+    now: i64,
 ) -> Vec<EntryRow> {
     entries
         .iter()
         .enumerate()
         .map(|(i, e)| {
+            let source = app_names
+                .get(&e.id)
+                .cloned()
+                .unwrap_or_else(|| "—".to_string());
+            let when = relative_time(e.last_copied_at_ms, now);
             let tagline = tags
                 .get(&e.id)
                 .map(|ts| {
@@ -96,15 +104,11 @@ fn to_rows(
                 })
                 .unwrap_or_default();
             let subtitle = if tagline.is_empty() {
-                format!("{} · copied {}×", e.kind.as_str(), e.copy_count)
+                format!("{source} · {when}")
             } else {
-                format!(
-                    "{} · copied {}× · {}",
-                    e.kind.as_str(),
-                    e.copy_count,
-                    tagline
-                )
+                format!("{source} · {when} · {tagline}")
             };
+            let size = format!("{} chars · {} lines", e.char_count, e.line_count);
             EntryRow {
                 title: SharedString::from(preview_title(e)),
                 subtitle: SharedString::from(subtitle),
@@ -113,6 +117,11 @@ fn to_rows(
                 merged: merge_set.contains(&(i as i32)),
                 full: SharedString::from(e.full_text.clone()),
                 badge: SharedString::from(line_badge(&e.full_text)),
+                glyph: SharedString::from(type_glyph(&e.kind)),
+                source: SharedString::from(source),
+                when: SharedString::from(when),
+                copied: e.copy_count as i32,
+                size: SharedString::from(size),
             }
         })
         .collect()
@@ -129,7 +138,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     }
     let results = current_results(state, now_ms());
 
-    let (slots, tag_map, all_tags) = match state.store.lock() {
+    let (slots, tag_map, all_tags, app_names) = match state.store.lock() {
         Ok(store) => {
             let slots: HashMap<i64, i64> = store
                 .slot_map()
@@ -142,9 +151,14 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
                 tag_map.entry(eid).or_default().push(tag);
             }
             let all_tags: Vec<String> = store.all_tags().unwrap_or_default();
-            (slots, tag_map, all_tags)
+            let app_names: HashMap<i64, String> = store
+                .app_name_pairs()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            (slots, tag_map, all_tags, app_names)
         }
-        Err(_) => (HashMap::new(), HashMap::new(), Vec::new()),
+        Err(_) => (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new()),
     };
 
     let sel = ui.get_selected() as usize;
@@ -174,7 +188,12 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     // The preview binds directly to the selected row's `full` text in the UI,
     // so there is no separate detail string to push here.
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(
-        &results, &slots, &tag_map, &merge_set,
+        &results,
+        &slots,
+        &tag_map,
+        &merge_set,
+        &app_names,
+        now_ms(),
     ))));
 }
 
