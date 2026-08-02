@@ -55,10 +55,11 @@ pub fn default_query() -> SearchQuery {
 }
 
 fn order_clause(sort: Sort) -> &'static str {
+    // Pinned entries lead every sort (sticky-on-top).
     match sort {
-        Sort::Recency => "e.last_copied_at_ms DESC",
-        Sort::MostCopied => "e.copy_count DESC, e.last_copied_at_ms DESC",
-        Sort::Alphabetical => "e.full_text COLLATE NOCASE ASC",
+        Sort::Recency => "e.pinned DESC, e.last_copied_at_ms DESC",
+        Sort::MostCopied => "e.pinned DESC, e.copy_count DESC, e.last_copied_at_ms DESC",
+        Sort::Alphabetical => "e.pinned DESC, e.full_text COLLATE NOCASE ASC",
     }
 }
 
@@ -308,6 +309,21 @@ mod tests {
             }),
             copied_at_ms: ms,
         }
+    }
+
+    #[test]
+    fn pinned_entries_sort_to_the_top() {
+        let s = open_in_memory().unwrap();
+        let old = s
+            .ingest(&text_ev("older", 100), &FakeImages)
+            .unwrap()
+            .entry_id;
+        s.ingest(&text_ev("newer", 200), &FakeImages).unwrap();
+        // Pin the OLDER one — it must still lead despite being less recent.
+        s.set_pinned(old, true).unwrap();
+        let rows = s.search(&default_query()).unwrap();
+        assert_eq!(rows[0].id, old, "pinned entry leads");
+        assert_eq!(rows[1].full_text, "newer");
     }
 
     #[test]
