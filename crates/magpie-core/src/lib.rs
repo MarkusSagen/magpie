@@ -13,6 +13,7 @@
 //! assert_eq!(s.search(&default_query()).unwrap().len(), 1);
 //! ```
 
+pub mod delete;
 pub mod detect;
 pub mod edit;
 pub mod mask_support;

@@ -14,6 +14,19 @@ impl Store {
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
         rows.collect()
     }
+
+    /// `(entry_id, app icon_path)` for entries whose source app has a non-null icon.
+    pub fn app_icon_pairs(&self) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT e.id, a.icon_path
+             FROM entries e JOIN apps a ON a.id = e.source_app_id
+             WHERE a.icon_path IS NOT NULL
+             ORDER BY e.id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -52,5 +65,30 @@ mod tests {
         let _b = ingest(&s, "no app", None);
         let pairs = s.app_name_pairs().unwrap();
         assert_eq!(pairs, vec![(a, "Terminal".to_string())]);
+    }
+
+    #[test]
+    fn icon_pairs_return_non_null_icon_paths() {
+        let s = open_in_memory().unwrap();
+        let a = s
+            .ingest(
+                &CaptureEvent {
+                    content: Content::Text("x".into()),
+                    source_app: Some(AppInfo {
+                        identifier: "Foo".into(),
+                        display_name: "Foo".into(),
+                        icon_path: Some("/i/foo.png".into()),
+                    }),
+                    copied_at_ms: 1,
+                },
+                &Noop,
+            )
+            .unwrap()
+            .entry_id;
+        let _b = ingest(&s, "no icon", Some("Bar"));
+        assert_eq!(
+            s.app_icon_pairs().unwrap(),
+            vec![(a, "/i/foo.png".to_string())]
+        );
     }
 }

@@ -75,7 +75,7 @@ impl Store {
 
     /// Delete a victim set: collect image paths, remove copy_events then entries
     /// (FTS trigger cleans the index), all in one transaction.
-    fn delete_entries(&self, victims: BTreeSet<i64>) -> Result<Removed> {
+    pub(crate) fn delete_entries(&self, victims: BTreeSet<i64>) -> Result<Removed> {
         if victims.is_empty() {
             return Ok(Removed {
                 entries_deleted: 0,
