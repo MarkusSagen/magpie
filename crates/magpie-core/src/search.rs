@@ -58,12 +58,31 @@ fn order_clause(sort: Sort) -> &'static str {
     }
 }
 
-fn fts_match(text: &str) -> String {
-    // Quote each term and AND them: alpha gamma -> "alpha" AND "gamma"
-    text.split_whitespace()
-        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" AND ")
+/// Build an FTS5 MATCH expression from user text. Each whitespace-separated term
+/// is reduced to its alphanumeric/underscore run and quoted, then ANDed:
+/// `alpha, gamma!` -> `"alpha" AND "gamma"`. Returns `None` when the query has no
+/// searchable token (e.g. it was all punctuation) so callers can short-circuit
+/// instead of handing FTS a syntactically invalid expression.
+fn fts_match(text: &str) -> Option<String> {
+    // Split on any non-alphanumeric boundary, matching how the default unicode61
+    // tokenizer breaks the stored content, so `d.rs` -> `"d" AND "rs"`.
+    let terms: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\""))
+        .collect();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" AND "))
+    }
+}
+
+/// Escape LIKE metacharacters so an exact-substring query is treated literally.
+fn like_escape(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn entry_cols_prefixed() -> String {
@@ -176,16 +195,20 @@ impl Store {
         if !trimmed.is_empty() {
             match q.mode {
                 SearchMode::Exact => {
-                    clauses.push("e.full_text LIKE ?".to_string());
-                    params.push(Value::Text(format!("%{}%", trimmed)));
+                    clauses.push("e.full_text LIKE ? ESCAPE '\\'".to_string());
+                    params.push(Value::Text(format!("%{}%", like_escape(trimmed))));
                 }
-                _ => {
-                    clauses.push(
-                        "e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)"
-                            .to_string(),
-                    );
-                    params.push(Value::Text(fts_match(trimmed)));
-                }
+                _ => match fts_match(trimmed) {
+                    Some(m) => {
+                        clauses.push(
+                            "e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)"
+                                .to_string(),
+                        );
+                        params.push(Value::Text(m));
+                    }
+                    // No searchable token in the query -> match nothing.
+                    None => clauses.push("0".to_string()),
+                },
             }
         }
         if let Some(k) = q.kind {
