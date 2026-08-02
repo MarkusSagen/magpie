@@ -99,6 +99,10 @@ impl Store {
             &format!("DELETE FROM copy_events WHERE entry_id IN ({placeholders})"),
             rusqlite::params_from_iter(ids.iter()),
         )?;
+        tx.execute(
+            &format!("DELETE FROM entry_tags WHERE entry_id IN ({placeholders})"),
+            rusqlite::params_from_iter(ids.iter()),
+        )?;
         let deleted = tx.execute(
             &format!("DELETE FROM entries WHERE id IN ({placeholders})"),
             rusqlite::params_from_iter(ids.iter()),
@@ -214,6 +218,16 @@ mod tests {
         assert!(remaining.contains(&"c".to_string()));
         assert!(remaining.contains(&"d".to_string()));
         assert!(!remaining.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn retention_removes_tags_of_deleted_entries() {
+        let s = open_in_memory().unwrap();
+        let old = s.ingest(&text("old", 100), &Noop).unwrap().entry_id;
+        s.add_tag(old, "gone").unwrap();
+        let policy = RetentionPolicy { max_entries: None, max_age_ms: Some(1_000), max_image_bytes: None };
+        s.enforce_retention(&policy, 10_000).unwrap();
+        assert!(s.all_tags().unwrap().is_empty());
     }
 
     #[test]
