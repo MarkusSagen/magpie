@@ -5,6 +5,7 @@
 pub mod app_state;
 pub mod cli;
 pub mod config;
+pub mod format_time;
 pub mod grouping;
 pub mod image_cache;
 pub mod merge_view;
