@@ -17,6 +17,7 @@ pub mod detect;
 pub mod metrics;
 pub mod model;
 pub mod search;
+pub mod stats;
 pub mod store;
 
 pub use detect::Kind;
