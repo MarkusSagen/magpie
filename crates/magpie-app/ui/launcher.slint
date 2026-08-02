@@ -4,6 +4,7 @@ struct EntryRow {
     title: string,
     subtitle: string,
     kind: string,
+    slot: int,
 }
 
 struct Bar {
@@ -74,6 +75,7 @@ export component LauncherWindow inherits Window {
     callback copy-only(int);
     callback stats-range-changed(int);
     callback toggle-view();
+    callback assign-slot(int, int);
 
     VerticalLayout {
         padding: 8px;
@@ -145,7 +147,37 @@ export component LauncherWindow inherits Window {
                     border-radius: 8px;
                     VerticalLayout {
                         padding: 12px;
+                        spacing: 10px;
                         Text { text: root.detail-text; color: #d0d0d4; wrap: word-wrap; }
+
+                        if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            Text {
+                                text: "Slot:";
+                                color: #9a9aa0;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                            for n in [1, 2, 3, 4, 5, 6, 7, 8, 9]: Rectangle {
+                                width: 24px;
+                                height: 24px;
+                                background: entries[root.selected].slot == n ? #6a8cff : #2a2a30;
+                                border-radius: 4px;
+                                TouchArea {
+                                    clicked => {
+                                        root.assign-slot(root.selected, n);
+                                    }
+                                }
+                                Text {
+                                    text: n;
+                                    color: white;
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -1,7 +1,7 @@
 use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
-use magpie_app::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
+use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
 use magpie_core::{open, Entry, RetentionPolicy, Stats, StatsRange, Totals};
@@ -51,13 +51,14 @@ fn preview_title(e: &Entry) -> String {
     }
 }
 
-fn to_rows(entries: &[Entry]) -> Vec<EntryRow> {
+fn to_rows(entries: &[Entry], slots: &HashMap<i64, i64>) -> Vec<EntryRow> {
     entries
         .iter()
         .map(|e| EntryRow {
             title: SharedString::from(preview_title(e)),
             subtitle: SharedString::from(format!("{} · copied {}×", e.kind.as_str(), e.copy_count)),
             kind: SharedString::from(e.kind.as_str()),
+            slot: *slots.get(&e.id).unwrap_or(&0) as i32,
         })
         .collect()
 }
@@ -65,11 +66,20 @@ fn to_rows(entries: &[Entry]) -> Vec<EntryRow> {
 /// Recompute results from the current UI state and push them into the window.
 fn refresh(ui: &LauncherWindow, state: &AppState) {
     let results = current_results(state, now_ms());
+    let slots: HashMap<i64, i64> = match state.store.lock() {
+        Ok(store) => store
+            .slot_map()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(slot, eid)| (eid, slot))
+            .collect(),
+        Err(_) => HashMap::new(),
+    };
     let detail = results
         .first()
         .map(|e| e.full_text.clone())
         .unwrap_or_default();
-    ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results))));
+    ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results, &slots))));
     ui.set_detail_text(SharedString::from(detail));
 }
 
@@ -243,12 +253,17 @@ fn spawn_hotkeys(
                     }
                     Some(HotAction::QuickPaste(slot)) => {
                         let recent = current_results(&state, now_ms());
-                        if let Some(entry) = resolve_quick_paste(&recent, *slot) {
+                        let slotted = state
+                            .store
+                            .lock()
+                            .ok()
+                            .and_then(|st| st.slot_entry(*slot as i64).ok().flatten());
+                        if let Some(entry) = resolve_slot_or_recent(slotted, &recent, *slot) {
                             if let Ok(mut clip) = magpie_platform::platform_clipboard() {
                                 let _ = perform_paste(
                                     &mut clip,
                                     &EnigoPaster,
-                                    entry,
+                                    &entry,
                                     PasteKind::Formatted,
                                     auto,
                                 );
@@ -308,6 +323,31 @@ pub fn start() {
                     let _ =
                         perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::PlainText, false);
                 }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_assign_slot(move |index, n| {
+            let recent = current_results(&s, now_ms());
+            if let Some(entry) = recent.get(index as usize) {
+                if let Ok(store) = s.store.lock() {
+                    let already_here = store
+                        .slot_entry(n as i64)
+                        .ok()
+                        .flatten()
+                        .map(|e| e.id)
+                        == Some(entry.id);
+                    if already_here {
+                        let _ = store.clear_slot(n as i64);
+                    } else {
+                        let _ = store.assign_slot(n as i64, entry.id);
+                    }
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
             }
         });
     }
