@@ -271,12 +271,23 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         &rules,
         visible,
     ))));
+
+    // Keep the selection where it was across refresh/reopen; only reset when it
+    // would point past the end.
+    let cur = ui.get_selected();
+    if cur < 0 || cur as usize >= results.len() {
+        ui.set_selected(0);
+    }
 }
 
 /// Refresh results and show the launcher window. Shared by the launcher hotkey
 /// and the tray (left-click + "Show Magpie").
 fn show_window(ui: &LauncherWindow, state: &AppState) {
     refresh(ui, state);
+    // Nudge the scroll-follow so the retained selection is back in view.
+    let sel = ui.get_selected();
+    ui.set_selected(-1);
+    ui.set_selected(sel);
     // Capture the paste target: whatever app is frontmost right before we show.
     match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
         cache_dir: data_dir().join("app_icons"),
