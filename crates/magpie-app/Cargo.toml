@@ -19,6 +19,7 @@ toml = "0.8"
 dirs = "5"
 image = "0.25"
 regex = "1"
+ureq = "2"
 
 [build-dependencies]
 slint-build = "1.8"

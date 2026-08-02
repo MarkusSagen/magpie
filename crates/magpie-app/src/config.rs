@@ -23,10 +23,17 @@ pub struct Config {
     pub mask_patterns: Vec<String>,
     #[serde(default = "default_mask_visible_chars")]
     pub mask_visible_chars: i64,
+    /// Fetch a link's site favicon (from the site's own /favicon.ico) for display.
+    #[serde(default = "default_true")]
+    pub fetch_link_favicons: bool,
 }
 
 fn default_mask_visible_chars() -> i64 {
     3
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -42,6 +49,7 @@ impl Default for Config {
             mask_apps: Vec::new(),
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,
+            fetch_link_favicons: true,
         }
     }
 }
@@ -109,5 +117,6 @@ mod tests {
         let c: Config = toml::from_str(toml).unwrap();
         assert!(c.mask_apps.is_empty());
         assert_eq!(c.mask_visible_chars, 3);
+        assert!(c.fetch_link_favicons); // defaults on
     }
 }
