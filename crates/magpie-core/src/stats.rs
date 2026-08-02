@@ -1,7 +1,20 @@
 use crate::detect::Kind;
 use crate::store::{Result, Store};
+use std::collections::HashMap;
 
 pub(crate) const DAY_MS: i64 = 86_400_000;
+
+/// Bucket size for the over-time series: daily, or weekly for an all-time range
+/// whose span exceeds 90 days (keeps the chart readable).
+pub(crate) fn bucket_ms(range: &StatsRange, earliest_ms: i64) -> i64 {
+    if range.since_ms.is_none() {
+        let span_days = range.now_ms / DAY_MS - earliest_ms / DAY_MS;
+        if span_days > 90 {
+            return 7 * DAY_MS;
+        }
+    }
+    DAY_MS
+}
 
 pub struct StatsRange {
     pub since_ms: Option<i64>,
@@ -80,6 +93,43 @@ impl Store {
         })?;
         rows.collect()
     }
+
+    pub(crate) fn over_time(&self, lo: i64, hi: i64, range: &StatsRange) -> Result<Vec<DayBucket>> {
+        // earliest in-range event drives the all-time start + weekly decision
+        let earliest: i64 = self
+            .conn()
+            .query_row(
+                "SELECT MIN(copied_at_ms) FROM copy_events WHERE copied_at_ms BETWEEN ?1 AND ?2",
+                [lo, hi],
+                |r| r.get::<_, Option<i64>>(0),
+            )?
+            .unwrap_or(range.now_ms);
+
+        let start_ms = range.since_ms.unwrap_or(earliest);
+        let bucket = bucket_ms(range, earliest);
+
+        let mut stmt = self.conn().prepare(
+            "SELECT copied_at_ms / ?3 AS b, COUNT(*)
+             FROM copy_events WHERE copied_at_ms BETWEEN ?1 AND ?2
+             GROUP BY b",
+        )?;
+        let counts: HashMap<i64, i64> = stmt
+            .query_map([lo, hi, bucket], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<HashMap<i64, i64>>>()?;
+
+        let start_b = start_ms.div_euclid(bucket);
+        let end_b = range.now_ms.div_euclid(bucket);
+        let mut out = Vec::new();
+        for b in start_b..=end_b {
+            out.push(DayBucket {
+                start_ms: b * bucket,
+                count: *counts.get(&b).unwrap_or(&0),
+            });
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +201,45 @@ mod tests {
         assert_eq!(rows[0].kind.as_str(), "text");
         assert_eq!(rows[1].preview, "twice");
         assert_eq!(rows[1].count, 2);
+    }
+
+    const DAY: i64 = 86_400_000;
+
+    #[test]
+    fn over_time_day_buckets_are_zero_filled() {
+        let s = open_in_memory().unwrap();
+        seed(
+            &s,
+            &[
+                ev("a", 100 * DAY + 1, None),
+                ev("b", 100 * DAY + 2, None),
+                ev("c", 102 * DAY + 5, None),
+            ],
+        );
+        let range = StatsRange { since_ms: Some(100 * DAY), now_ms: 102 * DAY + 10 };
+        let buckets = s
+            .over_time(range.since_ms.unwrap(), range.now_ms, &range)
+            .unwrap();
+        assert_eq!(buckets.len(), 3);
+        assert_eq!(buckets[0].start_ms, 100 * DAY);
+        assert_eq!(buckets[0].count, 2);
+        assert_eq!(buckets[1].start_ms, 101 * DAY);
+        assert_eq!(buckets[1].count, 0);
+        assert_eq!(buckets[2].count, 1);
+    }
+
+    #[test]
+    fn over_time_all_time_switches_to_weekly_beyond_90_days() {
+        let s = open_in_memory().unwrap();
+        seed(&s, &[ev("x", 0, None), ev("y", 200 * DAY, None)]);
+        let range = StatsRange { since_ms: None, now_ms: 200 * DAY };
+        let buckets = s.over_time(i64::MIN, range.now_ms, &range).unwrap();
+        assert!(
+            buckets.len() < 40,
+            "weekly bucketing keeps the series short: {}",
+            buckets.len()
+        );
+        let total: i64 = buckets.iter().map(|b| b.count).sum();
+        assert_eq!(total, 2);
     }
 }
