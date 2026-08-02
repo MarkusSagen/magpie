@@ -59,6 +59,27 @@ impl Store {
             },
         )
     }
+
+    pub(crate) fn most_copied(&self, lo: i64, hi: i64, top_n: i64) -> Result<Vec<MostCopied>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT ce.entry_id, COUNT(*) AS c, e.preview_text, e.kind
+             FROM copy_events ce JOIN entries e ON e.id = ce.entry_id
+             WHERE ce.copied_at_ms BETWEEN ?1 AND ?2
+             GROUP BY ce.entry_id
+             ORDER BY c DESC, ce.entry_id
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map([lo, hi, top_n], |r| {
+            let kind_str: String = r.get(3)?;
+            Ok(MostCopied {
+                entry_id: r.get(0)?,
+                count: r.get(1)?,
+                preview: r.get(2)?,
+                kind: Kind::from_str(&kind_str).unwrap_or(Kind::Text),
+            })
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -107,5 +128,28 @@ mod tests {
         assert_eq!(t.copies, 4);
         assert_eq!(t.unique_entries, 3); // a, b, c
         assert_eq!(t.distinct_apps, 2); // Ghostty, Safari (NULL excluded)
+    }
+
+    #[test]
+    fn most_copied_orders_by_count_and_limits() {
+        let s = open_in_memory().unwrap();
+        seed(
+            &s,
+            &[
+                ev("thrice", 1, None),
+                ev("thrice", 2, None),
+                ev("thrice", 3, None),
+                ev("once", 4, None),
+                ev("twice", 5, None),
+                ev("twice", 6, None),
+            ],
+        );
+        let rows = s.most_copied(i64::MIN, 1000, 2).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].preview, "thrice");
+        assert_eq!(rows[0].count, 3);
+        assert_eq!(rows[0].kind.as_str(), "text");
+        assert_eq!(rows[1].preview, "twice");
+        assert_eq!(rows[1].count, 2);
     }
 }
