@@ -175,10 +175,10 @@ export component LauncherWindow inherits Window {
                 return reject;
             }
 
-            // Help view swallows keys except the ways out.
-            if root.view == "help" {
-                if event.text == Key.Escape || (event.modifiers.control && event.text == "/") {
-                    root.view = "list";
+            // Help modal swallows keys except the ways out.
+            if root.mode == "help" {
+                if event.text == Key.Escape || event.text == "?" || (event.modifiers.control && event.text == "/") {
+                    root.mode = "list";
                 }
                 return accept;
             }
@@ -255,7 +255,7 @@ export component LauncherWindow inherits Window {
             if event.modifiers.control {
                 if event.text == "c" { root.copy-only(root.selected); return accept; }
                 if event.text == "k" { root.open-actions(); return accept; }
-                if event.text == "/" { root.view = "help"; return accept; }
+                if event.text == "/" { root.mode = "help"; return accept; }
                 if event.text == "e" { root.start-edit(root.selected); return accept; }
                 if event.text == "n" { root.new-snippet(); return accept; }
                 if event.text == "m" { root.toggle-merge(root.selected); return accept; }
@@ -354,7 +354,7 @@ export component LauncherWindow inherits Window {
                         height: 26px;
                         background: #202024;
                         border-radius: 6px;
-                        TouchArea { clicked => { root.view = "help"; } }
+                        TouchArea { clicked => { root.mode = "help"; } }
                         Text { text: "?"; color: white; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
@@ -760,58 +760,64 @@ export component LauncherWindow inherits Window {
                 }
             }
 
-            // ---- Help / keyboard shortcuts ----
-            if root.view == "help": VerticalLayout {
-                padding: 8px;
-                spacing: 6px;
-                HorizontalLayout {
-                    alignment: start;
-                    Rectangle {
-                        width: 70px;
-                        height: 26px;
-                        background: #202024;
-                        border-radius: 6px;
-                        TouchArea { clicked => { root.view = "list"; } }
-                        Text { text: "← Back"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+
+        // ---- Help modal (centered overlay) ----
+        if root.mode == "help": Rectangle {
+            background: #000000aa;
+            TouchArea { clicked => { root.mode = "list"; } }
+            Rectangle {
+                width: 460px;
+                height: 460px;
+                background: #1e1e21;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #3a3a40;
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 6px;
+                        Text { text: "Keyboard Shortcuts"; color: white; font-size: 15px; }
+
+                        Text { text: "Navigation"; color: #6a8cff; font-size: 12px; }
+                        for row in [
+                            { k: "↑ / ↓", d: "Move selection" },
+                            { k: "⏎", d: "Paste to the previous app + close" },
+                            { k: "⌘⏎", d: "Paste + keep Magpie open" },
+                            { k: "Esc", d: "Clear search, then close" },
+                            { k: "type", d: "Filter entries" },
+                            { k: "⌘1–9", d: "Paste the Nth entry" },
+                        ]: HorizontalLayout {
+                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                        }
+
+                        Text { text: "Actions"; color: #6a8cff; font-size: 12px; }
+                        for row in [
+                            { k: "⌘K", d: "Open the actions menu" },
+                            { k: "⌘F", d: "Advanced search (app / time)" },
+                            { k: "⌘C", d: "Copy (no paste)" },
+                            { k: "⌘E", d: "Edit the entry" },
+                            { k: "⌘N", d: "New snippet" },
+                            { k: "⌘P", d: "Pin / unpin" },
+                            { k: "⌘M", d: "Add to merge" },
+                            { k: "⌘V", d: "Paste clipboard into search" },
+                            { k: "⌃X", d: "Delete the entry" },
+                        ]: HorizontalLayout {
+                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                        }
+
+                        Text { text: "Views"; color: #6a8cff; font-size: 12px; }
+                        for row in [
+                            { k: "⌘/  or  ?", d: "This help" },
+                            { k: "🔒", d: "Screenshare (mask everything)" },
+                            { k: "Stats", d: "Copy analytics" },
+                        ]: HorizontalLayout {
+                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                        }
                     }
-                }
-                Text { text: "Keyboard Shortcuts"; color: white; font-size: 15px; }
-
-                Text { text: "Navigation"; color: #6a8cff; font-size: 12px; }
-                for row in [
-                    { k: "↑ / ↓", d: "Move selection" },
-                    { k: "⏎", d: "Paste to the previous app" },
-                    { k: "Esc", d: "Clear search, then close" },
-                    { k: "type", d: "Filter entries" },
-                    { k: "⌘1–9", d: "Paste the Nth entry" },
-                ]: HorizontalLayout {
-                    Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 120px; }
-                    Text { text: row.d; color: #9a9aa0; font-size: 12px; }
-                }
-
-                Text { text: "Actions"; color: #6a8cff; font-size: 12px; }
-                for row in [
-                    { k: "⌘K", d: "Open the actions menu" },
-                    { k: "⌘C", d: "Copy (no paste)" },
-                    { k: "⌘E", d: "Edit the entry" },
-                    { k: "⌘N", d: "New snippet" },
-                    { k: "⌘P", d: "Pin / unpin" },
-                    { k: "⌘M", d: "Add to merge" },
-                    { k: "⌘V", d: "Paste clipboard into search" },
-                    { k: "⌃X", d: "Delete the entry" },
-                ]: HorizontalLayout {
-                    Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 120px; }
-                    Text { text: row.d; color: #9a9aa0; font-size: 12px; }
-                }
-
-                Text { text: "Views"; color: #6a8cff; font-size: 12px; }
-                for row in [
-                    { k: "⌘/  or  ?", d: "This help" },
-                    { k: "🔒", d: "Screenshare (mask everything)" },
-                    { k: "Stats", d: "Copy analytics" },
-                ]: HorizontalLayout {
-                    Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 120px; }
-                    Text { text: row.d; color: #9a9aa0; font-size: 12px; }
                 }
             }
         }
