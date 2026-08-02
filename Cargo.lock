@@ -3354,6 +3354,7 @@ dependencies = [
  "image",
  "magpie-core",
  "magpie-platform",
+ "regex",
  "serde",
  "slint",
  "slint-build",

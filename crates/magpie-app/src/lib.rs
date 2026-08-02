@@ -8,6 +8,7 @@ pub mod config;
 pub mod format_time;
 pub mod grouping;
 pub mod image_cache;
+pub mod mask_view;
 pub mod merge_view;
 pub mod paste_action;
 pub mod retention;
