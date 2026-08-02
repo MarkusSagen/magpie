@@ -45,6 +45,16 @@ pub fn build_state() -> Arc<AppState> {
     })
 }
 
+/// A row badge like "3 lines" when the text has more than one non-empty line.
+fn line_badge(full_text: &str) -> String {
+    let n = full_text.lines().filter(|l| !l.trim().is_empty()).count();
+    if n > 1 {
+        format!("{n} lines")
+    } else {
+        String::new()
+    }
+}
+
 fn preview_title(e: &Entry) -> String {
     let line = e.full_text.lines().next().unwrap_or("").trim();
     if line.is_empty() {
@@ -657,4 +667,22 @@ fn build_tray() -> Option<tray_icon::TrayIcon> {
     });
 
     Some(tray)
+}
+
+#[cfg(test)]
+mod round1_tests {
+    use super::line_badge;
+
+    #[test]
+    fn badge_counts_nonempty_lines() {
+        assert_eq!(line_badge("a\nb\nc"), "3 lines");
+        assert_eq!(line_badge("a\n\nb"), "2 lines"); // blank interior line ignored
+    }
+
+    #[test]
+    fn badge_empty_for_single_or_no_line() {
+        assert_eq!(line_badge("one line"), "");
+        assert_eq!(line_badge(""), "");
+        assert_eq!(line_badge("   \n  "), ""); // only blank lines
+    }
 }
