@@ -5,7 +5,7 @@ use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
-use magpie_core::{open, Content, Entry, RetentionPolicy, Stats, StatsRange, Totals};
+use magpie_core::{open, Content, Entry, Kind, RetentionPolicy, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
@@ -43,6 +43,18 @@ pub fn build_state() -> Arc<AppState> {
         ui: std::sync::Mutex::new(magpie_app::viewmodel::UiState::new()),
         merge_set: std::sync::Mutex::new(Vec::new()),
     })
+}
+
+/// The glyph shown at the left of a list row for each content kind.
+fn type_glyph(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Link => "🔗",
+        Kind::Color => "🎨",
+        Kind::Email => "✉️",
+        Kind::Image => "🖼️",
+        Kind::File => "📁",
+        Kind::Text | Kind::Rtf | Kind::Html => "📄",
+    }
 }
 
 /// A row badge like "3 lines" when the text has more than one non-empty line.
@@ -720,6 +732,23 @@ fn build_tray(
     }
 
     Some(tray)
+}
+
+#[cfg(test)]
+mod glyph_tests {
+    use super::type_glyph;
+    use magpie_core::Kind;
+    #[test]
+    fn every_kind_has_a_glyph() {
+        assert_eq!(type_glyph(&Kind::Link), "🔗");
+        assert_eq!(type_glyph(&Kind::Color), "🎨");
+        assert_eq!(type_glyph(&Kind::Email), "✉️");
+        assert_eq!(type_glyph(&Kind::Image), "🖼️");
+        assert_eq!(type_glyph(&Kind::File), "📁");
+        assert_eq!(type_glyph(&Kind::Text), "📄");
+        assert_eq!(type_glyph(&Kind::Rtf), "📄");
+        assert_eq!(type_glyph(&Kind::Html), "📄");
+    }
 }
 
 #[cfg(test)]
