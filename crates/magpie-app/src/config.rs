@@ -15,6 +15,18 @@ pub struct Config {
     pub max_age_days: Option<i64>,
     #[serde(default)]
     pub max_image_mb: Option<i64>,
+    // Display-only masking (opt-in; empty by default). Separate from the
+    // never-capture skip path.
+    #[serde(default)]
+    pub mask_apps: Vec<String>,
+    #[serde(default)]
+    pub mask_patterns: Vec<String>,
+    #[serde(default = "default_mask_visible_chars")]
+    pub mask_visible_chars: i64,
+}
+
+fn default_mask_visible_chars() -> i64 {
+    3
 }
 
 impl Default for Config {
@@ -27,6 +39,9 @@ impl Default for Config {
             max_entries: None,
             max_age_days: None,
             max_image_mb: None,
+            mask_apps: Vec::new(),
+            mask_patterns: Vec::new(),
+            mask_visible_chars: 3,
         }
     }
 }
@@ -78,5 +93,21 @@ mod tests {
     fn missing_file_yields_default() {
         let c = load_or_default(std::path::Path::new("/nonexistent/magpie/nope.toml"));
         assert_eq!(c.launcher_hotkey, "super+ctrl+v");
+    }
+
+    #[test]
+    fn masking_defaults_are_empty_with_three_visible() {
+        let c = Config::default();
+        assert!(c.mask_apps.is_empty());
+        assert!(c.mask_patterns.is_empty());
+        assert_eq!(c.mask_visible_chars, 3);
+    }
+
+    #[test]
+    fn old_config_without_masking_keys_loads_with_defaults() {
+        let toml = "launcher_hotkey = \"super+ctrl+v\"\nquick_paste_hotkeys = []\npaste_on_select = true\napp_denylist = []\n";
+        let c: Config = toml::from_str(toml).unwrap();
+        assert!(c.mask_apps.is_empty());
+        assert_eq!(c.mask_visible_chars, 3);
     }
 }
