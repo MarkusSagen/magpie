@@ -177,7 +177,7 @@ export component LauncherWindow inherits Window {
 
             // Help view swallows keys except the ways out.
             if root.view == "help" {
-                if event.text == Key.Escape || (event.modifiers.meta && event.text == "/") {
+                if event.text == Key.Escape || (event.modifiers.control && event.text == "/") {
                     root.view = "list";
                 }
                 return accept;
@@ -252,7 +252,7 @@ export component LauncherWindow inherits Window {
             }
 
             // ---- ⌘ shortcuts ----
-            if event.modifiers.meta {
+            if event.modifiers.control {
                 if event.text == "c" { root.copy-only(root.selected); return accept; }
                 if event.text == "k" { root.open-actions(); return accept; }
                 if event.text == "/" { root.view = "help"; return accept; }
