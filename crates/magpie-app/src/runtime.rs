@@ -1,15 +1,17 @@
 use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
+use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
-use magpie_core::{open, Entry, RetentionPolicy, Stats, StatsRange, Totals};
+use magpie_core::{open, Content, Entry, RetentionPolicy, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
 use magpie_platform::{
-    default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Watcher,
+    default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Clipboard, Paster,
+    Watcher,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
@@ -39,6 +41,7 @@ pub fn build_state() -> Arc<AppState> {
             dir: dir.join("images"),
         },
         ui: std::sync::Mutex::new(magpie_app::viewmodel::UiState::new()),
+        merge_set: std::sync::Mutex::new(Vec::new()),
     })
 }
 
@@ -55,10 +58,12 @@ fn to_rows(
     entries: &[Entry],
     slots: &HashMap<i64, i64>,
     tags: &HashMap<i64, Vec<String>>,
+    merge_set: &[i32],
 ) -> Vec<EntryRow> {
     entries
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let tagline = tags
                 .get(&e.id)
                 .map(|ts| {
@@ -83,6 +88,7 @@ fn to_rows(
                 subtitle: SharedString::from(subtitle),
                 kind: SharedString::from(e.kind.as_str()),
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
+                merged: merge_set.contains(&(i as i32)),
             }
         })
         .collect()
@@ -134,12 +140,19 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
             .collect::<Vec<_>>(),
     )));
 
+    let merge_set = state
+        .merge_set
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+    ui.set_merge_count(merge_set.len() as i32);
+
     let detail = results
         .first()
         .map(|e| e.full_text.clone())
         .unwrap_or_default();
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(
-        &results, &slots, &tag_map,
+        &results, &slots, &tag_map, &merge_set,
     ))));
     ui.set_detail_text(SharedString::from(detail));
 }
@@ -508,6 +521,69 @@ pub fn start() {
                     tag
                 };
                 ui.set_tag_filter(next);
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_merge(move |index| {
+            if let Ok(mut m) = s.merge_set.lock() {
+                if let Some(pos) = m.iter().position(|&x| x == index) {
+                    m.remove(pos);
+                } else {
+                    m.push(index);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_clear_merge(move || {
+            if let Ok(mut m) = s.merge_set.lock() {
+                m.clear();
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_merge_paste(move || {
+            let indices: Vec<i32> = s.merge_set.lock().map(|m| m.clone()).unwrap_or_default();
+            let results = current_results(&s, now_ms());
+            let ids: Vec<i64> = indices
+                .iter()
+                .filter_map(|&i| results.get(i as usize).map(|e| e.id))
+                .collect();
+            let sep = w
+                .upgrade()
+                .map(|ui| separator_str(ui.get_merge_sep()))
+                .unwrap_or("\n");
+            let merged = s
+                .store
+                .lock()
+                .ok()
+                .and_then(|st| st.merged_text(&ids, sep).ok())
+                .unwrap_or_default();
+            if !merged.is_empty() {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    if clip.set_content(&Content::Text(merged)).is_ok() {
+                        let _ = EnigoPaster.paste();
+                    }
+                }
+            }
+            if let Ok(mut m) = s.merge_set.lock() {
+                m.clear();
+            }
+            if let Some(ui) = w.upgrade() {
                 refresh(&ui, &s);
             }
         });

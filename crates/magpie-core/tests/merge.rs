@@ -10,7 +10,11 @@ impl ImageStore for Noop {
 }
 fn ingest(s: &Store, t: &str) -> i64 {
     s.ingest(
-        &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: 1 },
+        &CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: None,
+            copied_at_ms: 1,
+        },
         &Noop,
     )
     .unwrap()

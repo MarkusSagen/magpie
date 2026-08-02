@@ -34,7 +34,11 @@ mod tests {
     }
     fn ingest(s: &Store, t: &str) -> i64 {
         s.ingest(
-            &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: 1 },
+            &CaptureEvent {
+                content: Content::Text(t.into()),
+                source_app: None,
+                copied_at_ms: 1,
+            },
             &Noop,
         )
         .unwrap()
@@ -48,7 +52,10 @@ mod tests {
         let b = ingest(&s, "beta");
         let c = ingest(&s, "gamma");
         assert_eq!(s.merged_text(&[a, c], "\n").unwrap(), "alpha\ngamma");
-        assert_eq!(s.merged_text(&[c, b, a], ", ").unwrap(), "gamma, beta, alpha");
+        assert_eq!(
+            s.merged_text(&[c, b, a], ", ").unwrap(),
+            "gamma, beta, alpha"
+        );
     }
 
     #[test]

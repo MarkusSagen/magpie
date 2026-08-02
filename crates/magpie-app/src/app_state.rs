@@ -7,6 +7,8 @@ pub struct AppState {
     pub store: Mutex<Store>,
     pub images: FsImageStore,
     pub ui: Mutex<UiState>,
+    /// Entry indices (into the current results) queued for merge-paste.
+    pub merge_set: Mutex<Vec<i32>>,
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
@@ -37,6 +39,7 @@ mod tests {
                 dir: std::env::temp_dir().join("magpie-appstate-test"),
             },
             ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
+            merge_set: std::sync::Mutex::new(Vec::new()),
         }
     }
 

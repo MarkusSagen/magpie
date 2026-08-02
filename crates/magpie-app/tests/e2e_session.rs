@@ -51,6 +51,7 @@ fn state() -> AppState {
             dir: std::env::temp_dir().join(format!("magpie-e2e-{}", std::process::id())),
         },
         ui: Mutex::new(UiState::new()),
+        merge_set: Mutex::new(Vec::new()),
     }
 }
 
