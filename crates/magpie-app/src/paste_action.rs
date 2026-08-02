@@ -8,6 +8,18 @@ pub fn resolve_quick_paste(recent: &[Entry], slot: usize) -> Option<&Entry> {
     recent.get(slot - 1)
 }
 
+/// Pick the slot entry if assigned, else the `slot`-th most-recent (1-based).
+pub fn resolve_slot_or_recent(
+    slot_entry: Option<Entry>,
+    recent: &[Entry],
+    slot: usize,
+) -> Option<Entry> {
+    match slot_entry {
+        Some(e) => Some(e),
+        None => resolve_quick_paste(recent, slot).cloned(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasteKind {
     Formatted,
