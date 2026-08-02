@@ -10,7 +10,11 @@ impl ImageStore for Noop {
 }
 fn ingest(s: &Store, t: &str, ms: i64) -> i64 {
     s.ingest(
-        &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: ms },
+        &CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: None,
+            copied_at_ms: ms,
+        },
         &Noop,
     )
     .unwrap()
@@ -36,7 +40,11 @@ fn slotted_entry_survives_retention_because_it_is_pinned() {
     s.assign_slot(1, fav).unwrap(); // pins it
     ingest(&s, "throwaway", 2);
 
-    let policy = RetentionPolicy { max_entries: None, max_age_ms: Some(0), max_image_bytes: None };
+    let policy = RetentionPolicy {
+        max_entries: None,
+        max_age_ms: Some(0),
+        max_image_bytes: None,
+    };
     s.enforce_retention(&policy, 1_000_000).unwrap();
 
     assert!(s.slot_entry(1).unwrap().is_some());

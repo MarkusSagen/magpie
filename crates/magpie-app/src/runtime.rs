@@ -333,12 +333,8 @@ pub fn start() {
             let recent = current_results(&s, now_ms());
             if let Some(entry) = recent.get(index as usize) {
                 if let Ok(store) = s.store.lock() {
-                    let already_here = store
-                        .slot_entry(n as i64)
-                        .ok()
-                        .flatten()
-                        .map(|e| e.id)
-                        == Some(entry.id);
+                    let already_here =
+                        store.slot_entry(n as i64).ok().flatten().map(|e| e.id) == Some(entry.id);
                     if already_here {
                         let _ = store.clear_slot(n as i64);
                     } else {

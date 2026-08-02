@@ -33,7 +33,8 @@ impl Store {
         if !(1..=9).contains(&slot) {
             return Err(slot_err());
         }
-        self.conn().execute("DELETE FROM slots WHERE slot = ?1", [slot])?;
+        self.conn()
+            .execute("DELETE FROM slots WHERE slot = ?1", [slot])?;
         Ok(())
     }
 
@@ -54,8 +55,9 @@ impl Store {
             .map(|c| format!("e.{c}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql =
-            format!("SELECT {cols} FROM entries e JOIN slots s ON s.entry_id = e.id WHERE s.slot = ?1");
+        let sql = format!(
+            "SELECT {cols} FROM entries e JOIN slots s ON s.entry_id = e.id WHERE s.slot = ?1"
+        );
         let mut stmt = self.conn().prepare(&sql)?;
         let mut rows = stmt.query_map([slot], row_to_entry)?;
         match rows.next() {
@@ -78,14 +80,23 @@ mod tests {
     }
     fn ingest(s: &Store, t: &str, ms: i64) -> i64 {
         s.ingest(
-            &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: ms },
+            &CaptureEvent {
+                content: Content::Text(t.into()),
+                source_app: None,
+                copied_at_ms: ms,
+            },
             &Noop,
         )
         .unwrap()
         .entry_id
     }
     fn pinned(s: &Store, id: i64) -> bool {
-        s.recent(100).unwrap().into_iter().find(|e| e.id == id).unwrap().pinned
+        s.recent(100)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == id)
+            .unwrap()
+            .pinned
     }
 
     #[test]
