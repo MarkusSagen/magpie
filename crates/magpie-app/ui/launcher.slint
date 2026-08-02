@@ -1,4 +1,4 @@
-import { LineEdit, ListView } from "std-widgets.slint";
+import { LineEdit, ListView, TextEdit } from "std-widgets.slint";
 
 struct EntryRow {
     title: string,
@@ -76,6 +76,13 @@ export component LauncherWindow inherits Window {
     callback stats-range-changed(int);
     callback toggle-view();
     callback assign-slot(int, int);
+
+    in-out property <string> edit-mode: "none";
+    in-out property <string> edit-text;
+    callback start-edit(int);
+    callback new-snippet();
+    callback save-edit(string);
+    callback cancel-edit();
 
     VerticalLayout {
         padding: 8px;
@@ -175,6 +182,73 @@ export component LauncherWindow inherits Window {
                                     font-size: 11px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // View-mode actions
+                        if root.edit-mode == "none": HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            if entries.length > 0 && root.selected < entries.length && entries[root.selected].kind != "image": Rectangle {
+                                width: 60px;
+                                height: 26px;
+                                background: #2a2a30;
+                                border-radius: 6px;
+                                TouchArea {
+                                    clicked => {
+                                        root.start-edit(root.selected);
+                                    }
+                                }
+                                Text { text: "Edit"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            Rectangle {
+                                width: 96px;
+                                height: 26px;
+                                background: #2a2a30;
+                                border-radius: 6px;
+                                TouchArea {
+                                    clicked => {
+                                        root.new-snippet();
+                                    }
+                                }
+                                Text { text: "New snippet"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+
+                        // Edit-mode editor
+                        if root.edit-mode != "none": VerticalLayout {
+                            spacing: 6px;
+                            editor := TextEdit {
+                                min-height: 120px;
+                                text <=> root.edit-text;
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                Rectangle {
+                                    width: 60px;
+                                    height: 26px;
+                                    background: #6a8cff;
+                                    border-radius: 6px;
+                                    TouchArea {
+                                        clicked => {
+                                            root.save-edit(root.edit-text);
+                                        }
+                                    }
+                                    Text { text: "Save"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                Rectangle {
+                                    width: 60px;
+                                    height: 26px;
+                                    background: #2a2a30;
+                                    border-radius: 6px;
+                                    TouchArea {
+                                        clicked => {
+                                            root.cancel-edit();
+                                        }
+                                    }
+                                    Text { text: "Cancel"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                         }
