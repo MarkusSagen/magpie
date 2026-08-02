@@ -1,4 +1,4 @@
-use crate::{ActionItem, Bar, EntryRow, LauncherWindow};
+use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, SlotItem};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::favicon;
@@ -198,15 +198,27 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     let rules = MaskRules::build(&state.mask_apps, &state.mask_patterns, screenshare);
     let visible = state.mask_visible_chars.max(0) as usize;
     ui.set_screenshare(screenshare);
+    // Advanced-search "filtered" indicator.
+    if let Ok(u) = state.ui.lock() {
+        let filtered = u.app_filter.is_some()
+            || u.pinned_only
+            || !matches!(u.time_filter, magpie_app::viewmodel::TimeFilter::All);
+        ui.set_filtered(filtered);
+    }
 
-    let (slots, tag_map, all_tags, app_names, app_icons) = match state.store.lock() {
+    let (slots, tag_map, all_tags, app_names, app_icons, slot_items) = match state.store.lock() {
         Ok(store) => {
-            let slots: HashMap<i64, i64> = store
-                .slot_map()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(slot, eid)| (eid, slot))
-                .collect();
+            let slot_pairs = store.slot_map().unwrap_or_default(); // (slot, entry_id)
+            let slots: HashMap<i64, i64> =
+                slot_pairs.iter().map(|&(slot, eid)| (eid, slot)).collect();
+            // Speed-dial: (slot, short title) for each assigned slot, ascending.
+            let mut slot_items: Vec<(i64, String)> = Vec::new();
+            for &(slot, _eid) in &slot_pairs {
+                if let Ok(Some(e)) = store.slot_entry(slot) {
+                    slot_items.push((slot, preview_title(&e)));
+                }
+            }
+            slot_items.sort_by_key(|(n, _)| *n);
             let mut tag_map: HashMap<i64, Vec<String>> = HashMap::new();
             for (eid, tag) in store.tag_pairs().unwrap_or_default() {
                 tag_map.entry(eid).or_default().push(tag);
@@ -222,7 +234,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            (slots, tag_map, all_tags, app_names, app_icons)
+            (slots, tag_map, all_tags, app_names, app_icons, slot_items)
         }
         Err(_) => (
             HashMap::new(),
@@ -230,8 +242,19 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
             Vec::new(),
             HashMap::new(),
             HashMap::new(),
+            Vec::new(),
         ),
     };
+    ui.set_slots(ModelRc::new(VecModel::from(
+        slot_items
+            .into_iter()
+            .map(|(n, title)| SlotItem {
+                n: n as i32,
+                title: SharedString::from(title),
+                filled: true,
+            })
+            .collect::<Vec<_>>(),
+    )));
 
     let sel = ui.get_selected() as usize;
     let selected_tags: Vec<SharedString> = results
@@ -701,6 +724,109 @@ pub fn start() {
                 u.sort = magpie_app::viewmodel::sort_from_index(idx);
             }
             if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    // ---- Pinned filter + speed-dial slots ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_pinned_only(move |on| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.pinned_only = on;
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_selected(0);
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_paste_slot(move |n| {
+            // Paste the entry assigned to slot n (or the Nth recent) via hide→paste.
+            let entry = s
+                .store
+                .lock()
+                .ok()
+                .and_then(|st| st.slot_entry(n as i64).ok().flatten());
+            let recent = current_results(&s, now_ms());
+            if let Some(entry) = resolve_slot_or_recent(entry, &recent, n as usize) {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ =
+                        perform_paste(&mut clip, &EnigoPaster, &entry, PasteKind::Formatted, false);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                let _ = ui.hide();
+            }
+            spawn_paste(w.clone(), false);
+        });
+    }
+    // ---- ⌘F advanced search ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_search(move || {
+            if let Some(ui) = w.upgrade() {
+                let apps: Vec<AppItem> = s
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|st| st.apps_in_use().ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(id, name)| AppItem {
+                        id: id as i32,
+                        name: SharedString::from(name),
+                    })
+                    .collect();
+                ui.set_apps(ModelRc::new(VecModel::from(apps)));
+                ui.set_mode(SharedString::from("search"));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_time_filter(move |idx| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.time_filter = magpie_app::viewmodel::time_filter_from_index(idx);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_app_filter(move |id| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.app_filter = if id >= 0 { Some(id as i64) } else { None };
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_mode(SharedString::from("list"));
+                ui.set_selected(0);
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_clear_filters(move || {
+            if let Ok(mut u) = s.ui.lock() {
+                u.app_filter = None;
+                u.time_filter = magpie_app::viewmodel::TimeFilter::All;
+                u.pinned_only = false;
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_time_index(0);
+                ui.set_pinned_only(false);
+                ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
             }
         });
