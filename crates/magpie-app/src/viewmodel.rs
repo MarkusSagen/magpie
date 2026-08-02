@@ -51,6 +51,18 @@ pub enum TimeFilter {
     All,
     Today,
     Last7Days,
+    Last30Days,
+}
+
+/// Map an advanced-search time-range index: 0 All · 1 Today · 2 Last7Days ·
+/// 3 Last30Days (out of range → All).
+pub fn time_filter_from_index(i: i32) -> TimeFilter {
+    match i {
+        1 => TimeFilter::Today,
+        2 => TimeFilter::Last7Days,
+        3 => TimeFilter::Last30Days,
+        _ => TimeFilter::All,
+    }
 }
 
 pub struct UiState {
@@ -61,6 +73,7 @@ pub struct UiState {
     pub time_filter: TimeFilter,
     pub sort: Sort,
     pub tag: Option<String>,
+    pub pinned_only: bool,
 }
 
 impl UiState {
@@ -73,6 +86,7 @@ impl UiState {
             time_filter: TimeFilter::All,
             sort: Sort::Recency,
             tag: None,
+            pinned_only: false,
         }
     }
 }
@@ -93,6 +107,7 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
     q.source_app_id = ui.app_filter;
     q.sort = ui.sort;
     q.tag = ui.tag.clone();
+    q.pinned_only = ui.pinned_only;
     q.time = match ui.time_filter {
         TimeFilter::All => TimeRange::default(),
         TimeFilter::Today => TimeRange {
@@ -101,6 +116,10 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
         },
         TimeFilter::Last7Days => TimeRange {
             since_ms: Some(now_ms - 7 * DAY_MS),
+            until_ms: None,
+        },
+        TimeFilter::Last30Days => TimeRange {
+            since_ms: Some(now_ms - 30 * DAY_MS),
             until_ms: None,
         },
     };
@@ -154,6 +173,24 @@ mod tests {
         assert_eq!(q.mode, SearchMode::Fuzzy);
         assert!(q.kind.is_none());
         assert!(q.time.since_ms.is_none());
+    }
+
+    #[test]
+    fn time_filter_index_and_30_days() {
+        assert_eq!(time_filter_from_index(0), TimeFilter::All);
+        assert_eq!(time_filter_from_index(3), TimeFilter::Last30Days);
+        let mut ui = UiState::new();
+        ui.time_filter = TimeFilter::Last30Days;
+        let now = 100 * 86_400_000i64;
+        assert_eq!(to_query(&ui, now).time.since_ms, Some(now - 30 * 86_400_000));
+    }
+
+    #[test]
+    fn pinned_only_flows_into_query() {
+        let mut ui = UiState::new();
+        assert!(!to_query(&ui, 0).pinned_only);
+        ui.pinned_only = true;
+        assert!(to_query(&ui, 0).pinned_only);
     }
 
     #[test]
