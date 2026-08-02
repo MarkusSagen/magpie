@@ -717,46 +717,59 @@ export component LauncherWindow inherits Window {
                     }
                 }
 
-                Text { text: root.totals-line; color: white; font-size: 13px; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: 8px;
+                        Text { text: root.totals-line; color: white; font-size: 13px; }
 
-                Text { text: "Copies over time"; color: #9a9aa0; font-size: 11px; }
-                Rectangle {
-                    height: 64px;
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: 2px;
-                        for bar in root.over-time-bars: Rectangle {
-                            width: 8px;
-                            Rectangle {
-                                width: parent.width;
-                                y: parent.height * (1.0 - bar.value_norm);
-                                height: parent.height * bar.value_norm;
-                                background: #6a8cff;
-                                border-radius: 2px;
+                        Text { text: "Copies over time"; color: #9a9aa0; font-size: 11px; }
+                        if root.over-time-bars.length >= 2: Rectangle {
+                            height: 64px;
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 3px;
+                                for bar in root.over-time-bars: Rectangle {
+                                    width: 10px;
+                                    // baseline track so empty days read as a bar, not a gap
+                                    Rectangle { width: parent.width; background: #2a2a30; border-radius: 2px; }
+                                    Rectangle {
+                                        width: parent.width;
+                                        y: parent.height * (1.0 - bar.value_norm);
+                                        height: parent.height * bar.value_norm;
+                                        background: #6a8cff;
+                                        border-radius: 2px;
+                                    }
+                                }
                             }
                         }
+                        if root.over-time-bars.length < 2: Text {
+                            text: "Not enough data yet.";
+                            color: #6a6a70;
+                            font-size: 11px;
+                        }
+
+                        Text { text: "Most copied"; color: #9a9aa0; font-size: 11px; }
+                        for bar in root.most-copied-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "By app"; color: #9a9aa0; font-size: 11px; }
+                        for bar in root.per-app-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "By type"; color: #9a9aa0; font-size: 11px; }
+                        for bar in root.by-type-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
                     }
-                }
-
-                Text { text: "Most copied"; color: #9a9aa0; font-size: 11px; }
-                for bar in root.most-copied-bars: HBar {
-                    label: bar.label;
-                    display: bar.display;
-                    value_norm: bar.value_norm;
-                }
-
-                Text { text: "By app"; color: #9a9aa0; font-size: 11px; }
-                for bar in root.per-app-bars: HBar {
-                    label: bar.label;
-                    display: bar.display;
-                    value_norm: bar.value_norm;
-                }
-
-                Text { text: "By type"; color: #9a9aa0; font-size: 11px; }
-                for bar in root.by-type-bars: HBar {
-                    label: bar.label;
-                    display: bar.display;
-                    value_norm: bar.value_norm;
                 }
             }
 
