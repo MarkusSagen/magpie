@@ -2,7 +2,8 @@ use crate::{ActionItem, Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::favicon;
-use magpie_app::format_time::relative_time;
+use magpie_app::format_time::{abs_date, relative_time};
+use magpie_app::grouping;
 use magpie_app::mask_view::{mask_render, should_mask, MaskRules};
 use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
@@ -172,6 +173,11 @@ fn to_rows(
                 full_masked: SharedString::from(full_masked),
                 icon: icon_img,
                 has_icon,
+                words: e.word_count as i32,
+                section: SharedString::from(
+                    grouping::section_for(e.last_copied_at_ms, now).label(),
+                ),
+                copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
             }
         })
         .collect()
@@ -271,6 +277,28 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
 /// and the tray (left-click + "Show Magpie").
 fn show_window(ui: &LauncherWindow, state: &AppState) {
     refresh(ui, state);
+    // Capture the paste target: whatever app is frontmost right before we show.
+    match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
+        cache_dir: data_dir().join("app_icons"),
+    }) {
+        Some(app) => {
+            ui.set_target_app(SharedString::from(app.display_name.clone()));
+            let (img, has) = app
+                .icon_path
+                .as_deref()
+                .map(std::path::Path::new)
+                .filter(|p| p.exists())
+                .and_then(|p| slint::Image::load_from_path(p).ok())
+                .map(|i| (i, true))
+                .unwrap_or((slint::Image::default(), false));
+            ui.set_target_icon(img);
+            ui.set_target_has_icon(has);
+        }
+        None => {
+            ui.set_target_app(SharedString::from(""));
+            ui.set_target_has_icon(false);
+        }
+    }
     let _ = ui.show();
 }
 

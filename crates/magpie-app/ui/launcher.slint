@@ -17,6 +17,9 @@ struct EntryRow {
     full_masked: string,
     icon: image,
     has_icon: bool,
+    words: int,
+    section: string,
+    copied_date: string,
 }
 
 struct Bar {
@@ -87,6 +90,10 @@ export component LauncherWindow inherits Window {
     in-out property <int> action-selected: 0;
     in property <bool> screenshare: false;
     in-out property <bool> revealed: false;
+    // The app that was frontmost when the launcher opened (paste target).
+    in property <string> target-app: "";
+    in property <image> target-icon;
+    in property <bool> target-has-icon: false;
 
     in-out property <string> view: "list";
     in property <[Bar]> over-time-bars;
@@ -430,7 +437,14 @@ export component LauncherWindow inherits Window {
 
                     list := ListView {
                         min-width: 340px;
-                        for row[i] in entries: Rectangle {
+                        for row[i] in entries: VerticalLayout {
+                            // Date group header when the section changes.
+                            if i == 0 || entries[i - 1].section != row.section: Text {
+                                text: row.section;
+                                color: #6a6a70;
+                                font-size: 11px;
+                            }
+                            Rectangle {
                             height: 52px;
                             background: i == root.selected ? #2f2f37 : transparent;
                             border-radius: 8px;
@@ -480,6 +494,7 @@ export component LauncherWindow inherits Window {
                                     Text { text: row.merged ? "✓" : "+"; color: row.merged ? white : #6a6a70; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
+                            }
                         }
                     }
 
@@ -515,35 +530,44 @@ export component LauncherWindow inherits Window {
                                 Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                             }
 
-                            // Metadata block.
+                            // Metadata "Information" block (Raycast-style; right-aligned values).
                             if entries.length > 0 && root.selected < entries.length: VerticalLayout {
-                                spacing: 4px;
+                                spacing: 5px;
                                 Rectangle { height: 1px; background: #2a2a30; }
+                                Text { text: "Information"; color: #6a6a70; font-size: 12px; }
                                 HorizontalLayout {
                                     spacing: 6px;
-                                    Text { text: "Application"; color: #6a6a70; font-size: 11px; width: 96px; }
+                                    Text { text: "Source"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
                                     if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
                                     Text { text: entries[root.selected].source; color: #d0d0d4; font-size: 11px; overflow: elide; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Type"; color: #6a6a70; font-size: 11px; width: 96px; }
-                                    Text { text: entries[root.selected].kind; color: #d0d0d4; font-size: 11px; }
+                                    Text { text: "Content type"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].kind; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Copied"; color: #6a6a70; font-size: 11px; width: 96px; }
-                                    Text { text: entries[root.selected].copied + "×"; color: #d0d0d4; font-size: 11px; }
+                                    Text { text: "Characters"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Last used"; color: #6a6a70; font-size: 11px; width: 96px; }
-                                    Text { text: entries[root.selected].when; color: #d0d0d4; font-size: 11px; }
+                                    Text { text: "Words"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].words; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Size"; color: #6a6a70; font-size: 11px; width: 96px; }
-                                    Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; }
+                                    Text { text: "Times copied"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Slot"; color: #6a6a70; font-size: 11px; width: 96px; }
-                                    Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: #d0d0d4; font-size: 11px; }
+                                    Text { text: "Last used"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].when; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    Text { text: "Copied"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied-date; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    Text { text: "Slot"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                             }
 
@@ -636,7 +660,14 @@ export component LauncherWindow inherits Window {
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
-                        Text { text: "⏎ Paste   ⌘C Copy   ⌘K Actions"; color: #9a9aa0; font-size: 12px; vertical-alignment: center; }
+                        if root.target-has-icon: Image { source: root.target-icon; width: 14px; height: 14px; }
+                        Text {
+                            text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
+                            color: #9a9aa0;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        Text { text: "⌘C Copy   ⌘K Actions"; color: #9a9aa0; font-size: 12px; vertical-alignment: center; }
                     }
                 }
             }
