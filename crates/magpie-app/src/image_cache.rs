@@ -29,6 +29,18 @@ impl FsImageStore {
     }
 }
 
+impl FsImageStore {
+    /// Best-effort removal of each image file plus its thumbnail sibling.
+    pub fn remove_paths(&self, paths: &[String]) {
+        for p in paths {
+            let _ = std::fs::remove_file(p);
+            if let Some(stem) = p.strip_suffix(".bin") {
+                let _ = std::fs::remove_file(format!("{stem}.thumb.png"));
+            }
+        }
+    }
+}
+
 impl ImageStore for FsImageStore {
     fn put(&self, hash: &str, bytes: &[u8]) -> std::io::Result<String> {
         self.ensure_dir()?;
@@ -54,6 +66,22 @@ mod tests {
         assert_eq!(p1, p2);
         assert!(std::path::Path::new(&p1).exists());
         assert!(p1.ends_with("abc123.bin"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn remove_paths_deletes_bin_and_thumbnail_and_ignores_missing() {
+        let dir = std::env::temp_dir().join(format!("magpie-rm-{}", std::process::id()));
+        let store = FsImageStore { dir: dir.clone() };
+        let bin = store.put("abcd", &[1, 2, 3]).unwrap();
+        let rgba = vec![255, 0, 0, 255];
+        let thumb = store.write_thumbnail("abcd", 1, 1, &rgba, 8).unwrap();
+        assert!(std::path::Path::new(&bin).exists());
+        assert!(std::path::Path::new(&thumb).exists());
+
+        store.remove_paths(&[bin.clone(), "/no/such/file.bin".to_string()]);
+        assert!(!std::path::Path::new(&bin).exists());
+        assert!(!std::path::Path::new(&thumb).exists()); // sibling removed too
         std::fs::remove_dir_all(&dir).ok();
     }
 
