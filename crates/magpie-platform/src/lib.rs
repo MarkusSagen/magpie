@@ -1,6 +1,7 @@
 //! `magpie-platform` — OS clipboard/window/hotkey/paste adapters behind traits,
 //! plus the pure capture-policy and watcher logic that drives them.
 
+pub mod app_icons;
 pub mod defaults;
 pub mod hotkey;
 pub mod os;

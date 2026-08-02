@@ -5,7 +5,10 @@ fn main() {
     use magpie_platform::{Clipboard, SourceApp};
     let mut c = MacClipboard::new().unwrap();
     let s = c.snapshot();
-    let app = ActiveWinSource.frontmost();
+    let app = ActiveWinSource {
+        cache_dir: std::env::temp_dir().join("magpie-probe-icons"),
+    }
+    .frontmost();
     println!(
         "token={} concealed={} some={} app={:?}",
         s.change_token,

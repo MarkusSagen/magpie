@@ -360,7 +360,13 @@ fn spawn_watcher(
         let mut policy = CapturePolicy::new();
         policy.ignore_regexes = default_ignore_regexes();
         policy.app_denylist = denylist;
-        let mut watcher = Watcher::new(clip, ActiveWinSource, policy);
+        let mut watcher = Watcher::new(
+            clip,
+            ActiveWinSource {
+                cache_dir: data_dir().join("app_icons"),
+            },
+            policy,
+        );
         loop {
             if let Some(ev) = watcher.poll_once(now_ms()) {
                 if ingest_event(&state, &ev).is_ok() {
