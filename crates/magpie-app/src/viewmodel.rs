@@ -25,6 +25,27 @@ impl TypeFilter {
     }
 }
 
+/// Map a type-filter row index to a `TypeFilter` (0 All · 1 Text · 2 Link ·
+/// 3 Color · 4 Image · 5 File; out-of-range → All).
+pub fn type_filter_from_index(i: i32) -> TypeFilter {
+    match i {
+        1 => TypeFilter::Text,
+        2 => TypeFilter::Link,
+        3 => TypeFilter::Color,
+        4 => TypeFilter::Image,
+        5 => TypeFilter::File,
+        _ => TypeFilter::All,
+    }
+}
+
+/// Map a sort control index to a `Sort` (0 Recency · 1 Most copied; else Recency).
+pub fn sort_from_index(i: i32) -> Sort {
+    match i {
+        1 => Sort::MostCopied,
+        _ => Sort::Recency,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeFilter {
     All,
@@ -103,6 +124,24 @@ mod tests {
     fn type_filter_maps_to_kind() {
         assert!(TypeFilter::All.to_kind().is_none());
         assert_eq!(TypeFilter::Link.to_kind(), Some(Kind::Link));
+    }
+
+    #[test]
+    fn type_filter_index_mapping() {
+        assert_eq!(type_filter_from_index(0), TypeFilter::All);
+        assert_eq!(type_filter_from_index(1), TypeFilter::Text);
+        assert_eq!(type_filter_from_index(2), TypeFilter::Link);
+        assert_eq!(type_filter_from_index(3), TypeFilter::Color);
+        assert_eq!(type_filter_from_index(4), TypeFilter::Image);
+        assert_eq!(type_filter_from_index(5), TypeFilter::File);
+        assert_eq!(type_filter_from_index(99), TypeFilter::All);
+    }
+
+    #[test]
+    fn sort_index_mapping() {
+        assert_eq!(sort_from_index(0), Sort::Recency);
+        assert_eq!(sort_from_index(1), Sort::MostCopied);
+        assert_eq!(sort_from_index(99), Sort::Recency);
     }
 
     #[test]
