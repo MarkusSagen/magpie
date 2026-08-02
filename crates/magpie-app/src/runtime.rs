@@ -2,8 +2,9 @@ use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::paste_action::{perform_paste, resolve_quick_paste, PasteKind};
+use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
-use magpie_core::{open, Entry, Stats, StatsRange, Totals};
+use magpie_core::{open, Entry, RetentionPolicy, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
@@ -142,8 +143,31 @@ fn refresh_stats(ui: &LauncherWindow, state: &AppState, range_index: i32) {
     )));
 }
 
+/// Apply retention caps (prune DB + delete image files). No-op when off.
+fn sweep_retention(state: &AppState, policy: &RetentionPolicy) {
+    if policy.is_noop() {
+        return;
+    }
+    let removed = {
+        let store = match state.store.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        match store.enforce_retention(policy, now_ms()) {
+            Ok(r) => r,
+            Err(_) => return,
+        }
+    };
+    state.images.remove_paths(&removed.image_paths);
+}
+
 /// Poll the clipboard on a background thread; refresh the window on each capture.
-fn spawn_watcher(state: Arc<AppState>, denylist: Vec<String>, weak: slint::Weak<LauncherWindow>) {
+fn spawn_watcher(
+    state: Arc<AppState>,
+    denylist: Vec<String>,
+    retention: RetentionPolicy,
+    weak: slint::Weak<LauncherWindow>,
+) {
     std::thread::spawn(move || {
         let clip = match magpie_platform::platform_clipboard() {
             Ok(c) => c,
@@ -156,6 +180,7 @@ fn spawn_watcher(state: Arc<AppState>, denylist: Vec<String>, weak: slint::Weak<
         loop {
             if let Some(ev) = watcher.poll_once(now_ms()) {
                 if ingest_event(&state, &ev).is_ok() {
+                    sweep_retention(&state, &retention);
                     let w = weak.clone();
                     let s = state.clone();
                     let _ = slint::invoke_from_event_loop(move || {
@@ -309,8 +334,12 @@ pub fn start() {
         });
     }
 
+    // Retention: sweep once at startup, then after each capture (in the watcher).
+    let retention = policy_from_config(&cfg);
+    sweep_retention(&state, &retention);
+
     refresh(&ui, &state);
-    spawn_watcher(state.clone(), denylist, weak.clone());
+    spawn_watcher(state.clone(), denylist, retention, weak.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
