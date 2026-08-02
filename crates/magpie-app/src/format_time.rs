@@ -24,6 +24,12 @@ pub fn relative_time(then_ms: i64, now_ms: i64) -> String {
     }
 }
 
+/// Absolute UTC date `YYYY-MM-DD` for an epoch-millis timestamp.
+pub fn abs_date(ms: i64) -> String {
+    let (y, m, d) = civil_from_days(ms.div_euclid(86_400_000));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// Howard Hinnant's days-from-epoch → civil (y, m, d) algorithm, proleptic
 /// Gregorian, UTC. `z` is days since 1970-01-01.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
@@ -62,6 +68,11 @@ mod tests {
     fn future_clock_skew_is_just_now() {
         let now = 1_000 * DAY;
         assert_eq!(relative_time(now + 10 * S, now), "just now");
+    }
+
+    #[test]
+    fn abs_date_formats_epoch_day() {
+        assert_eq!(super::abs_date(1_000 * DAY), "1972-09-27");
     }
 
     #[test]
