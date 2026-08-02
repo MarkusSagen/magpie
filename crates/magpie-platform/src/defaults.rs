@@ -42,7 +42,13 @@ mod tests {
     #[test]
     fn denylist_covers_major_password_managers() {
         let d = default_app_denylist();
-        for app in ["1Password", "Bitwarden", "KeePassXC", "LastPass", "Dashlane"] {
+        for app in [
+            "1Password",
+            "Bitwarden",
+            "KeePassXC",
+            "LastPass",
+            "Dashlane",
+        ] {
             assert!(d.iter().any(|x| x == app), "missing {app}");
         }
     }

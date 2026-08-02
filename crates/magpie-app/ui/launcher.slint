@@ -13,6 +13,8 @@ struct EntryRow {
     when: string,
     copied: int,
     size: string,
+    masked: bool,
+    full_masked: string,
 }
 
 struct Bar {
@@ -74,6 +76,8 @@ export component LauncherWindow inherits Window {
     in-out property <int> type-index: 0;
     in-out property <int> sort-index: 0;
     in-out property <int> action-selected: 0;
+    in property <bool> screenshare: false;
+    in-out property <bool> revealed: false;
 
     in-out property <string> view: "list";
     in property <[Bar]> over-time-bars;
@@ -98,6 +102,7 @@ export component LauncherWindow inherits Window {
     callback hide-window();
     callback toggle-pin(int);
     callback paste-into-search();
+    callback toggle-screenshare();
 
     in-out property <string> edit-mode: "none";
     in-out property <string> edit-text;
@@ -300,6 +305,14 @@ export component LauncherWindow inherits Window {
                         Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
+                        width: 40px;
+                        height: 26px;
+                        background: root.screenshare ? #b04a4a : #202024;
+                        border-radius: 6px;
+                        TouchArea { clicked => { root.toggle-screenshare(); } }
+                        Text { text: "🔒"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
                         width: 58px;
                         height: 26px;
                         background: #202024;
@@ -372,6 +385,7 @@ export component LauncherWindow inherits Window {
                     // handler can reach `list` (an id inside this subtree).
                     property <int> sel-follow: root.selected;
                     changed sel-follow => {
+                        root.revealed = false;
                         if root.selected * 52px < -list.viewport-y {
                             list.viewport-y = -root.selected * 52px;
                         } else if (root.selected + 1) * 52px > -list.viewport-y + list.visible-height {
@@ -444,10 +458,25 @@ export component LauncherWindow inherits Window {
                                 vertical-stretch: 1;
                                 Text {
                                     width: parent.visible-width;
-                                    text: (entries.length > 0 && root.selected < entries.length) ? entries[root.selected].full : "";
+                                    text: (entries.length > 0 && root.selected < entries.length)
+                                        ? (entries[root.selected].masked && !root.revealed
+                                            ? entries[root.selected].full-masked
+                                            : entries[root.selected].full)
+                                        : "";
                                     color: #d0d0d4;
                                     wrap: word-wrap;
                                 }
+                            }
+
+                            // Reveal a masked entry's detail (UI-only; row stays masked).
+                            if entries.length > 0 && root.selected < entries.length
+                                && entries[root.selected].masked && !root.revealed: Rectangle {
+                                height: 26px;
+                                width: 96px;
+                                background: #2a2a30;
+                                border-radius: 6px;
+                                TouchArea { clicked => { root.revealed = true; } }
+                                Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                             }
 
                             // Metadata block.

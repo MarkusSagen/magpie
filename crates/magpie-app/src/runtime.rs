@@ -2,6 +2,7 @@ use crate::{Bar, EntryRow, LauncherWindow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::format_time::relative_time;
+use magpie_app::mask_view::{mask_render, should_mask, MaskRules};
 use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
@@ -81,6 +82,7 @@ fn preview_title(e: &Entry) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn to_rows(
     entries: &[Entry],
     slots: &HashMap<i64, i64>,
@@ -88,6 +90,8 @@ fn to_rows(
     merge_set: &[i32],
     app_names: &HashMap<i64, String>,
     now: i64,
+    rules: &MaskRules,
+    visible: usize,
 ) -> Vec<EntryRow> {
     entries
         .iter()
@@ -98,6 +102,22 @@ fn to_rows(
                 .cloned()
                 .unwrap_or_else(|| "—".to_string());
             let when = relative_time(e.last_copied_at_ms, now);
+            let masked = should_mask(
+                rules,
+                app_names.get(&e.id).map(|s| s.as_str()),
+                &e.full_text,
+            );
+            let base_title = preview_title(e);
+            let title = if masked {
+                mask_render(&base_title, visible)
+            } else {
+                base_title
+            };
+            let full_masked = if masked {
+                mask_render(&e.full_text, visible)
+            } else {
+                String::new()
+            };
             let tagline = tags
                 .get(&e.id)
                 .map(|ts| {
@@ -114,7 +134,7 @@ fn to_rows(
             };
             let size = format!("{} chars · {} lines", e.char_count, e.line_count);
             EntryRow {
-                title: SharedString::from(preview_title(e)),
+                title: SharedString::from(title),
                 subtitle: SharedString::from(subtitle),
                 kind: SharedString::from(e.kind.as_str()),
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
@@ -126,6 +146,8 @@ fn to_rows(
                 when: SharedString::from(when),
                 copied: e.copy_count as i32,
                 size: SharedString::from(size),
+                masked,
+                full_masked: SharedString::from(full_masked),
             }
         })
         .collect()
@@ -141,6 +163,11 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         }
     }
     let results = current_results(state, now_ms());
+
+    let screenshare = state.screenshare.lock().map(|g| *g).unwrap_or(false);
+    let rules = MaskRules::build(&state.mask_apps, &state.mask_patterns, screenshare);
+    let visible = state.mask_visible_chars.max(0) as usize;
+    ui.set_screenshare(screenshare);
 
     let (slots, tag_map, all_tags, app_names) = match state.store.lock() {
         Ok(store) => {
@@ -198,6 +225,8 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         &merge_set,
         &app_names,
         now_ms(),
+        &rules,
+        visible,
     ))));
 }
 
@@ -532,6 +561,18 @@ pub fn start() {
                 if let Ok(store) = s.store.lock() {
                     let _ = store.set_pinned(e.id, !e.pinned);
                 }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_screenshare(move || {
+            if let Ok(mut g) = s.screenshare.lock() {
+                *g = !*g;
             }
             if let Some(ui) = w.upgrade() {
                 refresh(&ui, &s);
