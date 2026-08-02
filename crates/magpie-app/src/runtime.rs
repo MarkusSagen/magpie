@@ -204,6 +204,26 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
     let _ = ui.show();
 }
 
+/// Set the search query text (command-bar owns input in Rust), mirror it into the
+/// UI state, and refresh the results.
+fn apply_query(ui: &LauncherWindow, state: &AppState, text: String) {
+    if let Ok(mut u) = state.ui.lock() {
+        u.text = text.clone();
+    }
+    ui.set_query(SharedString::from(text));
+    refresh(ui, state);
+}
+
+/// Paste the entry at `idx` in the current results using the formatted path.
+fn activate_index(state: &AppState, idx: usize, auto: bool) {
+    let recent = current_results(state, now_ms());
+    if let Some(entry) = recent.get(idx) {
+        if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+            let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
+        }
+    }
+}
+
 fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
     let bars: Vec<Bar> = to_bars(items)
         .into_iter()
@@ -425,11 +445,105 @@ pub fn start() {
         let s = state.clone();
         let auto = cfg.paste_on_select;
         ui.on_activate(move |idx| {
-            let recent = current_results(&s, now_ms());
-            if let Some(entry) = recent.get(idx as usize) {
-                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                    let _ =
-                        perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
+            activate_index(&s, idx as usize, auto);
+        });
+    }
+    {
+        let s = state.clone();
+        let auto = cfg.paste_on_select;
+        ui.on_activate_nth(move |n| {
+            if n >= 1 {
+                activate_index(&s, (n - 1) as usize, auto);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_key_char(move |c| {
+            if let Some(ui) = w.upgrade() {
+                let q = format!("{}{}", ui.get_query(), c);
+                apply_query(&ui, &s, q);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_key_backspace(move || {
+            if let Some(ui) = w.upgrade() {
+                let mut q = ui.get_query().to_string();
+                q.pop();
+                apply_query(&ui, &s, q);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_clear_query(move || {
+            if let Some(ui) = w.upgrade() {
+                apply_query(&ui, &s, String::new());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_type_filter(move |idx| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.type_filter = magpie_app::viewmodel::type_filter_from_index(idx);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_sort(move |idx| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.sort = magpie_app::viewmodel::sort_from_index(idx);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_hide_window(move || {
+            if let Some(ui) = w.upgrade() {
+                let _ = ui.hide();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_pin(move |idx| {
+            let results = current_results(&s, now_ms());
+            if let Some(e) = results.get(idx as usize) {
+                if let Ok(store) = s.store.lock() {
+                    let _ = store.set_pinned(e.id, !e.pinned);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_paste_into_search(move || {
+            if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                if let Some(Content::Text(t)) = clip.snapshot().content {
+                    if let Some(ui) = w.upgrade() {
+                        let q = format!("{}{}", ui.get_query(), t);
+                        apply_query(&ui, &s, q);
+                    }
                 }
             }
         });
@@ -476,6 +590,7 @@ pub fn start() {
                 if let Some(e) = results.get(index as usize) {
                     ui.set_edit_text(SharedString::from(e.full_text.clone()));
                     ui.set_edit_mode(SharedString::from("entry"));
+                    ui.set_mode(SharedString::from("edit"));
                 }
             }
         });
@@ -486,6 +601,7 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 ui.set_edit_text(SharedString::from(""));
                 ui.set_edit_mode(SharedString::from("snippet"));
+                ui.set_mode(SharedString::from("edit"));
             }
         });
     }
@@ -512,6 +628,7 @@ pub fn start() {
                     }
                 }
                 ui.set_edit_mode(SharedString::from("none"));
+                ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
             }
         });
@@ -521,6 +638,7 @@ pub fn start() {
         ui.on_cancel_edit(move || {
             if let Some(ui) = w.upgrade() {
                 ui.set_edit_mode(SharedString::from("none"));
+                ui.set_mode(SharedString::from("list"));
             }
         });
     }
