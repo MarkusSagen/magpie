@@ -33,7 +33,10 @@ fn realistic_session_stats() {
     ] {
         s.ingest(&e, &Noop).unwrap();
     }
-    let range = StatsRange { since_ms: Some(100 * DAY), now_ms: 101 * DAY + 100 };
+    let range = StatsRange {
+        since_ms: Some(100 * DAY),
+        now_ms: 101 * DAY + 100,
+    };
     let st = s.stats(&range, 10).unwrap();
 
     assert_eq!(st.totals.copies, 5);
@@ -60,7 +63,10 @@ fn over_time_buckets_partition_the_copies() {
         )
         .unwrap();
     }
-    let range = StatsRange { since_ms: Some(9 * DAY), now_ms: 12 * DAY };
+    let range = StatsRange {
+        since_ms: Some(9 * DAY),
+        now_ms: 12 * DAY,
+    };
     let st = s.stats(&range, 10).unwrap();
     let bucket_sum: i64 = st.over_time.iter().map(|b| b.count).sum();
     assert_eq!(bucket_sum, st.totals.copies);
@@ -70,7 +76,13 @@ fn over_time_buckets_partition_the_copies() {
 fn empty_db_yields_zeroes() {
     let s = open_in_memory().unwrap();
     let st = s
-        .stats(&StatsRange { since_ms: None, now_ms: 1000 }, 10)
+        .stats(
+            &StatsRange {
+                since_ms: None,
+                now_ms: 1000,
+            },
+            10,
+        )
         .unwrap();
     assert_eq!(st.totals.copies, 0);
     assert!(st.most_copied.is_empty());

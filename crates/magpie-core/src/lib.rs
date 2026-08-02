@@ -16,12 +16,14 @@
 pub mod detect;
 pub mod metrics;
 pub mod model;
+pub mod retention;
 pub mod search;
 pub mod stats;
 pub mod store;
 
 pub use detect::Kind;
 pub use model::{AppInfo, CaptureEvent, Content, Entry};
+pub use retention::{Removed, RetentionPolicy};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
 pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};
 pub use store::{open, open_in_memory, ImageStore, Ingested, Store};

@@ -141,7 +141,10 @@ impl Store {
              LIMIT ?3",
         )?;
         let rows = stmt.query_map([lo, hi, top_n], |r| {
-            Ok(AppCount { name: r.get(0)?, count: r.get(1)? })
+            Ok(AppCount {
+                name: r.get(0)?,
+                count: r.get(1)?,
+            })
         })?;
         rows.collect()
     }
@@ -262,7 +265,10 @@ mod tests {
                 ev("c", 102 * DAY + 5, None),
             ],
         );
-        let range = StatsRange { since_ms: Some(100 * DAY), now_ms: 102 * DAY + 10 };
+        let range = StatsRange {
+            since_ms: Some(100 * DAY),
+            now_ms: 102 * DAY + 10,
+        };
         let buckets = s
             .over_time(range.since_ms.unwrap(), range.now_ms, &range)
             .unwrap();
@@ -278,7 +284,10 @@ mod tests {
     fn over_time_all_time_switches_to_weekly_beyond_90_days() {
         let s = open_in_memory().unwrap();
         seed(&s, &[ev("x", 0, None), ev("y", 200 * DAY, None)]);
-        let range = StatsRange { since_ms: None, now_ms: 200 * DAY };
+        let range = StatsRange {
+            since_ms: None,
+            now_ms: 200 * DAY,
+        };
         let buckets = s.over_time(i64::MIN, range.now_ms, &range).unwrap();
         assert!(
             buckets.len() < 40,
@@ -336,7 +345,10 @@ mod tests {
                 ev("b", 3, None),
             ],
         );
-        let range = StatsRange { since_ms: None, now_ms: 1000 };
+        let range = StatsRange {
+            since_ms: None,
+            now_ms: 1000,
+        };
         let st = s.stats(&range, 10).unwrap();
         assert_eq!(st.totals.copies, 3);
         assert_eq!(st.most_copied[0].count, 2);

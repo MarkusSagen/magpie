@@ -91,7 +91,11 @@ fn truncate(s: &str, n: usize) -> String {
 
 fn empty_stats() -> Stats {
     Stats {
-        totals: Totals { copies: 0, unique_entries: 0, distinct_apps: 0 },
+        totals: Totals {
+            copies: 0,
+            unique_entries: 0,
+            distinct_apps: 0,
+        },
         most_copied: Vec::new(),
         over_time: Vec::new(),
         per_app: Vec::new(),

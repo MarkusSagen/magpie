@@ -30,9 +30,18 @@ fn to_bars_empty_is_empty() {
 #[test]
 fn range_from_index_maps_windows() {
     let now = 100 * 86_400_000i64;
-    assert_eq!(range_from_index(0, now).since_ms, Some(now - 7 * 86_400_000));
-    assert_eq!(range_from_index(1, now).since_ms, Some(now - 30 * 86_400_000));
-    assert_eq!(range_from_index(2, now).since_ms, Some(now - 90 * 86_400_000));
+    assert_eq!(
+        range_from_index(0, now).since_ms,
+        Some(now - 7 * 86_400_000)
+    );
+    assert_eq!(
+        range_from_index(1, now).since_ms,
+        Some(now - 30 * 86_400_000)
+    );
+    assert_eq!(
+        range_from_index(2, now).since_ms,
+        Some(now - 90 * 86_400_000)
+    );
     assert_eq!(range_from_index(3, now).since_ms, None); // All
     assert_eq!(range_from_index(3, now).now_ms, now);
 }
