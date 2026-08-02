@@ -51,35 +51,82 @@ fn preview_title(e: &Entry) -> String {
     }
 }
 
-fn to_rows(entries: &[Entry], slots: &HashMap<i64, i64>) -> Vec<EntryRow> {
+fn to_rows(
+    entries: &[Entry],
+    slots: &HashMap<i64, i64>,
+    tags: &HashMap<i64, Vec<String>>,
+) -> Vec<EntryRow> {
     entries
         .iter()
-        .map(|e| EntryRow {
-            title: SharedString::from(preview_title(e)),
-            subtitle: SharedString::from(format!("{} · copied {}×", e.kind.as_str(), e.copy_count)),
-            kind: SharedString::from(e.kind.as_str()),
-            slot: *slots.get(&e.id).unwrap_or(&0) as i32,
+        .map(|e| {
+            let tagline = tags
+                .get(&e.id)
+                .map(|ts| ts.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))
+                .unwrap_or_default();
+            let subtitle = if tagline.is_empty() {
+                format!("{} · copied {}×", e.kind.as_str(), e.copy_count)
+            } else {
+                format!("{} · copied {}× · {}", e.kind.as_str(), e.copy_count, tagline)
+            };
+            EntryRow {
+                title: SharedString::from(preview_title(e)),
+                subtitle: SharedString::from(subtitle),
+                kind: SharedString::from(e.kind.as_str()),
+                slot: *slots.get(&e.id).unwrap_or(&0) as i32,
+            }
         })
         .collect()
 }
 
 /// Recompute results from the current UI state and push them into the window.
 fn refresh(ui: &LauncherWindow, state: &AppState) {
+    // Push the window's tag-filter into UiState before querying.
+    {
+        let t = ui.get_tag_filter().to_string();
+        if let Ok(mut u) = state.ui.lock() {
+            u.tag = if t.is_empty() { None } else { Some(t) };
+        }
+    }
     let results = current_results(state, now_ms());
-    let slots: HashMap<i64, i64> = match state.store.lock() {
-        Ok(store) => store
-            .slot_map()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(slot, eid)| (eid, slot))
-            .collect(),
-        Err(_) => HashMap::new(),
-    };
+
+    let (slots, tag_map, all_tags): (HashMap<i64, i64>, HashMap<i64, Vec<String>>, Vec<String>) =
+        match state.store.lock() {
+            Ok(store) => {
+                let slots = store
+                    .slot_map()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(slot, eid)| (eid, slot))
+                    .collect();
+                let mut tag_map: HashMap<i64, Vec<String>> = HashMap::new();
+                for (eid, tag) in store.tag_pairs().unwrap_or_default() {
+                    tag_map.entry(eid).or_default().push(tag);
+                }
+                let all_tags = store.all_tags().unwrap_or_default();
+                (slots, tag_map, all_tags)
+            }
+            Err(_) => (HashMap::new(), HashMap::new(), Vec::new()),
+        };
+
+    let sel = ui.get_selected() as usize;
+    let selected_tags: Vec<SharedString> = results
+        .get(sel)
+        .and_then(|e| tag_map.get(&e.id))
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(SharedString::from)
+        .collect();
+    ui.set_selected_tags(ModelRc::new(VecModel::from(selected_tags)));
+    ui.set_all_tags(ModelRc::new(VecModel::from(
+        all_tags.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+    )));
+
     let detail = results
         .first()
         .map(|e| e.full_text.clone())
         .unwrap_or_default();
-    ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results, &slots))));
+    ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results, &slots, &tag_map))));
     ui.set_detail_text(SharedString::from(detail));
 }
 
@@ -401,6 +448,53 @@ pub fn start() {
         ui.on_cancel_edit(move || {
             if let Some(ui) = w.upgrade() {
                 ui.set_edit_mode(SharedString::from("none"));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_add_tag(move |index, tag| {
+            let recent = current_results(&s, now_ms());
+            if let Some(e) = recent.get(index as usize) {
+                if let Ok(store) = s.store.lock() {
+                    let _ = store.add_tag(e.id, &tag);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_add_tag_text(SharedString::from(""));
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_remove_tag(move |index, tag| {
+            let recent = current_results(&s, now_ms());
+            if let Some(e) = recent.get(index as usize) {
+                if let Ok(store) = s.store.lock() {
+                    let _ = store.remove_tag(e.id, &tag);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_tag_filter(move |tag| {
+            if let Some(ui) = w.upgrade() {
+                let current = ui.get_tag_filter().to_string();
+                let next = if current == tag.as_str() {
+                    SharedString::from("")
+                } else {
+                    tag
+                };
+                ui.set_tag_filter(next);
+                refresh(&ui, &s);
             }
         });
     }

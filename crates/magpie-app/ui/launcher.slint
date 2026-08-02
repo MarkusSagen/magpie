@@ -84,6 +84,14 @@ export component LauncherWindow inherits Window {
     callback save-edit(string);
     callback cancel-edit();
 
+    in property <[string]> selected-tags;
+    in property <[string]> all-tags;
+    in-out property <string> add-tag-text;
+    in-out property <string> tag-filter;
+    callback add-tag(int, string);
+    callback remove-tag(int, string);
+    callback set-tag-filter(string);
+
     VerticalLayout {
         padding: 8px;
         spacing: 8px;
@@ -120,6 +128,30 @@ export component LauncherWindow inherits Window {
                 text <=> query;
                 edited(t) => {
                     root.search-changed(t);
+                }
+            }
+
+            if root.all-tags.length > 0: HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                for t in root.all-tags: Rectangle {
+                    height: 22px;
+                    width: 64px;
+                    background: root.tag-filter == t ? #6a8cff : #2a2a30;
+                    border-radius: 11px;
+                    TouchArea {
+                        clicked => {
+                            root.set-tag-filter(t);
+                        }
+                    }
+                    Text {
+                        text: "#" + t;
+                        color: white;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
                 }
             }
 
@@ -183,6 +215,54 @@ export component LauncherWindow inherits Window {
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
+                            }
+                        }
+
+                        // Tag chips for the selected entry (click to remove)
+                        if root.edit-mode == "none" && root.selected-tags.length > 0: HorizontalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            for t in root.selected-tags: Rectangle {
+                                height: 22px;
+                                width: 74px;
+                                background: #3a3a40;
+                                border-radius: 11px;
+                                TouchArea {
+                                    clicked => {
+                                        root.remove-tag(root.selected, t);
+                                    }
+                                }
+                                Text {
+                                    text: "#" + t + " ✕";
+                                    color: #d0d0d4;
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+
+                        // Add-tag input
+                        if root.edit-mode == "none" && entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            tagfield := LineEdit {
+                                placeholder-text: "add tag…";
+                                width: 140px;
+                                text <=> root.add-tag-text;
+                            }
+                            Rectangle {
+                                width: 48px;
+                                height: 26px;
+                                background: #2a2a30;
+                                border-radius: 6px;
+                                TouchArea {
+                                    clicked => {
+                                        root.add-tag(root.selected, root.add-tag-text);
+                                    }
+                                }
+                                Text { text: "Add"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                             }
                         }
 
