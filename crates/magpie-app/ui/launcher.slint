@@ -235,7 +235,11 @@ export component LauncherWindow inherits Window {
                 return accept;
             }
             if event.text == Key.Return {
-                root.activate(root.selected);
+                if event.modifiers.control {
+                    root.activate-keep(root.selected);
+                } else {
+                    root.activate(root.selected);
+                }
                 return accept;
             }
             if event.text == Key.Escape {

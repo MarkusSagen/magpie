@@ -346,14 +346,41 @@ fn apply_query(ui: &LauncherWindow, state: &AppState, text: String) {
     refresh(ui, state);
 }
 
-/// Paste the entry at `idx` in the current results using the formatted path.
-fn activate_index(state: &AppState, idx: usize, auto: bool) {
+/// After hiding, wait for focus to return to the previous app, send the paste
+/// keystroke, and optionally re-show the window. Runs off the UI thread.
+fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        let _ = magpie_platform::Paster::paste(&EnigoPaster);
+        if keep_open {
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    let _ = ui.show();
+                }
+            });
+        }
+    });
+}
+
+/// The Enter / ⌘Enter flow: copy the entry at `idx`, hide Magpie so the previous
+/// app regains focus, then paste into it. `keep_open` re-shows Magpie afterward.
+fn paste_and_close(
+    state: &AppState,
+    weak: &slint::Weak<LauncherWindow>,
+    idx: usize,
+    keep_open: bool,
+) {
     let recent = current_results(state, now_ms());
     if let Some(entry) = recent.get(idx) {
         if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-            let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, auto);
+            // Copy only here; the keystroke is sent after the window hides.
+            let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
         }
     }
+    if let Some(ui) = weak.upgrade() {
+        let _ = ui.hide();
+    }
+    spawn_paste(weak.clone(), keep_open);
 }
 
 fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
@@ -599,17 +626,17 @@ pub fn start() {
     }
     {
         let s = state.clone();
-        let auto = cfg.paste_on_select;
+        let w = ui.as_weak();
         ui.on_activate(move |idx| {
-            activate_index(&s, idx as usize, auto);
+            paste_and_close(&s, &w, idx as usize, false);
         });
     }
     {
         let s = state.clone();
-        let auto = cfg.paste_on_select;
+        let w = ui.as_weak();
         ui.on_activate_nth(move |n| {
             if n >= 1 {
-                activate_index(&s, (n - 1) as usize, auto);
+                paste_and_close(&s, &w, (n - 1) as usize, false);
             }
         });
     }
@@ -743,9 +770,9 @@ pub fn start() {
     }
     {
         let s = state.clone();
-        let auto = cfg.paste_on_select;
+        let w = ui.as_weak();
         ui.on_activate_keep(move |idx| {
-            activate_index(&s, idx as usize, auto);
+            paste_and_close(&s, &w, idx as usize, true);
         });
     }
     {
