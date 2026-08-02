@@ -225,7 +225,11 @@ mod tests {
         let s = open_in_memory().unwrap();
         let old = s.ingest(&text("old", 100), &Noop).unwrap().entry_id;
         s.add_tag(old, "gone").unwrap();
-        let policy = RetentionPolicy { max_entries: None, max_age_ms: Some(1_000), max_image_bytes: None };
+        let policy = RetentionPolicy {
+            max_entries: None,
+            max_age_ms: Some(1_000),
+            max_image_bytes: None,
+        };
         s.enforce_retention(&policy, 10_000).unwrap();
         assert!(s.all_tags().unwrap().is_empty());
     }

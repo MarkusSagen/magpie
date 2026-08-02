@@ -10,7 +10,11 @@ impl ImageStore for Noop {
 }
 fn ingest(s: &Store, t: &str) -> i64 {
     s.ingest(
-        &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: 1 },
+        &CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: None,
+            copied_at_ms: 1,
+        },
         &Noop,
     )
     .unwrap()
@@ -40,7 +44,10 @@ fn all_tags_reflects_adds_and_removes() {
     let id = ingest(&s, "x");
     s.add_tag(id, "one").unwrap();
     s.add_tag(id, "two").unwrap();
-    assert_eq!(s.all_tags().unwrap(), vec!["one".to_string(), "two".to_string()]);
+    assert_eq!(
+        s.all_tags().unwrap(),
+        vec!["one".to_string(), "two".to_string()]
+    );
     s.remove_tag(id, "one").unwrap();
     assert_eq!(s.all_tags().unwrap(), vec!["two".to_string()]);
 }

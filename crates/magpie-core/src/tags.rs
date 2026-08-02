@@ -65,7 +65,11 @@ mod tests {
     }
     fn ingest(s: &Store, t: &str) -> i64 {
         s.ingest(
-            &CaptureEvent { content: Content::Text(t.into()), source_app: None, copied_at_ms: 1 },
+            &CaptureEvent {
+                content: Content::Text(t.into()),
+                source_app: None,
+                copied_at_ms: 1,
+            },
             &Noop,
         )
         .unwrap()
@@ -90,8 +94,14 @@ mod tests {
         s.add_tag(a, "red").unwrap();
         s.add_tag(a, "blue").unwrap();
         s.add_tag(b, "red").unwrap();
-        assert_eq!(s.tags_of(a).unwrap(), vec!["blue".to_string(), "red".to_string()]);
-        assert_eq!(s.all_tags().unwrap(), vec!["blue".to_string(), "red".to_string()]);
+        assert_eq!(
+            s.tags_of(a).unwrap(),
+            vec!["blue".to_string(), "red".to_string()]
+        );
+        assert_eq!(
+            s.all_tags().unwrap(),
+            vec!["blue".to_string(), "red".to_string()]
+        );
         s.remove_tag(a, "RED").unwrap();
         assert_eq!(s.tags_of(a).unwrap(), vec!["blue".to_string()]);
     }
@@ -102,6 +112,9 @@ mod tests {
         let id = ingest(&s, "x");
         s.add_tag(id, "a").unwrap();
         s.add_tag(id, "b").unwrap();
-        assert_eq!(s.tag_pairs().unwrap(), vec![(id, "a".to_string()), (id, "b".to_string())]);
+        assert_eq!(
+            s.tag_pairs().unwrap(),
+            vec![(id, "a".to_string()), (id, "b".to_string())]
+        );
     }
 }

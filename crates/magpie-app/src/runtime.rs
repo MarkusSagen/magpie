@@ -61,12 +61,22 @@ fn to_rows(
         .map(|e| {
             let tagline = tags
                 .get(&e.id)
-                .map(|ts| ts.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))
+                .map(|ts| {
+                    ts.iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
                 .unwrap_or_default();
             let subtitle = if tagline.is_empty() {
                 format!("{} · copied {}×", e.kind.as_str(), e.copy_count)
             } else {
-                format!("{} · copied {}× · {}", e.kind.as_str(), e.copy_count, tagline)
+                format!(
+                    "{} · copied {}× · {}",
+                    e.kind.as_str(),
+                    e.copy_count,
+                    tagline
+                )
             };
             EntryRow {
                 title: SharedString::from(preview_title(e)),
@@ -89,24 +99,23 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     }
     let results = current_results(state, now_ms());
 
-    let (slots, tag_map, all_tags): (HashMap<i64, i64>, HashMap<i64, Vec<String>>, Vec<String>) =
-        match state.store.lock() {
-            Ok(store) => {
-                let slots = store
-                    .slot_map()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(slot, eid)| (eid, slot))
-                    .collect();
-                let mut tag_map: HashMap<i64, Vec<String>> = HashMap::new();
-                for (eid, tag) in store.tag_pairs().unwrap_or_default() {
-                    tag_map.entry(eid).or_default().push(tag);
-                }
-                let all_tags = store.all_tags().unwrap_or_default();
-                (slots, tag_map, all_tags)
+    let (slots, tag_map, all_tags) = match state.store.lock() {
+        Ok(store) => {
+            let slots: HashMap<i64, i64> = store
+                .slot_map()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(slot, eid)| (eid, slot))
+                .collect();
+            let mut tag_map: HashMap<i64, Vec<String>> = HashMap::new();
+            for (eid, tag) in store.tag_pairs().unwrap_or_default() {
+                tag_map.entry(eid).or_default().push(tag);
             }
-            Err(_) => (HashMap::new(), HashMap::new(), Vec::new()),
-        };
+            let all_tags: Vec<String> = store.all_tags().unwrap_or_default();
+            (slots, tag_map, all_tags)
+        }
+        Err(_) => (HashMap::new(), HashMap::new(), Vec::new()),
+    };
 
     let sel = ui.get_selected() as usize;
     let selected_tags: Vec<SharedString> = results
@@ -119,14 +128,19 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         .collect();
     ui.set_selected_tags(ModelRc::new(VecModel::from(selected_tags)));
     ui.set_all_tags(ModelRc::new(VecModel::from(
-        all_tags.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+        all_tags
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
     )));
 
     let detail = results
         .first()
         .map(|e| e.full_text.clone())
         .unwrap_or_default();
-    ui.set_entries(ModelRc::new(VecModel::from(to_rows(&results, &slots, &tag_map))));
+    ui.set_entries(ModelRc::new(VecModel::from(to_rows(
+        &results, &slots, &tag_map,
+    ))));
     ui.set_detail_text(SharedString::from(detail));
 }
 

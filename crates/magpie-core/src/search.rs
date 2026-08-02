@@ -331,7 +331,10 @@ mod tests {
     #[test]
     fn filter_by_tag() {
         let s = open_in_memory().unwrap();
-        let a = s.ingest(&text_ev("tagged one", 1), &FakeImages).unwrap().entry_id;
+        let a = s
+            .ingest(&text_ev("tagged one", 1), &FakeImages)
+            .unwrap()
+            .entry_id;
         s.ingest(&text_ev("untagged", 2), &FakeImages).unwrap();
         s.add_tag(a, "keep").unwrap();
 
