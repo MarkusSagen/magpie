@@ -39,6 +39,7 @@ pub struct UiState {
     pub app_filter: Option<i64>,
     pub time_filter: TimeFilter,
     pub sort: Sort,
+    pub tag: Option<String>,
 }
 
 impl UiState {
@@ -50,6 +51,7 @@ impl UiState {
             app_filter: None,
             time_filter: TimeFilter::All,
             sort: Sort::Recency,
+            tag: None,
         }
     }
 }
@@ -69,6 +71,7 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
     q.kind = ui.type_filter.to_kind();
     q.source_app_id = ui.app_filter;
     q.sort = ui.sort;
+    q.tag = ui.tag.clone();
     q.time = match ui.time_filter {
         TimeFilter::All => TimeRange::default(),
         TimeFilter::Today => TimeRange {
@@ -87,6 +90,14 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
 mod tests {
     use super::*;
     use magpie_core::{Kind, SearchMode};
+
+    #[test]
+    fn tag_flows_into_query() {
+        let mut ui = UiState::new();
+        assert!(to_query(&ui, 0).tag.is_none());
+        ui.tag = Some("work".into());
+        assert_eq!(to_query(&ui, 0).tag, Some("work".to_string()));
+    }
 
     #[test]
     fn type_filter_maps_to_kind() {
