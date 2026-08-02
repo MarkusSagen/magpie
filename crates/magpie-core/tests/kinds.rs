@@ -1,9 +1,7 @@
 //! Every content kind is classified and stored correctly, and is findable via a
 //! kind-filtered search. Guards the "copied X shows up as X" behavior.
 
-use magpie_core::{
-    default_query, open_in_memory, CaptureEvent, Content, ImageStore, Kind, Store,
-};
+use magpie_core::{default_query, open_in_memory, CaptureEvent, Content, ImageStore, Kind, Store};
 
 struct FakeImages;
 impl ImageStore for FakeImages {
@@ -44,7 +42,13 @@ fn each_content_kind_is_classified() {
     let email = ingest(&s, Content::Text("me@example.io".into()), 3);
     let color = ingest(&s, Content::Text("#1a2b3c".into()), 4);
     let rgb = ingest(&s, Content::Text("rgb(10, 20, 30)".into()), 5);
-    let image = ingest(&s, Content::Image { bytes: vec![1, 2, 3, 4] }, 6);
+    let image = ingest(
+        &s,
+        Content::Image {
+            bytes: vec![1, 2, 3, 4],
+        },
+        6,
+    );
     let files = ingest(
         &s,
         Content::Files(vec!["/a/one.png".into(), "/b/two.pdf".into()]),
@@ -63,8 +67,19 @@ fn each_content_kind_is_classified() {
 #[test]
 fn image_entry_has_image_path_and_no_text() {
     let s = open_in_memory().unwrap();
-    let id = ingest(&s, Content::Image { bytes: vec![9, 9, 9] }, 1);
-    let e = s.recent(10).unwrap().into_iter().find(|e| e.id == id).unwrap();
+    let id = ingest(
+        &s,
+        Content::Image {
+            bytes: vec![9, 9, 9],
+        },
+        1,
+    );
+    let e = s
+        .recent(10)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == id)
+        .unwrap();
     assert!(e.image_path.is_some(), "image entry keeps an image_path");
     assert!(e.full_text.is_empty(), "image entry has no text body");
 }
@@ -77,7 +92,12 @@ fn file_entry_stores_the_paths() {
         Content::Files(vec!["/x/a.txt".into(), "/y/b.txt".into()]),
         1,
     );
-    let e = s.recent(10).unwrap().into_iter().find(|e| e.id == id).unwrap();
+    let e = s
+        .recent(10)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == id)
+        .unwrap();
     assert_eq!(e.full_text, "/x/a.txt\n/y/b.txt");
 }
 
