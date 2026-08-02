@@ -90,6 +90,9 @@ export component LauncherWindow inherits Window {
     in-out property <int> action-selected: 0;
     in property <bool> screenshare: false;
     in-out property <bool> revealed: false;
+    // True while the primary modifier (⌘ on macOS / Ctrl elsewhere) is held —
+    // lights up the 1-9 quick-paste badges.
+    in-out property <bool> cmd-held: false;
     // The app that was frontmost when the launcher opened (paste target).
     in property <string> target-app: "";
     in property <image> target-icon;
@@ -169,7 +172,12 @@ export component LauncherWindow inherits Window {
     }
 
     fs := FocusScope {
+        key-released(event) => {
+            root.cmd-held = event.modifiers.control;
+            return accept;
+        }
         key-pressed(event) => {
+            root.cmd-held = event.modifiers.control;
             // Native editor owns the keyboard while editing.
             if root.mode == "edit" {
                 return reject;
@@ -487,6 +495,15 @@ export component LauncherWindow inherits Window {
                                         if row.badge != "": Text { text: row.badge; color: #9a9aa0; font-size: 10px; vertical-alignment: center; }
                                     }
                                     Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
+                                }
+                                // 1-9 quick-paste badge; brightens while ⌘/Ctrl is held.
+                                if i < 9: Text {
+                                    text: i + 1;
+                                    color: root.cmd-held ? #6a8cff : #45454e;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 16px;
+                                    horizontal-alignment: center;
                                 }
                                 if row.slot > 0: Rectangle {
                                     width: 24px;
