@@ -35,6 +35,7 @@ pub struct SearchQuery {
     pub source_app_id: Option<i64>,
     pub time: TimeRange,
     pub sort: Sort,
+    pub tag: Option<String>,
     pub limit: i64,
 }
 
@@ -46,6 +47,7 @@ pub fn default_query() -> SearchQuery {
         source_app_id: None,
         time: TimeRange::default(),
         sort: Sort::Recency,
+        tag: None,
         limit: 200,
     }
 }
@@ -227,6 +229,13 @@ impl Store {
             clauses.push("e.last_copied_at_ms <= ?".to_string());
             params.push(Value::Integer(until));
         }
+        if let Some(tag) = &q.tag {
+            let tag = tag.trim().to_lowercase();
+            if !tag.is_empty() {
+                clauses.push("e.id IN (SELECT entry_id FROM entry_tags WHERE tag = ?)".to_string());
+                params.push(Value::Text(tag));
+            }
+        }
 
         let where_sql = if clauses.is_empty() {
             "1=1".to_string()
@@ -317,6 +326,20 @@ mod tests {
         q.mode = SearchMode::Exact;
         q.text = "loworl".into();
         assert_eq!(s.search(&q).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn filter_by_tag() {
+        let s = open_in_memory().unwrap();
+        let a = s.ingest(&text_ev("tagged one", 1), &FakeImages).unwrap().entry_id;
+        s.ingest(&text_ev("untagged", 2), &FakeImages).unwrap();
+        s.add_tag(a, "keep").unwrap();
+
+        let mut q = default_query();
+        q.tag = Some("KEEP".into());
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].full_text, "tagged one");
     }
 
     #[test]
