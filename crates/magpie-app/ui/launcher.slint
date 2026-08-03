@@ -105,13 +105,6 @@ export component LauncherWindow inherits Window {
     // True while the primary modifier (⌘ on macOS / Ctrl elsewhere) is held —
     // lights up the 1-9 quick-paste badges.
     in-out property <bool> cmd-held: false;
-    // Blinking search caret.
-    in-out property <bool> blink: true;
-    Timer {
-        interval: 530ms;
-        running: true;
-        triggered => { root.blink = !root.blink; }
-    }
     // The app that was frontmost when the launcher opened (paste target).
     in property <string> target-app: "";
     in property <image> target-icon;
@@ -368,8 +361,6 @@ export component LauncherWindow inherits Window {
                             vertical-alignment: center;
                             overflow: elide;
                         }
-                        // Blinking caret, right after the text; spacer fills the rest.
-                        Rectangle { width: 2px; height: 20px; background: #6a8cff; opacity: root.blink ? 1.0 : 0.0; }
                         Rectangle { horizontal-stretch: 1; }
                     }
                 }
