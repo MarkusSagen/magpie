@@ -303,10 +303,6 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
 /// and the tray (left-click + "Show Magpie").
 fn show_window(ui: &LauncherWindow, state: &AppState) {
     refresh(ui, state);
-    // Nudge the scroll-follow so the retained selection is back in view.
-    let sel = ui.get_selected();
-    ui.set_selected(-1);
-    ui.set_selected(sel);
     // Capture the paste target: whatever app is frontmost right before we show.
     match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
         cache_dir: data_dir().join("app_icons"),
@@ -333,6 +329,8 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
     // Background/agent apps don't steal focus just by showing a window — activate
     // the process and raise + key the window so the search box is ready to type.
     magpie_platform::raise_to_front();
+    // Focus the search field and highlight the top item, ready to type.
+    ui.invoke_summon();
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's

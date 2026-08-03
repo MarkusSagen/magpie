@@ -209,6 +209,17 @@ export component LauncherWindow inherits Window {
     changed selected => { root.rebuild-preview(); }
     changed revealed => { root.rebuild-preview(); }
 
+    // Called from Rust right after the window is summoned to the front: return to
+    // the list, focus the search field so typing filters immediately, and select
+    // the top item (the -1→0 nudge forces the scroll-follow + preview rebuild even
+    // when the selection was already 0).
+    public function summon() {
+        root.mode = "list";
+        root.selected = -1;
+        root.selected = 0;
+        searchinput.focus();
+    }
+
     Rectangle {
 
         VerticalLayout {
