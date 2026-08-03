@@ -705,7 +705,12 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_activate(move |idx| {
-            paste_and_close(&s, &w, idx as usize, false);
+            // Defer out of the synchronous key-event dispatch: hiding/deactivating
+            // the window from inside its own keyDown handler aborts on macOS.
+            let (s, w) = (s.clone(), w.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                paste_and_close(&s, &w, idx as usize, false);
+            });
         });
     }
     {
@@ -713,7 +718,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_activate_nth(move |n| {
             if n >= 1 {
-                paste_and_close(&s, &w, (n - 1) as usize, false);
+                let (s, w) = (s.clone(), w.clone());
+                let _ = slint::invoke_from_event_loop(move || {
+                    paste_and_close(&s, &w, (n - 1) as usize, false);
+                });
             }
         });
     }
@@ -747,23 +755,32 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_paste_slot(move |n| {
             // Paste the entry assigned to slot n (or the Nth recent) via hide→paste.
-            let entry = s
-                .store
-                .lock()
-                .ok()
-                .and_then(|st| st.slot_entry(n as i64).ok().flatten());
-            let recent = current_results(&s, now_ms());
-            if let Some(entry) = resolve_slot_or_recent(entry, &recent, n as usize) {
-                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                    let _ =
-                        perform_paste(&mut clip, &EnigoPaster, &entry, PasteKind::Formatted, false);
+            // Deferred so the window hide happens outside the click-event dispatch.
+            let (s, w) = (s.clone(), w.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                let entry = s
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|st| st.slot_entry(n as i64).ok().flatten());
+                let recent = current_results(&s, now_ms());
+                if let Some(entry) = resolve_slot_or_recent(entry, &recent, n as usize) {
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = perform_paste(
+                            &mut clip,
+                            &EnigoPaster,
+                            &entry,
+                            PasteKind::Formatted,
+                            false,
+                        );
+                    }
                 }
-            }
-            if let Some(ui) = w.upgrade() {
-                let _ = ui.hide();
-            }
-            magpie_platform::hide_and_yield_focus();
-            spawn_paste(w.clone(), false);
+                if let Some(ui) = w.upgrade() {
+                    let _ = ui.hide();
+                }
+                magpie_platform::hide_and_yield_focus();
+                spawn_paste(w.clone(), false);
+            });
         });
     }
     // ---- ⌘F advanced search ----
@@ -835,11 +852,15 @@ pub fn start() {
     {
         let w = ui.as_weak();
         ui.on_hide_window(move || {
-            if let Some(ui) = w.upgrade() {
-                let _ = ui.hide();
-            }
-            // Return focus to the app the user came from.
-            magpie_platform::hide_and_yield_focus();
+            // Deferred: Esc fires this inside keyDown; hiding the window there aborts.
+            let w = w.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    let _ = ui.hide();
+                }
+                // Return focus to the app the user came from.
+                magpie_platform::hide_and_yield_focus();
+            });
         });
     }
     {
@@ -912,7 +933,10 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_activate_keep(move |idx| {
-            paste_and_close(&s, &w, idx as usize, true);
+            let (s, w) = (s.clone(), w.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                paste_and_close(&s, &w, idx as usize, true);
+            });
         });
     }
     {
