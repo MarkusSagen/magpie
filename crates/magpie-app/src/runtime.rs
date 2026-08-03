@@ -387,6 +387,27 @@ fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
     });
 }
 
+/// True when running as a real macOS `.app` bundle (path
+/// `…/Magpie.app/Contents/MacOS/magpie`) rather than a bare dev binary from
+/// `cargo run`. We only gate/prompt for Accessibility as a bundle: a bare
+/// terminal-launched binary is attributed by TCC to the *responsible process*
+/// (the terminal, e.g. Ghostty), so `AXIsProcessTrusted()` is always false for us
+/// yet the paste is delivered via the terminal's own grant — prompting there just
+/// nags for the terminal forever. Always `true` off macOS (no such gate).
+fn running_as_app_bundle() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        std::env::current_exe()
+            .ok()
+            .map(|p| p.to_string_lossy().contains("/Contents/MacOS/"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 /// Hide the launcher **without quitting the event loop**. On macOS Slint's
 /// `Window::hide()` terminates `run_event_loop` once the window has been shown
 /// (verified), so we hide at the AppKit level via `NSApp.hide`, which also returns
@@ -420,11 +441,11 @@ fn paste_and_close(
         // Copy only here; the keystroke is sent after the window hides.
         let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
     }
-    // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. If we don't
-    // have it, keep the window up and show the permission modal instead of hiding
-    // and failing silently. The item is already on the clipboard, so the user can
-    // paste manually in the meantime.
-    if !magpie_platform::accessibility_trusted() {
+    // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. Only gate the
+    // *installed app* on it: as a bare dev binary the grant belongs to the launching
+    // terminal (Ghostty), so prompting for Magpie would nag forever while the paste
+    // already works via the terminal — in dev we just proceed best-effort.
+    if running_as_app_bundle() && !magpie_platform::accessibility_trusted() {
         if let Some(ui) = weak.upgrade() {
             ui.set_needs_accessibility(true);
         }
