@@ -396,11 +396,22 @@ fn paste_and_close(
     keep_open: bool,
 ) {
     let recent = current_results(state, now_ms());
-    if let Some(entry) = recent.get(idx) {
-        if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-            // Copy only here; the keystroke is sent after the window hides.
-            let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
+    let Some(entry) = recent.get(idx) else {
+        return;
+    };
+    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+        // Copy only here; the keystroke is sent after the window hides.
+        let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
+    }
+    // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. If we don't
+    // have it, keep the window up and show the permission modal instead of hiding
+    // and failing silently. The item is already on the clipboard, so the user can
+    // paste manually in the meantime.
+    if !magpie_platform::accessibility_trusted() {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_needs_accessibility(true);
         }
+        return;
     }
     if let Some(ui) = weak.upgrade() {
         let _ = ui.hide();
@@ -846,6 +857,20 @@ pub fn start() {
                 ui.set_pinned_only(false);
                 ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        ui.on_open_accessibility_settings(|| {
+            magpie_platform::open_accessibility_settings();
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_recheck_accessibility(move || {
+            // Clear the modal iff the grant is now in place; otherwise keep prompting.
+            if let Some(ui) = w.upgrade() {
+                ui.set_needs_accessibility(!magpie_platform::accessibility_trusted());
             }
         });
     }

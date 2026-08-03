@@ -1,3 +1,4 @@
+pub mod accessibility;
 pub mod hotkeys;
 pub mod paste;
 pub mod source_app;
