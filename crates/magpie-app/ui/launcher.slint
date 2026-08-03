@@ -121,6 +121,7 @@ export component LauncherWindow inherits Window {
     callback search-changed(string);
     callback key-char(string);
     callback key-backspace();
+    callback key-delete-word();
     callback clear-query();
     callback activate(int);
     callback activate-nth(int);
@@ -292,7 +293,14 @@ export component LauncherWindow inherits Window {
                 return accept;
             }
             if event.text == Key.Backspace {
-                root.key-backspace();
+                // ⌘/Ctrl+⌫ clears; ⌥/Alt+⌫ deletes a word; else one char.
+                if event.modifiers.control {
+                    root.clear-query();
+                } else if event.modifiers.alt {
+                    root.key-delete-word();
+                } else {
+                    root.key-backspace();
+                }
                 return accept;
             }
 

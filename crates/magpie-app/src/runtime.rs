@@ -65,6 +65,17 @@ fn type_glyph(kind: &Kind) -> &'static str {
     }
 }
 
+/// Delete the trailing word (and the whitespace before it) from a search query —
+/// the ⌥/Alt+Backspace behavior for the command-bar (cursor is always at the end).
+fn delete_last_word(q: &str) -> String {
+    let trimmed = q.trim_end();
+    let cut = trimmed
+        .rfind(char::is_whitespace)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    trimmed[..cut].to_string()
+}
+
 /// A row badge like "3 lines" when the text has more than one non-empty line.
 fn line_badge(full_text: &str) -> String {
     let n = full_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -699,6 +710,15 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
+        ui.on_key_delete_word(move || {
+            if let Some(ui) = w.upgrade() {
+                apply_query(&ui, &s, delete_last_word(&ui.get_query()));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
         ui.on_clear_query(move || {
             if let Some(ui) = w.upgrade() {
                 apply_query(&ui, &s, String::new());
@@ -1274,6 +1294,19 @@ mod glyph_tests {
         assert_eq!(type_glyph(&Kind::Text), "📄");
         assert_eq!(type_glyph(&Kind::Rtf), "📄");
         assert_eq!(type_glyph(&Kind::Html), "📄");
+    }
+}
+
+#[cfg(test)]
+mod delete_word_tests {
+    use super::delete_last_word;
+    #[test]
+    fn deletes_trailing_word_and_space() {
+        assert_eq!(delete_last_word("foo bar"), "foo ");
+        assert_eq!(delete_last_word("foo bar  "), "foo ");
+        assert_eq!(delete_last_word("single"), "");
+        assert_eq!(delete_last_word(""), "");
+        assert_eq!(delete_last_word("a b c"), "a b ");
     }
 }
 
