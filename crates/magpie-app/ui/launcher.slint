@@ -210,10 +210,9 @@ export component LauncherWindow inherits Window {
                 border-width: 1px;
                 border-color: searchinput.has-focus ? #4a4a58 : #33333c;
                 HorizontalLayout {
-                    padding-left: 12px;
+                    padding-left: 14px;
                     padding-right: 12px;
                     spacing: 8px;
-                    Text { text: "🔍"; font-size: 16px; vertical-alignment: center; }
                     Rectangle {
                         horizontal-stretch: 1;
                         if root.query == "": Text {
@@ -462,6 +461,8 @@ export component LauncherWindow inherits Window {
                     horizontal-stretch: 1;
                     min-width: 340px;
                     list := ListView {
+                        // Hide the native sliver; we draw our own scrollbar.
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                         for row[i] in entries: VerticalLayout {
                             // Date group divider: a label with a full-width rule under it.
                             if i == 0 || entries[i - 1].section != row.section: VerticalLayout {
@@ -489,22 +490,23 @@ export component LauncherWindow inherits Window {
                                 padding-left: 8px;
                                 padding-right: 10px;
                                 spacing: 8px;
-                                // 1-9 quick-paste number on the LEFT; brightens while ⌘/Ctrl held.
+                                // 1-9 quick-paste number on the LEFT, aligned with the
+                                // top line of the copied text; brightens while ⌘/Ctrl held.
                                 Rectangle {
                                     width: 20px;
                                     if i < 9: Text {
+                                        y: 9px;
                                         text: i + 1;
                                         color: root.cmd-held ? #6a8cff : #45454e;
                                         font-size: 12px;
                                         horizontal-alignment: center;
-                                        vertical-alignment: center;
                                     }
                                 }
-                                // Icon centered vertically against the row (a Rectangle centers its child).
+                                // Icon aligned with the top line of the text.
                                 Rectangle {
                                     width: 28px;
-                                    if row.has-icon: Image { source: row.icon; width: 20px; height: 20px; }
-                                    if !row.has-icon: Text { text: row.glyph; font-size: 18px; }
+                                    if row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
+                                    if !row.has-icon: Text { text: row.glyph; y: 6px; font-size: 18px; }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -561,8 +563,8 @@ export component LauncherWindow inherits Window {
                     }
                     // Custom scrollbar (the native one is a barely-visible sliver).
                     if list.viewport-height > list.visible-height + 1px: sb := Rectangle {
-                        x: parent.width - 9px;
-                        width: 6px;
+                        x: parent.width - 6px;
+                        width: 5px;
                         y: 0;
                         height: parent.height;
                         Rectangle {
@@ -603,6 +605,7 @@ export component LauncherWindow inherits Window {
                                             : entries[root.selected].full)
                                         : "";
                                     color: #d0d0d4;
+                                    font-size: 13px;
                                     wrap: word-wrap;
                                 }
                             }
@@ -748,7 +751,10 @@ export component LauncherWindow inherits Window {
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
-                        if root.target-has-icon: Image { source: root.target-icon; width: 14px; height: 14px; }
+                        if root.target-has-icon: Rectangle {
+                            width: 14px;
+                            Image { source: root.target-icon; width: 14px; height: 14px; }
+                        }
                         Text {
                             text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
                             color: #9a9aa0;
