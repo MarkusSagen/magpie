@@ -127,24 +127,34 @@ viewport slicing** is the right tool if/when we want unbounded smooth scrolling.
 
 ## 8. Magpie roadmap for "buttery at any size"
 
-Ordered by value/effort. (1) is shipped.
+Ordered by value/effort.
 
-1. **[done] Bound the preview render** (`preview_display`). Removes the stall.
-2. **Lazy full-text load.** `search()` currently `SELECT`s `full_text` for *every*
-   result (up to 200), so opening the window pulls every big blob into memory. Split
-   into a light list query (id, preview_text, metrics, app) + a `Store::full_text(id)`
-   fetched only for paste/selected. Saves memory and list-build time.
-3. **Store a dedicated bounded preview blob at ingest** so display never touches
-   `full_text` at all (trade a little disk for guaranteed O(cap) display).
-4. **Viewport-windowed preview** (the real fix for millions of lines): precompute a
-   line index for the selected entry; expose only the visible lines to Slint and
-   re-slice on scroll. Then scrolling a 1M-line entry costs one screen.
-5. **Spill very large items to a file + memory-map**; keep only a preview in SQLite;
-   load slices on demand (what pagers/editors do for giant files).
-6. **Keep the model lean**: avoid duplicating strings across `EntryRow` fields;
-   compute display strings lazily for the selected row only.
+1. **[done, then superseded] Bound the preview render.** First cut capped the
+   string; still shaped one big `Text` → residual lag on ~1k lines. Replaced by (4).
+4. **[done] Viewport-windowed preview.** The detail pane is now a **`ListView` of
+   fixed-height line rows** — Slint only shapes the ~40 *visible* rows, so selection
+   is instant regardless of total size (the Zed/Helix "render the viewport" pattern,
+   expressed via Slint's row virtualization). Rust pushes a bounded (≤20k) line model
+   on selection (`preview-select`); masked entries show the bulleted render. A custom
+   scrollbar + **"Open in editor"** (`external_editor`: `$VISUAL`/`$EDITOR` or OS
+   default) cover full-fidelity viewing.
+6. **[done] Lean model.** Removed the per-row `full`/`full_masked` clones; only the
+   selected entry's lines are materialized, and only on selection.
+
+Still open:
+
+2. **Lazy full-text load.** `search()` still `SELECT`s `full_text` for *every* result
+   (up to 200); `preview-select` also re-queries on each keypress. Split into a light
+   list query (id, preview_text, metrics, app) + a `Store::full_text(id)` fetched only
+   for the selected entry / paste. Saves memory + per-keypress work.
+3. **Dedicated bounded preview blob at ingest** so display never reads `full_text`.
+5. **Spill very large items to a file + memory-map**; keep only a preview in SQLite.
 7. **Verify DB indexes** cover every sort/filter path (recency, most-copied, pinned,
    app, kind) so search stays O(log n) as history grows.
+
+> **Dev-env note:** Slint compiles the whole UI into one enormous generated Rust file,
+> so `target/debug` balloons (tens of GB with incremental artifacts). If a build fails
+> with `ENOSPC`, `rm -rf target/debug/incremental` (safe scratch) or `cargo clean`.
 
 ## 9. References
 
