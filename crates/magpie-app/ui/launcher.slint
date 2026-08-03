@@ -6,7 +6,6 @@ struct EntryRow {
     kind: string,
     slot: int,
     merged: bool,
-    full: string,
     badge: string,
     glyph: string,
     source: string,
@@ -14,7 +13,6 @@ struct EntryRow {
     copied: int,
     size: string,
     masked: bool,
-    full_masked: string,
     icon: image,
     has_icon: bool,
     words: int,
@@ -119,6 +117,12 @@ export component LauncherWindow inherits Window {
     in-out property <int> range-index: 1;
 
     callback search-changed(string);
+    // Detail preview is a virtualized line list — Rust pushes the (bounded) lines
+    // for the selected entry so only visible lines are ever shaped.
+    in property <[string]> preview-lines;
+    in property <bool> preview-truncated: false;
+    callback preview-select(int, bool, bool);
+    callback open-in-editor(int);
     callback activate(int);
     callback activate-nth(int);
     callback copy-only(int);
@@ -193,6 +197,17 @@ export component LauncherWindow inherits Window {
             searchinput.focus();
         }
     }
+
+    // Rebuild the (virtualized) preview when the selection or reveal state changes.
+    public function rebuild-preview() {
+        if root.entries.length > 0 && root.selected >= 0 && root.selected < root.entries.length {
+            root.preview-select(root.selected, entries[root.selected].masked, root.revealed);
+        } else {
+            root.preview-select(-1, false, false);
+        }
+    }
+    changed selected => { root.rebuild-preview(); }
+    changed revealed => { root.rebuild-preview(); }
 
     Rectangle {
 
@@ -594,31 +609,74 @@ export component LauncherWindow inherits Window {
                         VerticalLayout {
                             padding: 12px;
                             spacing: 10px;
-                            ScrollView {
+                            // Detail preview — a VIRTUALIZED line list. Only the
+                            // visible lines are shaped, so huge entries are instant.
+                            // Rust pushes preview-lines (masked→bullets, else the
+                            // real lines, bounded) for the selected entry.
+                            Rectangle {
                                 min-height: 100px;
                                 vertical-stretch: 1;
-                                Text {
-                                    width: parent.visible-width;
-                                    text: (entries.length > 0 && root.selected < entries.length)
-                                        ? (entries[root.selected].masked && !root.revealed
-                                            ? entries[root.selected].full-masked
-                                            : entries[root.selected].full)
-                                        : "";
-                                    color: #d0d0d4;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
+                                plist := ListView {
+                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                                    for ln in root.preview-lines: Rectangle {
+                                        height: 19px;
+                                        Text {
+                                            x: 0;
+                                            width: parent.width;
+                                            text: ln;
+                                            color: #d0d0d4;
+                                            font-size: 13px;
+                                            overflow: elide;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                // Custom scrollbar for the preview (flush right).
+                                if plist.viewport-height > plist.visible-height + 1px: pv := Rectangle {
+                                    x: parent.width - 6px;
+                                    width: 5px;
+                                    y: 0;
+                                    height: parent.height;
+                                    Rectangle {
+                                        width: parent.width;
+                                        border-radius: 3px;
+                                        background: pvta.pressed ? #6a6a72 : (pvta.has-hover ? #55555f : #3f3f47);
+                                        height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
+                                        y: -plist.viewport-y / plist.viewport-height * pv.height;
+                                    }
+                                    pvta := TouchArea {
+                                        property <length> anchor;
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.down) { self.anchor = plist.viewport-y; }
+                                        }
+                                        moved => {
+                                            plist.viewport-y = min(0px, max(-(plist.viewport-height - plist.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (plist.viewport-height / pv.height)));
+                                        }
+                                    }
                                 }
                             }
 
-                            // Reveal a masked entry's detail (UI-only; row stays masked).
-                            if entries.length > 0 && root.selected < entries.length
-                                && entries[root.selected].masked && !root.revealed: Rectangle {
-                                height: 26px;
-                                width: 96px;
-                                background: #2a2a30;
-                                border-radius: 6px;
-                                TouchArea { clicked => { root.revealed = true; } }
-                                Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            // Preview controls: truncation note · Reveal · Open in editor.
+                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                                spacing: 8px;
+                                if root.preview-truncated: Text { text: "Preview truncated — open in editor for all"; color: #6a6a70; font-size: 11px; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                if entries[root.selected].masked && !root.revealed: Rectangle {
+                                    height: 26px;
+                                    width: 92px;
+                                    background: revta.has-hover ? #35353d : #2a2a30;
+                                    border-radius: 6px;
+                                    revta := TouchArea { clicked => { root.revealed = true; } }
+                                    Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                Rectangle {
+                                    height: 26px;
+                                    width: 116px;
+                                    background: oeta.has-hover ? #35353d : #2a2a30;
+                                    border-radius: 6px;
+                                    oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
+                                    Text { text: "↗ Open in editor"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
                             }
 
                             // Metadata "Information" block (Raycast-style; right-aligned values).

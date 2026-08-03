@@ -84,39 +84,6 @@ fn preview_title(e: &Entry) -> String {
     }
 }
 
-/// Cap for the detail-pane preview string. The full text is still pasted from the
-/// DB; we never hand a huge word-wrapped blob to a single Slint `Text` (shaping
-/// hundreds of thousands of chars is the multi-second hang on selection).
-const PREVIEW_CHAR_CAP: usize = 20_000;
-const PREVIEW_LINE_CAP: usize = 400;
-
-/// A bounded copy of `full` for display: at most `char_cap` chars and `line_cap`
-/// lines (whichever comes first), with a truncation note when cut. Runs in
-/// O(cap), not O(len), by stopping early.
-fn preview_display(full: &str, char_cap: usize, line_cap: usize) -> String {
-    let mut out = String::new();
-    let mut lines = 0usize;
-    let mut truncated = false;
-    for (chars, ch) in full.chars().enumerate() {
-        if chars >= char_cap {
-            truncated = true;
-            break;
-        }
-        if ch == '\n' {
-            lines += 1;
-            if lines >= line_cap {
-                truncated = true;
-                break;
-            }
-        }
-        out.push(ch);
-    }
-    if truncated {
-        out.push_str("\n\n… preview truncated — press ⏎ to paste the full text");
-    }
-    out
-}
-
 #[allow(clippy::too_many_arguments)]
 fn to_rows(
     entries: &[Entry],
@@ -169,11 +136,6 @@ fn to_rows(
             } else {
                 base_title
             };
-            let full_masked = if masked {
-                mask_render(&e.full_text, visible)
-            } else {
-                String::new()
-            };
             let tagline = tags
                 .get(&e.id)
                 .map(|ts| {
@@ -195,11 +157,6 @@ fn to_rows(
                 kind: SharedString::from(e.kind.as_str()),
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
                 merged: merge_set.contains(&(i as i32)),
-                full: SharedString::from(preview_display(
-                    &e.full_text,
-                    PREVIEW_CHAR_CAP,
-                    PREVIEW_LINE_CAP,
-                )),
                 badge: SharedString::from(line_badge(&e.full_text)),
                 glyph: SharedString::from(type_glyph(&e.kind)),
                 source: SharedString::from(source),
@@ -207,7 +164,6 @@ fn to_rows(
                 copied: e.copy_count as i32,
                 size: SharedString::from(size),
                 masked,
-                full_masked: SharedString::from(full_masked),
                 icon: icon_img,
                 has_icon,
                 words: e.word_count as i32,
@@ -339,6 +295,8 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     if cur < 0 || cur as usize >= results.len() {
         ui.set_selected(0);
     }
+    // Rebuild the virtualized preview for the (possibly new) selection.
+    ui.invoke_rebuild_preview();
 }
 
 /// Refresh results and show the launcher window. Shared by the launcher hotkey
@@ -683,6 +641,56 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        // Build the (bounded) preview line model for the selected entry. Only the
+        // visible lines are shaped by the ListView, so huge entries stay instant.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_preview_select(move |idx, masked, revealed| {
+            const PREVIEW_LINE_CAP: usize = 20_000;
+            let results = current_results(&s, now_ms());
+            let entry = if idx >= 0 {
+                results.get(idx as usize)
+            } else {
+                None
+            };
+            let (lines, truncated) = match entry {
+                Some(e) if masked && !revealed => {
+                    let visible = s.mask_visible_chars.max(0) as usize;
+                    (
+                        vec![SharedString::from(mask_render(&e.full_text, visible))],
+                        false,
+                    )
+                }
+                Some(e) => {
+                    let mut lines: Vec<SharedString> = Vec::new();
+                    let mut truncated = false;
+                    for (n, line) in e.full_text.split('\n').enumerate() {
+                        if n >= PREVIEW_LINE_CAP {
+                            truncated = true;
+                            break;
+                        }
+                        lines.push(SharedString::from(line));
+                    }
+                    (lines, truncated)
+                }
+                None => (Vec::new(), false),
+            };
+            if let Some(ui) = w.upgrade() {
+                ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
+                ui.set_preview_truncated(truncated);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.on_open_in_editor(move |idx| {
+            let results = current_results(&s, now_ms());
+            if let Some(e) = results.get(idx as usize) {
+                let _ = magpie_app::external_editor::open_text(&e.full_text, &e.content_hash);
             }
         });
     }
@@ -1241,34 +1249,6 @@ fn build_tray(
     }
 
     Some(tray)
-}
-
-#[cfg(test)]
-mod preview_tests {
-    use super::preview_display;
-
-    #[test]
-    fn small_text_is_unchanged() {
-        assert_eq!(preview_display("hello\nworld", 100, 100), "hello\nworld");
-    }
-
-    #[test]
-    fn caps_by_chars_with_note() {
-        let big = "x".repeat(50_000);
-        let out = preview_display(&big, 20_000, 400);
-        assert!(out.len() < big.len());
-        assert!(out.contains("truncated"));
-        // Kept ~char_cap chars (+ the note).
-        assert!(out.chars().take_while(|&c| c == 'x').count() == 20_000);
-    }
-
-    #[test]
-    fn caps_by_lines_with_note() {
-        let many = "line\n".repeat(1000); // 1000 lines
-        let out = preview_display(&many, 1_000_000, 50);
-        assert!(out.matches('\n').count() <= 51);
-        assert!(out.contains("truncated"));
-    }
 }
 
 #[cfg(test)]
