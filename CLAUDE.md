@@ -126,7 +126,12 @@ check timestamps and don't assume "no new report" = "not crashing."
   `just run` or an installed `.app` (Carbon `RegisterEventHotKey`, system-wide).
 - **`target/debug` can balloon to tens of GB** (Slint generates one enormous Rust
   file × incremental artifacts). On `ENOSPC`: `rm -rf target/debug/incremental` or
-  `cargo clean`.
+  `cargo clean`. **Symptom of a disk-full release build:** `rust-objcopy`
+  (`strip = true`) dies mid-write — `LLVM ERROR: IO failure on output stream: No
+  space left on device` — leaving a **truncated ~2 KB `data` binary**, which macOS
+  then rejects with *"the application cannot be opened because it has an incorrect
+  executable format."* Free space and rebuild; verify with
+  `file target/release/magpie` (should say `Mach-O …executable`, not `data`).
 - **Real-clipboard / real-pasteboard tests must be ONE sequential test per file** —
   parallel `NSPasteboard` access SIGTRAPs on macOS.
 
