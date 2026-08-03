@@ -90,9 +90,15 @@ check timestamps and don't assume "no new report" = "not crashing."
 
 ## Hard-won gotchas
 
+- **`ui.hide()` (Slint `Window::hide`) QUITS `run_event_loop`** once a window has
+  been shown — the whole tray daemon exits (clean exit, *no* crash report, so it
+  looks like a silent "death"). To hide the launcher but keep the process alive,
+  hide at the OS level: **macOS → `NSApp.hide` (`magpie_platform::hide_and_yield_focus`)**,
+  which also returns focus to the app underneath. See `hide_launcher()`. Isolate
+  this class of bug with a headless self-test that shows→hides→checks "still alive."
 - **Never hide/mutate the window synchronously inside a Slint key handler.**
-  `activate`/`hide-window` fire inside winit's `keyDown`; calling `ui.hide()` /
-  `NSApp.hide()` there aborts (SIGABRT). **Defer via `slint::invoke_from_event_loop`.**
+  `activate`/`hide-window` fire inside winit's `keyDown`; hiding there aborts
+  (SIGABRT, thread 0). **Defer via `slint::invoke_from_event_loop`.**
 - **Slint's winit backend swaps Command↔Control on Apple.** Use
   `event.modifiers.control` for the primary shortcut modifier (= ⌘ on mac, Ctrl on
   win/linux). `.meta` is wrong on mac.
