@@ -20,6 +20,9 @@ pub fn raise_to_front() {
     };
     let app = NSApplication::sharedApplication(mtm);
 
+    // If we previously hid the app to yield focus for a paste, un-hide it first.
+    app.unhide(None);
+
     // Foreground the process even though we're an agent app. `activate()` (macOS
     // 14+) will not pull focus from the active app for an accessory app, so we
     // use the older `activateIgnoringOtherApps:` which does exactly that.
@@ -41,3 +44,23 @@ pub fn raise_to_front() {
 /// No-op fallback: on Windows/Linux the WM focuses the window on show.
 #[cfg(not(target_os = "macos"))]
 pub fn raise_to_front() {}
+
+/// Hide Magpie and return keyboard focus to the app that was active before us, so
+/// a subsequent paste keystroke lands in that app. On macOS `-[NSApplication
+/// hide:]` hides all our windows and activates the next app in line — even when we
+/// have no visible window — which is exactly the "paste into the app underneath"
+/// behavior. On other platforms hiding the Slint window already yields focus.
+#[cfg(target_os = "macos")]
+pub fn hide_and_yield_focus() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    NSApplication::sharedApplication(mtm).hide(None);
+}
+
+/// No-op fallback: on Windows/Linux hiding the window returns focus to the WM.
+#[cfg(not(target_os = "macos"))]
+pub fn hide_and_yield_focus() {}

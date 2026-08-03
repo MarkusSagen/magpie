@@ -52,7 +52,7 @@ fn config_roundtrips_and_bad_toml_falls_back() {
     // malformed toml -> defaults, not a panic
     std::fs::write(&path, "this is : not = valid ][ toml").unwrap();
     let d = load_or_default(&path);
-    assert_eq!(d.launcher_hotkey, "super+ctrl+v");
+    assert_eq!(d.launcher_hotkey, "super+shift+space");
 
     std::fs::remove_dir_all(&dir).ok();
 }

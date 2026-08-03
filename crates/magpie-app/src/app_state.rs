@@ -26,10 +26,14 @@ pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
 }
 
 pub fn current_results(state: &AppState, now_ms: i64) -> Vec<Entry> {
-    let ui = state.ui.lock().expect("ui lock");
+    // Recover the guard even if a mutex was poisoned by a panic on another thread
+    // (e.g. an ingest failure on the watcher thread). A poisoned lock must never
+    // crash the UI thread — this runs inside Slint callbacks, and a panic there
+    // unwinds through the event loop and kills the whole app.
+    let ui = state.ui.lock().unwrap_or_else(|e| e.into_inner());
     let q = to_query(&ui, now_ms);
     drop(ui);
-    let store = state.store.lock().expect("store lock");
+    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
     store.search(&q).unwrap_or_default()
 }
 
@@ -65,6 +69,34 @@ mod tests {
             },
         )
         .unwrap();
+        let rows = current_results(&s, 1_000);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].full_text, "hello");
+    }
+
+    #[test]
+    fn current_results_survives_a_poisoned_lock() {
+        let s = state();
+        ingest_event(
+            &s,
+            &CaptureEvent {
+                content: Content::Text("hello".into()),
+                source_app: None,
+                copied_at_ms: 1,
+            },
+        )
+        .unwrap();
+        // Poison the store mutex the way a panicking watcher thread would: panic
+        // while holding the guard. Silence the default panic print for the test.
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = s.store.lock().unwrap();
+            panic!("poison the store lock");
+        }));
+        std::panic::set_hook(prev);
+        assert!(res.is_err() && s.store.is_poisoned());
+        // The UI thread must NOT panic — it recovers the guard and still queries.
         let rows = current_results(&s, 1_000);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].full_text, "hello");

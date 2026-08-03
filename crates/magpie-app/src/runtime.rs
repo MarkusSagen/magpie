@@ -374,9 +374,13 @@ fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
         std::thread::sleep(Duration::from_millis(120));
         let _ = magpie_platform::Paster::paste(&EnigoPaster);
         if keep_open {
+            // ⌘Enter: after pasting into the app underneath, bring Magpie back to
+            // the front, focused, ready to type (same as a fresh summon).
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = weak.upgrade() {
                     let _ = ui.show();
+                    magpie_platform::raise_to_front();
+                    ui.invoke_summon();
                 }
             });
         }
@@ -401,6 +405,8 @@ fn paste_and_close(
     if let Some(ui) = weak.upgrade() {
         let _ = ui.hide();
     }
+    // Resign active so focus returns to the app underneath; the paste lands there.
+    magpie_platform::hide_and_yield_focus();
     spawn_paste(weak.clone(), keep_open);
 }
 
@@ -756,6 +762,7 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 let _ = ui.hide();
             }
+            magpie_platform::hide_and_yield_focus();
             spawn_paste(w.clone(), false);
         });
     }
@@ -831,6 +838,8 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 let _ = ui.hide();
             }
+            // Return focus to the app the user came from.
+            magpie_platform::hide_and_yield_focus();
         });
     }
     {
