@@ -44,14 +44,15 @@ fn env_editor() -> Option<String> {
     None
 }
 
-/// basename of the first token of a command string (`/usr/bin/nvim -p` → `nvim`).
+/// basename of the first token of a command string, minus a trailing `.exe`
+/// (`/usr/bin/nvim -p` → `nvim`, `C:\…\notepad.exe` → `notepad`).
 fn command_bin(cmd: &str) -> &str {
-    cmd.split_whitespace()
-        .next()
-        .unwrap_or("")
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
+    let first = cmd.split_whitespace().next().unwrap_or("");
+    // Handle both `/` (unix) and `\` (windows) path separators.
+    let base = first.rsplit(['/', '\\']).next().unwrap_or("");
+    base.strip_suffix(".exe")
+        .or_else(|| base.strip_suffix(".EXE"))
+        .unwrap_or(base)
 }
 
 /// Heuristic: does this editor command need a terminal? Unknown editors default to
@@ -71,20 +72,56 @@ fn is_terminal_editor(cmd: &str) -> bool {
         return true;
     }
     const GUI: &[&str] = &[
+        // VS Code family
         "code",
         "code-insiders",
         "codium",
-        "zed",
+        "cursor",
+        "windsurf",
+        // Sublime
         "subl",
         "sublime_text",
-        "cursor",
-        "mate",
+        // Zed
+        "zed",
+        // GUI vim/neovim frontends
         "gvim",
         "mvim",
+        "neovide",
+        "nvim-qt",
+        "gnvim",
+        // GUI emacs (terminal modes `emacs -nw` / `emacsclient -t` are caught
+        // by the flag checks above, before this list)
+        "emacs",
+        "emacsclient",
+        "runemacs",
+        // JetBrains IDEs (launcher scripts / binaries)
+        "idea",
+        "idea64",
+        "pycharm",
+        "pycharm64",
+        "webstorm",
+        "goland",
+        "clion",
+        "rubymine",
+        "phpstorm",
+        "rider",
+        "datagrip",
+        "rustrover",
+        "fleet",
+        "studio", // Android Studio
+        // Other GUI editors
+        "mate", // TextMate
         "gedit",
         "kate",
+        "kwrite",
+        "geany",
+        "gnome-text-editor",
+        "pluma",
+        "xed",
         "notepad",
         "notepad++",
+        "notepadpp",
+        "textedit",
     ];
     !GUI.contains(&command_bin(cmd))
 }
@@ -205,16 +242,49 @@ mod tests {
 
     #[test]
     fn detects_terminal_vs_gui_editors() {
+        // Terminal editors
         assert!(is_terminal_editor("nvim"));
         assert!(is_terminal_editor("vim"));
         assert!(is_terminal_editor("nano"));
         assert!(is_terminal_editor("emacsclient -t -a ''"));
-        assert!(is_terminal_editor("emacs -nw"));
+        assert!(is_terminal_editor("emacs -nw")); // -nw forces terminal even though `emacs` is GUI
         assert!(is_terminal_editor("/opt/homebrew/bin/hx"));
+        assert!(is_terminal_editor("micro"));
+        // GUI editors
         assert!(!is_terminal_editor("code"));
         assert!(!is_terminal_editor("code -n -w"));
         assert!(!is_terminal_editor("zed"));
         assert!(!is_terminal_editor("/usr/local/bin/subl -w"));
+        assert!(!is_terminal_editor("neovide"));
+        assert!(!is_terminal_editor("emacs")); // plain emacs is GUI
+        assert!(!is_terminal_editor("emacsclient")); // no -t → opens in GUI emacs
+        assert!(!is_terminal_editor("/opt/idea/bin/idea")); // JetBrains launcher
+        assert!(!is_terminal_editor("pycharm"));
+        assert!(!is_terminal_editor("cursor"));
+    }
+
+    #[test]
+    fn command_bin_strips_paths_and_exe() {
+        assert_eq!(command_bin("/usr/bin/nvim -p"), "nvim");
+        assert_eq!(command_bin(r"C:\Windows\System32\notepad.exe"), "notepad");
+        assert_eq!(command_bin(r"C:\Tools\notepad++.exe"), "notepad++");
+        assert_eq!(command_bin("code.EXE -n"), "code");
+        // Windows notepad is recognized as GUI via .exe stripping.
+        assert!(!is_terminal_editor(r"C:\Windows\notepad.exe"));
+    }
+
+    /// Manual end-to-end check: actually spawns the editor for the current
+    /// environment. Ignored by default (needs a real editor + terminal + a
+    /// display). Run with:
+    ///   cargo test -p magpie-app --lib external_editor::tests::e2e -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn e2e_open_text_spawns() {
+        let text = "magpie end-to-end verification\nline 2\nline 3\n";
+        let path = open_text(text, "e2e-verify").expect("open_text should not error");
+        eprintln!("wrote + launched editor for: {}", path.display());
+        assert!(path.exists(), "temp file should exist");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 
     #[test]
