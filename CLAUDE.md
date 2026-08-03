@@ -111,6 +111,12 @@ check timestamps and don't assume "no new report" = "not crashing."
 - **Poisoned mutex = crash risk.** A panic while holding a lock poisons it; a later
   `.expect()`/`.unwrap()` lock on the UI thread then panics → abort. Recover with
   `.lock().unwrap_or_else(|e| e.into_inner())` on the UI hot path.
+- **enigo's ⌘V synthesis MUST run on the main thread (macOS).** It calls
+  TIS/HIToolbox input-source APIs that `dispatch_assert_queue` — from a background
+  thread you get `EXC_BREAKPOINT`/`SIGTRAP` (`TSMGetInputSourceProperty` in the
+  stack), and this only reliably fires in the packaged `.app`, not always in `just
+  run`. Paste via `slint::Timer::single_shot` (fires on the event loop) or
+  `invoke_from_event_loop`, never `std::thread::spawn`.
 - **macOS auto-paste needs Accessibility.** `enigo`'s ⌘V silently no-ops without it.
   Check `magpie_platform::accessibility_trusted()`; guide via
   `open_accessibility_settings()` / `prompt_accessibility()` (the latter *registers*
