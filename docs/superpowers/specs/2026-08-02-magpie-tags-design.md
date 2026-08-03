@@ -155,3 +155,18 @@ querying. This keeps all query inputs in `UiState` (consistent with text/type/ti
 - Tag chips per-row in the list are shown only as a compact caption
   (`EntryRow.tags`); full chip interaction is on the selected entry in the detail
   pane, keeping the list rows light.
+
+## Addendum — 2026-08-03: tag row layout
+
+The detail-pane **tag chips row** is a **single row** (never wraps to multiple
+lines). When the chips exceed the available width, the row scrolls **horizontally**
+rather than growing taller:
+
+- Implement as a Slint horizontal `ListView`/`Flickable` of chips with a fixed
+  height, `viewport-width` = sum of chip widths, clipped to the pane width.
+- Show a thin horizontal scrollbar only when overflowing (`ScrollBarPolicy.as-needed`,
+  matching the flush, minimal scrollbar styling used elsewhere in the app).
+- The **add-tag input** stays fixed (does not scroll with the chips) so it's always
+  reachable — placed adjacent to the scrolling chip row, not inside it.
+- Keyboard access to individual chips (focus/select tag #N) is deferred to the
+  forthcoming **keyboard-navigation spec**, not this feature.
