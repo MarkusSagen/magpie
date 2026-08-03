@@ -112,8 +112,16 @@ check timestamps and don't assume "no new report" = "not crashing."
   `.expect()`/`.unwrap()` lock on the UI thread then panics → abort. Recover with
   `.lock().unwrap_or_else(|e| e.into_inner())` on the UI hot path.
 - **macOS auto-paste needs Accessibility.** `enigo`'s ⌘V silently no-ops without it.
-  Check `magpie_platform::accessibility_trusted()`; guide the user via
-  `open_accessibility_settings()`.
+  Check `magpie_platform::accessibility_trusted()`; guide via
+  `open_accessibility_settings()` / `prompt_accessibility()` (the latter *registers*
+  the app in the list — a bare trust check never does).
+- **TCC attributes a `cargo run` binary to the launching terminal**, not to Magpie.
+  So `AXIsProcessTrusted()` is always false for the dev binary even when the paste
+  works (delivered via the terminal's own grant), and prompting just nags for the
+  *terminal* forever. Only gate/prompt when running as a real `.app`
+  (`running_as_app_bundle()` = exe path contains `/Contents/MacOS/`); in dev, skip
+  the modal and paste best-effort. Also: an unsigned `.app`/binary loses its grant
+  on every rebuild (TCC keys on the code hash) — use the bundle for a stable grant.
 - **The global summon hotkey needs no Accessibility** and works identically from
   `just run` or an installed `.app` (Carbon `RegisterEventHotKey`, system-wide).
 - **`target/debug` can balloon to tens of GB** (Slint generates one enormous Rust
