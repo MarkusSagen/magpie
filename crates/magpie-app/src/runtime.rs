@@ -368,21 +368,24 @@ fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
 }
 
 /// After hiding, wait for focus to return to the previous app, send the paste
-/// keystroke, and optionally re-show the window. Runs off the UI thread.
+/// keystroke, and optionally re-show the window.
+///
+/// MUST be called on the main (event-loop) thread — callers defer here. enigo's
+/// macOS keystroke synthesis calls TIS/HIToolbox input-source APIs that assert
+/// they run on the main thread (`dispatch_assert_queue` → SIGTRAP otherwise), so
+/// we use a Slint `Timer` (fires on the event loop) rather than a background
+/// thread. The delay lets the window hide and focus return to the app underneath.
 fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(120));
+    slint::Timer::single_shot(Duration::from_millis(120), move || {
         let _ = magpie_platform::Paster::paste(&EnigoPaster);
         if keep_open {
             // ⌘Enter: after pasting into the app underneath, bring Magpie back to
             // the front, focused, ready to type (same as a fresh summon).
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = weak.upgrade() {
-                    let _ = ui.show();
-                    magpie_platform::raise_to_front();
-                    ui.invoke_summon();
-                }
-            });
+            if let Some(ui) = weak.upgrade() {
+                let _ = ui.show();
+                magpie_platform::raise_to_front();
+                ui.invoke_summon();
+            }
         }
     });
 }
@@ -659,13 +662,21 @@ fn spawn_hotkeys(
                             .and_then(|st| st.slot_entry(*slot as i64).ok().flatten());
                         if let Some(entry) = resolve_slot_or_recent(slotted, &recent, *slot) {
                             if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                                // Set the clipboard here (this runs on the hotkey
+                                // thread); the ⌘V keystroke must fire on the main
+                                // thread (enigo/TIS asserts main-thread), so defer it.
                                 let _ = perform_paste(
                                     &mut clip,
                                     &EnigoPaster,
                                     &entry,
                                     PasteKind::Formatted,
-                                    auto,
+                                    false,
                                 );
+                            }
+                            if auto {
+                                let _ = slint::invoke_from_event_loop(|| {
+                                    let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                                });
                             }
                         }
                     }
