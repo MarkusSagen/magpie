@@ -342,7 +342,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("edit", "✏️", "Edit", "⌘E"),
     ("snippet", "🧩", "New snippet", "⌘N"),
     ("pin", "📌", "Pin / Unpin", "⌘P"),
-    ("merge", "➕", "Add to merge", "⌘M"),
+    ("merge", "➕", "Add to merge", "⌘G"),
     ("delete", "🗑", "Delete", "⌃X"),
 ];
 

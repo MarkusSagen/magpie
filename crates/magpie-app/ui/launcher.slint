@@ -319,7 +319,7 @@ export component LauncherWindow inherits Window {
                                     if event.text == "/" { root.mode = "help"; return accept; }
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
-                                    if event.text == "m" { root.toggle-merge(root.selected); return accept; }
+                                    if event.text == "g" { root.toggle-merge(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }
                                     if event.text == "1" { root.activate-nth(1); return accept; }
                                     if event.text == "2" { root.activate-nth(2); return accept; }
@@ -546,7 +546,7 @@ export component LauncherWindow inherits Window {
                                     }
                                     Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
                                 }
-                                // Merge checkmark only when this row is queued (via ⌘M / ⌘K).
+                                // Merge checkmark only when this row is queued (via ⌘G / ⌘K).
                                 if row.merged: Rectangle {
                                     width: 22px;
                                     height: 22px;
@@ -968,7 +968,7 @@ export component LauncherWindow inherits Window {
                             { k: "⌘E", d: "Edit the entry" },
                             { k: "⌘N", d: "New snippet" },
                             { k: "⌘P", d: "Pin / unpin" },
-                            { k: "⌘M", d: "Add to merge" },
+                            { k: "⌘G", d: "Add to merge" },
                             { k: "⌘V", d: "Paste clipboard into search" },
                             { k: "⌃X", d: "Delete the entry" },
                         ]: HorizontalLayout {
