@@ -40,9 +40,9 @@ hidden background agent.
 ## Goals / Non-goals
 
 **Goals:** reliable summon (front + focus + selected, over fullscreen/spaces);
-proper `LSUIElement` `.app` with icon + versioned bundle; `.dmg` installer;
-run-at-login as the installed app that actually takes effect; docs for install +
-permissions.
+proper `LSUIElement` `.app` with icon + versioned bundle; `.dmg` installer; a
+**first-run welcome/intro + help screen**; run-at-login as the installed app that
+actually takes effect; docs for install + permissions.
 
 **Non-goals (documented follow-ups):** Developer-ID signing/notarization; Homebrew
 cask; auto-update; Windows installer (`.msi`) and Linux `.deb`/AppImage
@@ -165,7 +165,40 @@ Reuse `MacAutostart` (LaunchAgent). Two refinements:
   A "Start at login" toggle in the Settings panel is cross-referenced to the
   Settings & Theming spec (wired there, reading `MacAutostart::is_enabled`).
 
-## Task 5 — Docs & permissions
+## Task 5 — First-run welcome / intro & help screen
+
+The first time Magpie launches (freshly installed from the `.dmg`), show a
+**welcome screen** that orients the user and gets the two permissions/settings
+that make Magpie useful, instead of leaving them to discover the tray.
+
+**When it shows:** first launch only, gated by a `#[serde(default)]`
+`welcomed: bool` (default `false`) in `Config` — set `true` after the user
+dismisses it (persist via `config::save`). A hidden `--show-welcome` flag / a
+"Show intro" item in Help re-opens it for testing and later reference.
+
+**Content (a `mode == "welcome"` overlay, same modal style as Help):**
+1. **Hello / what Magpie is** — one line + the menu-bar/no-Dock note.
+2. **Summon** — big, clear: “Press **⌘⇧Space** anywhere to open Magpie” (reads
+   the live `launcher_hotkey`, so it stays correct if rebound).
+3. **Accessibility** — “Auto-paste needs Accessibility permission” + an **Open
+   System Settings** button (`open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"`)
+   and a one-line why. Skippable (capture/search still work without it).
+4. **Start at login** — a checkbox that calls the autostart enable path
+   (Task 4), defaulting to on for an installed app.
+5. **Quick help** — the essential shortcuts (↑/↓ navigate, ⏎ paste, ⌘K actions,
+   Esc hide) — reuse the existing Help cheat-sheet rows so there's one source of
+   truth; a “Full shortcuts (⌘/ or ?)” link opens the existing Help modal.
+6. **Get started** button → sets `welcomed = true`, closes to the list.
+
+**Reuse:** the Help modal (`mode=="help"`) already exists — the welcome screen
+embeds/links its shortcut rows rather than duplicating them. No new capture or
+storage; `welcomed` is the only state added.
+
+**Testing:** `config.rs` — `welcomed` defaults `false`, round-trips, old configs
+load with `false`. Manual: fresh data dir → launch → welcome shows once →
+dismiss → relaunch → not shown; `--show-welcome` re-opens.
+
+## Task 6 — Docs & permissions
 
 README "Install" section (macOS): download `Magpie-<version>.dmg` → drag to
 Applications → first-run right-click **Open** → grant **Accessibility** (System
@@ -200,6 +233,7 @@ that Magpie has no Dock icon (it's a menu-bar/tray agent).
 - `autostart.rs`: plist for the `.app` program path contains the bundle binary +
   `RunAtLoad`; enable/disable writes/removes (existing tests extended).
 - Info.plist generation: `LSUIElement`, `CFBundleIdentifier`, version injected.
+- `config.rs`: `welcomed` defaults `false`, round-trips, old configs load `false`.
 
 **Manual (host, can't automate):** Task 1d summon gate; `just dmg` → install → first
 launch (Gatekeeper workaround) → Accessibility grant → enable autostart → **log out /
@@ -226,4 +260,7 @@ stores or sends (nothing).
 3. **`.dmg`** — `just dmg` (hdiutil, /Applications symlink), quarantine docs.
 4. **Autostart** — LaunchAgent takes-effect-now (`launchctl bootstrap`), app-path
    program args, first-run hint, Settings cross-ref.
-5. **Docs** — README install + permissions + summon key.
+5. **First-run welcome / help** — `mode=="welcome"` overlay (summon key,
+   Accessibility button, start-at-login, quick help reusing the Help rows),
+   gated by `welcomed` config flag; `--show-welcome` to re-open.
+6. **Docs** — README install + permissions + summon key.

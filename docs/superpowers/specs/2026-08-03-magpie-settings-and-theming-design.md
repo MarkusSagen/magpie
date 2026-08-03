@@ -164,6 +164,29 @@ Ctrl elsewhere), closed by Esc. Two sections:
 - Preset selector (list/dropdown of the 13 presets; live-applies on select).
 - Accent: a row of swatches + a `#rrggbb` custom field; empty = preset default.
 
+**Shortcuts**
+- **Summon hotkey capture** — shows the current binding (default
+  `Cmd+Shift+Space`). A **"Record shortcut"** button puts the field into
+  capture mode: the next key-chord the user presses is captured (via the Slint
+  `FocusScope` `key-pressed` modifiers + key) and rendered as a spec string
+  (e.g. `super+shift+space`). Esc cancels capture; the field never accepts a
+  bare key with no modifier.
+- **Validate before saving.** On capture, run `validate_hotkey(spec)` which:
+  1. **Parses** it (`parse_hotkey`) — reject if malformed / no modifier / an
+     unsupported key (surface the `to_global_hotkey` error, e.g. an
+     unmapped key).
+  2. **Checks availability** by attempting a real `Hotkeys::register` of the
+     candidate in a throwaway manager: `Ok` → the combo is free and works
+     (immediately unregister); `Err` → it's already taken by the OS or another
+     app — show "This shortcut is unavailable (in use by another app)". This is
+     the only reliable cross-platform "is it free?" test — the OS refuses a
+     duplicate registration.
+  3. Only on success: persist `launcher_hotkey`, **re-register live**
+     (unregister the old id, register the new) so it takes effect without
+     restart, and show a confirmation.
+- Quick-paste hotkeys stay in `config.toml` for now (editable there);
+  exposing them in-panel is a documented later addition.
+
 **Editor**
 - Radio list of detected editors. First row is always
   **"System default ($VISUAL → <resolved>)"** = `editor:None`.
@@ -200,6 +223,10 @@ today; only *which* program opens it becomes configurable.
   resolution; unknown → dark.
 - `external_editor.rs`: `detect_editors`/`detect_terminals` against a fake PATH;
   `open_text` honors overrides; existing pure tests unchanged.
+- `hotkey`/`validate_hotkey`: rejects malformed/no-modifier/unsupported-key; a
+  free combo validates `Ok`; a combo already registered by the same process
+  probe reports unavailable. (The cross-app "in use elsewhere" branch is a
+  manual/host check — CI has no competing registrant.)
 - Gates: `cargo test`, `clippy --all-targets -D warnings`, `fmt --check`, timeout
   launch (exit 124 = alive). Windows/Linux discovery is cfg-gated / compile-only.
 
@@ -213,3 +240,9 @@ today; only *which* program opens it becomes configurable.
    global; migrate ~50 hardcoded colors; set global on startup.
 4. **Settings panel** — `mode=="settings"` modal, ⌘, open/Esc close, Appearance +
    Editor sections, callbacks that edit `Config`, apply live, and persist.
+5. **Shortcut capture** — `magpie-platform::validate_hotkey(spec)` (parse +
+   register-probe availability, immediately unregistering the probe); a
+   "Record shortcut" control in the panel's **Shortcuts** section that captures a
+   chord, validates it, and on success persists `launcher_hotkey` + a runtime hook
+   that live re-registers (unregister old id → register new) so it works without
+   restart. `launcher_hotkey` already exists in `Config` (no new field).
