@@ -387,6 +387,23 @@ fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
     });
 }
 
+/// Hide the launcher **without quitting the event loop**. On macOS Slint's
+/// `Window::hide()` terminates `run_event_loop` once the window has been shown
+/// (verified), so we hide at the AppKit level via `NSApp.hide`, which also returns
+/// focus to the app underneath. Elsewhere fall back to the Slint hide (the WM
+/// handles focus).
+fn hide_launcher(ui: &LauncherWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = ui;
+        magpie_platform::hide_and_yield_focus();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = ui.hide();
+    }
+}
+
 /// The Enter / ⌘Enter flow: copy the entry at `idx`, hide Magpie so the previous
 /// app regains focus, then paste into it. `keep_open` re-shows Magpie afterward.
 fn paste_and_close(
@@ -413,11 +430,11 @@ fn paste_and_close(
         }
         return;
     }
+    // Hide (macOS: NSApp.hide → keeps the loop alive AND returns focus to the app
+    // underneath, so the paste lands there).
     if let Some(ui) = weak.upgrade() {
-        let _ = ui.hide();
+        hide_launcher(&ui);
     }
-    // Resign active so focus returns to the app underneath; the paste lands there.
-    magpie_platform::hide_and_yield_focus();
     spawn_paste(weak.clone(), keep_open);
 }
 
@@ -787,9 +804,8 @@ pub fn start() {
                     }
                 }
                 if let Some(ui) = w.upgrade() {
-                    let _ = ui.hide();
+                    hide_launcher(&ui);
                 }
-                magpie_platform::hide_and_yield_focus();
                 spawn_paste(w.clone(), false);
             });
         });
@@ -884,10 +900,9 @@ pub fn start() {
             let w = w.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
-                    let _ = ui.hide();
+                    // Return focus to the app the user came from (keeps loop alive).
+                    hide_launcher(&ui);
                 }
-                // Return focus to the app the user came from.
-                magpie_platform::hide_and_yield_focus();
             });
         });
     }
