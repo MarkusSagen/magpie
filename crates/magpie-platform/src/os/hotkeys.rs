@@ -59,6 +59,16 @@ fn key_to_code(key: &str) -> Result<Code, String> {
         "7" => Code::Digit7,
         "8" => Code::Digit8,
         "9" => Code::Digit9,
+        // Common non-alphanumeric keys (Space is required for the default
+        // summon binding Cmd/Ctrl+Shift+Space).
+        "SPACE" => Code::Space,
+        "ENTER" | "RETURN" => Code::Enter,
+        "TAB" => Code::Tab,
+        "ESC" | "ESCAPE" => Code::Escape,
+        "COMMA" => Code::Comma,
+        "PERIOD" | "DOT" => Code::Period,
+        "SLASH" => Code::Slash,
+        "BACKQUOTE" | "GRAVE" => Code::Backquote,
         other => return Err(format!("unsupported hotkey key: {other}")),
     };
     Ok(c)
@@ -97,5 +107,30 @@ mod tests {
     #[test]
     fn rejects_unsupported_key() {
         assert!(to_global_hotkey(&parse_hotkey("ctrl+f13").unwrap()).is_err());
+    }
+
+    #[test]
+    fn maps_space_for_summon_default() {
+        // The default summon binding must register (Space was previously
+        // unsupported, so Cmd/Ctrl+Shift+Space silently failed).
+        let hk = to_global_hotkey(&parse_hotkey("super+shift+space").unwrap()).unwrap();
+        let ctrl_variant = to_global_hotkey(&parse_hotkey("ctrl+shift+space").unwrap()).unwrap();
+        assert_ne!(hk.id(), ctrl_variant.id());
+    }
+
+    #[test]
+    fn maps_other_common_keys() {
+        for combo in [
+            "ctrl+enter",
+            "ctrl+tab",
+            "ctrl+comma",
+            "ctrl+period",
+            "ctrl+slash",
+        ] {
+            assert!(
+                to_global_hotkey(&parse_hotkey(combo).unwrap()).is_ok(),
+                "{combo} should map"
+            );
+        }
     }
 }

@@ -39,7 +39,7 @@ fn default_true() -> bool {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            launcher_hotkey: "super+ctrl+v".into(),
+            launcher_hotkey: "super+shift+space".into(),
             quick_paste_hotkeys: (1..=9).map(|n| format!("super+ctrl+{n}")).collect(),
             paste_on_select: true,
             app_denylist: Vec::new(),
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn missing_file_yields_default() {
         let c = load_or_default(std::path::Path::new("/nonexistent/magpie/nope.toml"));
-        assert_eq!(c.launcher_hotkey, "super+ctrl+v");
+        assert_eq!(c.launcher_hotkey, "super+shift+space");
     }
 
     #[test]

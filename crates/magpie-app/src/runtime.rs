@@ -330,6 +330,9 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
         }
     }
     let _ = ui.show();
+    // Background/agent apps don't steal focus just by showing a window — activate
+    // the process and raise + key the window so the search box is ready to type.
+    magpie_platform::raise_to_front();
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's

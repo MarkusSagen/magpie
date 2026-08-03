@@ -1,6 +1,7 @@
 pub mod hotkeys;
 pub mod paste;
 pub mod source_app;
+pub mod window;
 
 pub mod autostart_linux;
 pub mod factory;
