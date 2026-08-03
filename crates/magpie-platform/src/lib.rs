@@ -11,7 +11,9 @@ pub mod watcher;
 
 pub use defaults::{default_app_denylist, default_ignore_regexes};
 pub use hotkey::{parse_hotkey, HotkeySpec, Mods};
-pub use os::accessibility::{accessibility_trusted, open_accessibility_settings};
+pub use os::accessibility::{
+    accessibility_trusted, open_accessibility_settings, prompt_accessibility,
+};
 pub use os::factory::{platform_autostart, platform_clipboard};
 pub use os::window::{hide_and_yield_focus, raise_to_front};
 pub use policy::{CapturePolicy, Decision, SkipReason};

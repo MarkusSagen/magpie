@@ -862,6 +862,9 @@ pub fn start() {
     }
     {
         ui.on_open_accessibility_settings(|| {
+            // Prompt first so macOS registers Magpie in the Accessibility list
+            // (a bare trust check never adds it), then deep-link to the pane.
+            let _ = magpie_platform::prompt_accessibility();
             magpie_platform::open_accessibility_settings();
         });
     }

@@ -23,6 +23,63 @@ pub fn accessibility_trusted() -> bool {
     true
 }
 
+/// Register this process with the Accessibility system and show macOS's own
+/// "wants to control your computer" prompt. This is what makes the app **appear
+/// in the Accessibility list** — a bare `AXIsProcessTrusted()` check never
+/// registers it. Returns the current trust state. macOS only; no-op elsewhere.
+///
+/// `AXIsProcessTrustedWithOptions({ kAXTrustedCheckOptionPrompt: true })`.
+#[cfg(target_os = "macos")]
+pub fn prompt_accessibility() -> bool {
+    use std::ffi::c_void;
+    type Ref = *const c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFBooleanTrue: Ref;
+        static kCFTypeDictionaryKeyCallBacks: c_void;
+        static kCFTypeDictionaryValueCallBacks: c_void;
+        fn CFDictionaryCreate(
+            allocator: Ref,
+            keys: *const Ref,
+            values: *const Ref,
+            num_values: isize,
+            key_cbs: *const c_void,
+            value_cbs: *const c_void,
+        ) -> Ref;
+        fn CFRelease(cf: Ref);
+    }
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        static kAXTrustedCheckOptionPrompt: Ref;
+        fn AXIsProcessTrustedWithOptions(options: Ref) -> u8;
+    }
+
+    unsafe {
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            std::ptr::addr_of!(kCFTypeDictionaryKeyCallBacks),
+            std::ptr::addr_of!(kCFTypeDictionaryValueCallBacks),
+        );
+        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
+        if !options.is_null() {
+            CFRelease(options);
+        }
+        trusted
+    }
+}
+
+/// Non-macOS: nothing to register.
+#[cfg(not(target_os = "macos"))]
+pub fn prompt_accessibility() -> bool {
+    true
+}
+
 /// Open the exact OS pane where the user grants Accessibility. macOS deep-links to
 /// Privacy ▸ Accessibility; other platforms have no equivalent (no-op).
 #[cfg(target_os = "macos")]
