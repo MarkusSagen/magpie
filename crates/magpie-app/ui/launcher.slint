@@ -517,32 +517,43 @@ export component LauncherWindow inherits Window {
                     min-width: 340px;
                     list := ListView {
                         for row[i] in entries: VerticalLayout {
-                            // Date group header when the section changes.
-                            if i == 0 || entries[i - 1].section != row.section: Text {
-                                text: row.section;
-                                color: #6a6a70;
-                                font-size: 11px;
+                            // Date group divider: a label with a full-width rule under it.
+                            if i == 0 || entries[i - 1].section != row.section: VerticalLayout {
+                                padding-top: 12px;
+                                padding-bottom: 2px;
+                                spacing: 5px;
+                                Text {
+                                    text: row.section;
+                                    color: #8a8a92;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                }
+                                Rectangle { height: 1px; background: #2e2e35; }
                             }
                             Rectangle {
                             height: 52px;
+                            // Selection is a soft rounded fill only — no border/underline.
                             background: i == root.selected ? #2f2f37 : (rowta.has-hover ? #232329 : transparent);
                             border-radius: 8px;
                             rowta := TouchArea {
                                 clicked => { root.selected = i; }
                                 double-clicked => { root.activate(i); }
                             }
-                            // Subtle bottom underline marks the selected row.
-                            Rectangle {
-                                x: 8px;
-                                y: parent.height - 2px;
-                                width: parent.width - 16px;
-                                height: 1px;
-                                background: i == root.selected ? #6a8cff : transparent;
-                            }
                             HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 8px;
+                                padding-left: 8px;
+                                padding-right: 10px;
                                 spacing: 8px;
+                                // 1-9 quick-paste number on the LEFT; brightens while ⌘/Ctrl held.
+                                Rectangle {
+                                    width: 20px;
+                                    if i < 9: Text {
+                                        text: i + 1;
+                                        color: root.cmd-held ? #6a8cff : #45454e;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
                                 // Icon centered vertically against the row (a Rectangle centers its child).
                                 Rectangle {
                                     width: 28px;
@@ -560,15 +571,6 @@ export component LauncherWindow inherits Window {
                                         if row.badge != "": Text { text: row.badge; color: #9a9aa0; font-size: 10px; vertical-alignment: center; }
                                     }
                                     Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
-                                }
-                                // 1-9 quick-paste badge; brightens while ⌘/Ctrl is held.
-                                if i < 9: Text {
-                                    text: i + 1;
-                                    color: root.cmd-held ? #6a8cff : #45454e;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                    width: 16px;
-                                    horizontal-alignment: center;
                                 }
                                 // Merge checkmark only when this row is queued (via ⌘M / ⌘K).
                                 if row.merged: Rectangle {
@@ -608,6 +610,31 @@ export component LauncherWindow inherits Window {
                                     font-size: 12px;
                                     horizontal-alignment: center;
                                 }
+                            }
+                        }
+                    }
+                    // Custom scrollbar (the native one is a barely-visible sliver).
+                    if list.viewport-height > list.visible-height + 1px: sb := Rectangle {
+                        x: parent.width - 9px;
+                        width: 6px;
+                        y: 0;
+                        height: parent.height;
+                        Rectangle {
+                            width: parent.width;
+                            border-radius: 3px;
+                            background: sbta.pressed ? #6a6a72 : (sbta.has-hover ? #55555f : #3f3f47);
+                            height: max(30px, sb.height * (list.visible-height / list.viewport-height));
+                            y: -list.viewport-y / list.viewport-height * sb.height;
+                        }
+                        sbta := TouchArea {
+                            property <length> anchor;
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    self.anchor = list.viewport-y;
+                                }
+                            }
+                            moved => {
+                                list.viewport-y = min(0px, max(-(list.viewport-height - list.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (list.viewport-height / sb.height)));
                             }
                         }
                     }
