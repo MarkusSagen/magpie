@@ -136,6 +136,7 @@ export component LauncherWindow inherits Window {
     in-out property <bool> needs-accessibility: false;
     callback open-accessibility-settings();
     callback recheck-accessibility();
+    callback dismiss-accessibility();
     callback toggle-pin(int);
     callback toggle-screenshare();
     callback delete-entry(int);
@@ -312,6 +313,7 @@ export component LauncherWindow inherits Window {
                                     return accept;
                                 }
                                 if event.text == Key.Escape {
+                                    if root.needs-accessibility { root.dismiss-accessibility(); return accept; }
                                     if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
                                     root.hide-window();
                                     return accept;
@@ -1051,7 +1053,7 @@ export component LauncherWindow inherits Window {
                     Rectangle {
                         height: 28px;
                         dismissta := TouchArea {
-                            clicked => { root.needs-accessibility = false; }
+                            clicked => { root.dismiss-accessibility(); }
                         }
                         Text {
                             text: "Not now";

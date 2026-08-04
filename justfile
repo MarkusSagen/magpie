@@ -41,7 +41,13 @@ package-macos: release
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
     cp target/release/magpie "$APP/Contents/MacOS/magpie"
     cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
-    echo "built $APP (unsigned)"
+    # Ad-hoc sign with a stable identifier so macOS TCC (Accessibility) can bind the
+    # grant to a consistent identity. Without any signature the grant often won't
+    # apply even when the toggle is on. (Developer-ID signing/notarization is a
+    # separate, later step — see the install spec.)
+    codesign --force --deep --sign - --identifier io.magpie "$APP" \
+      && echo "built $APP (ad-hoc signed)" \
+      || echo "built $APP (unsigned — codesign unavailable)"
 
 # Windows: the release .exe is the deliverable
 package-windows: release

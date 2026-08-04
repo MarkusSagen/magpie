@@ -390,6 +390,11 @@ fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
     });
 }
 
+/// Set once the user has acted on the "Enable auto-paste" modal (either button),
+/// so we never re-show it this session — prevents an unsigned-`.app` trap where
+/// the grant is on but `AXIsProcessTrusted()` still reports false.
+static A11Y_DISMISSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// True when running as a real macOS `.app` bundle (path
 /// `…/Magpie.app/Contents/MacOS/magpie`) rather than a bare dev binary from
 /// `cargo run`. We only gate/prompt for Accessibility as a bundle: a bare
@@ -448,7 +453,17 @@ fn paste_and_close(
     // *installed app* on it: as a bare dev binary the grant belongs to the launching
     // terminal (Ghostty), so prompting for Magpie would nag forever while the paste
     // already works via the terminal — in dev we just proceed best-effort.
-    if running_as_app_bundle() && !magpie_platform::accessibility_trusted() {
+    //
+    // Show the informational modal AT MOST ONCE per session: once the user has acted
+    // on it (either button), `A11Y_DISMISSED` is set and we always proceed
+    // best-effort. This matters because for an unsigned .app macOS TCC is
+    // unreliable — the toggle can be on while `AXIsProcessTrusted()` still reports
+    // false (grants often need an app relaunch), which would otherwise trap the user
+    // in a modal that never clears.
+    if running_as_app_bundle()
+        && !magpie_platform::accessibility_trusted()
+        && !A11Y_DISMISSED.load(std::sync::atomic::Ordering::Relaxed)
+    {
         if let Some(ui) = weak.upgrade() {
             ui.set_needs_accessibility(true);
         }
@@ -919,9 +934,24 @@ pub fn start() {
     {
         let w = ui.as_weak();
         ui.on_recheck_accessibility(move || {
-            // Clear the modal iff the grant is now in place; otherwise keep prompting.
+            // The user says they've enabled it. Close the modal and never gate again
+            // this session — even if AXIsProcessTrusted() still reports false (common
+            // for an unsigned .app until relaunch). Subsequent pastes proceed
+            // best-effort; if the grant is live the keystroke lands, and if it needs
+            // a relaunch the user isn't trapped in an un-clearable modal.
+            A11Y_DISMISSED.store(true, std::sync::atomic::Ordering::Relaxed);
             if let Some(ui) = w.upgrade() {
-                ui.set_needs_accessibility(!magpie_platform::accessibility_trusted());
+                ui.set_needs_accessibility(false);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_dismiss_accessibility(move || {
+            // "Not now" — stop gating for the session; paste best-effort afterward.
+            A11Y_DISMISSED.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(ui) = w.upgrade() {
+                ui.set_needs_accessibility(false);
             }
         });
     }
