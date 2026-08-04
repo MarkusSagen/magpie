@@ -121,6 +121,13 @@ check timestamps and don't assume "no new report" = "not crashing."
   Check `magpie_platform::accessibility_trusted()`; guide via
   `open_accessibility_settings()` / `prompt_accessibility()` (the latter *registers*
   the app in the list — a bare trust check never does).
+- **An unsigned `.app` can't reliably hold a TCC grant.** The Accessibility toggle
+  shows on, yet `AXIsProcessTrusted()` still returns false (and grants usually only
+  take effect after an **app relaunch**). Ad-hoc sign the bundle
+  (`codesign --force --deep -s - --identifier io.magpie`) so TCC binds to a stable
+  identity, and after granting **quit + reopen** the app. Never let the permission
+  modal become un-clearable — gate it at most once per session (`A11Y_DISMISSED`)
+  and always allow dismiss (button / Esc), then paste best-effort.
 - **TCC attributes a `cargo run` binary to the launching terminal**, not to Magpie.
   So `AXIsProcessTrusted()` is always false for the dev binary even when the paste
   works (delivered via the terminal's own grant), and prompting just nags for the
