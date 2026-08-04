@@ -126,8 +126,12 @@ returns focus to the previous app. This gate must pass before Task 2.
 - No special TCC key needed for Accessibility; the OS prompts on first
   auto-paste (documented).
 
-**Icon:** add `packaging/macos/icon.iconset/` (PNGs at required sizes) → build
-`Magpie.icns` via `iconutil -c icns`. Placed in `Contents/Resources/`.
+**Icon:** DONE — a single SVG source lives in `assets/` (`magpie.svg` colored app
+icon, `magpie-mono.svg` menu-bar silhouette). `just icons` regenerates the derived
+`packaging/macos/Magpie.icns` (all iconset sizes via `iconutil`) and the embedded
+menu-bar template `crates/magpie-app/icons/tray-template.png`. Placed in
+`Contents/Resources/`. Windows `.ico` / Linux PNGs derive from the same source when
+those platforms land.
 
 `just package-macos` (extended): copy binary + generated Info.plist + `Magpie.icns`;
 apply **ad-hoc signature** `codesign -s - --force --deep target/Magpie.app` (helps

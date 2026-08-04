@@ -30,6 +30,27 @@ clippy:
 install-autostart: release
     ./target/release/magpie --install-autostart
 
+# --- assets ---
+
+# Regenerate every derived icon from the single SVG source in assets/.
+# Run this whenever assets/magpie*.svg changes; the outputs are committed so
+# `cargo build` and `just package-*` never need a rasterizer (librsvg).
+#   - packaging/macos/Magpie.icns        (macOS app icon)
+#   - crates/magpie-app/icons/tray-template.png  (menu-bar icon, embedded via include_bytes!)
+icons:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v rsvg-convert >/dev/null || { echo "need rsvg-convert (brew install librsvg)"; exit 1; }
+    ICONSET="$(mktemp -d)/Magpie.iconset"; mkdir -p "$ICONSET"
+    for s in 16 32 128 256 512; do
+      rsvg-convert -w "$s"        -h "$s"        assets/magpie.svg -o "$ICONSET/icon_${s}x${s}.png"
+      rsvg-convert -w "$((s*2))"  -h "$((s*2))"  assets/magpie.svg -o "$ICONSET/icon_${s}x${s}@2x.png"
+    done
+    iconutil -c icns "$ICONSET" -o packaging/macos/Magpie.icns
+    mkdir -p crates/magpie-app/icons
+    rsvg-convert -w 44 -h 44 assets/magpie-mono.svg -o crates/magpie-app/icons/tray-template.png
+    echo "regenerated packaging/macos/Magpie.icns + crates/magpie-app/icons/tray-template.png from assets/"
+
 # --- packaging ---
 
 # macOS: assemble a minimal .app bundle around the release binary
