@@ -1311,6 +1311,15 @@ pub fn start() {
     slint::run_event_loop().expect("run event loop");
 }
 
+/// Decode the embedded menu-bar template PNG (black magpie silhouette on
+/// transparent) into a tray icon.
+fn load_tray_icon() -> Option<tray_icon::Icon> {
+    let bytes = include_bytes!("../icons/tray-template.png");
+    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    tray_icon::Icon::from_rgba(img.into_raw(), w, h).ok()
+}
+
 /// Build the tray icon: right-click shows a menu (Show / Quit); left-click opens
 /// the window. On Linux, tray click events are not emitted, so "Show Magpie" in
 /// the menu is the portable way to open the window.
@@ -1330,13 +1339,21 @@ fn build_tray(
     let show_id = show.id().clone();
     let quit_id = quit.id().clone();
 
-    let tray = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
-        .with_tooltip("Magpie")
-        .with_title("🐦")
-        .build()
-        .ok()?;
+        .with_tooltip("Magpie");
+    // Menu-bar icon: the magpie silhouette as a template image (macOS tints it for
+    // the light/dark menu bar). Falls back to a text glyph if decoding fails.
+    match load_tray_icon() {
+        Some(icon) => {
+            builder = builder.with_icon(icon).with_icon_as_template(true);
+        }
+        None => {
+            builder = builder.with_title("🐦");
+        }
+    }
+    let tray = builder.build().ok()?;
 
     // Menu clicks (right-click menu): Show / Quit.
     {

@@ -8,6 +8,8 @@
     <string>io.magpie</string>
     <key>CFBundleExecutable</key>
     <string>magpie</string>
+    <key>CFBundleIconFile</key>
+    <string>Magpie</string>
     <key>CFBundleVersion</key>
     <string>0.1.0</string>
     <key>CFBundleShortVersionString</key>

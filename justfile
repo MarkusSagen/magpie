@@ -41,6 +41,7 @@ package-macos: release
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
     cp target/release/magpie "$APP/Contents/MacOS/magpie"
     cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
+    cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
     # Ad-hoc sign with a stable identifier so macOS TCC (Accessibility) can bind the
     # grant to a consistent identity. Without any signature the grant often won't
     # apply even when the toggle is on. (Developer-ID signing/notarization is a

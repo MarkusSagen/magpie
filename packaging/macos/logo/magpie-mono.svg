@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="700" viewBox="220 255 620 700">
+  <!-- Solid black silhouette on transparent: a macOS "template" image that the OS
+       tints for the light/dark menu bar. Same magpie shape as the app icon, tail
+       merged into the body (no accent), tight bounds so it fills the menu bar. -->
+  <g fill="#000000">
+    <path d="M 235 352 L 360 322 L 360 392 Z"/>
+    <circle cx="410" cy="356" r="92"/>
+    <ellipse cx="505" cy="500" rx="150" ry="185"/>
+    <path d="M 520 560 Q 675 645 800 878 L 720 922 Q 605 705 490 648 Z"/>
+    <rect x="470" y="662" width="20" height="130" rx="8"/>
+    <rect x="548" y="662" width="20" height="130" rx="8"/>
+  </g>
+</svg>

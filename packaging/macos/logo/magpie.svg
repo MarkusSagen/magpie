@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2b31"/>
+      <stop offset="1" stop-color="#16161a"/>
+    </linearGradient>
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3fbfae"/>
+      <stop offset="1" stop-color="#2a7fd6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded-square app background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="url(#bg)"/>
+
+  <!-- magpie, facing left, long tail sweeping down-right -->
+  <g>
+    <!-- teal tail accent (drawn first, behind the white body) -->
+    <path d="M 545 560
+             Q 690 640 815 860
+             L 735 905
+             Q 615 700 505 640 Z"
+          fill="url(#tail)"/>
+
+    <!-- white bird body group -->
+    <g fill="#f4f4f6">
+      <!-- beak -->
+      <path d="M 235 352 L 360 322 L 360 392 Z"/>
+      <!-- head -->
+      <circle cx="410" cy="356" r="92"/>
+      <!-- body -->
+      <ellipse cx="505" cy="500" rx="150" ry="185"/>
+      <!-- upper tail base overlapping body -->
+      <path d="M 520 560 Q 660 640 775 862 L 705 900 Q 600 705 490 648 Z"/>
+      <!-- legs -->
+      <rect x="470" y="662" width="20" height="120" rx="8"/>
+      <rect x="548" y="662" width="20" height="120" rx="8"/>
+    </g>
+
+    <!-- eye -->
+    <circle cx="392" cy="345" r="17" fill="#16161a"/>
+  </g>
+</svg>
