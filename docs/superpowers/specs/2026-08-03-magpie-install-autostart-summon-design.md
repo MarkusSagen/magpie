@@ -220,6 +220,28 @@ that Magpie has no Dock icon (it's a menu-bar/tray agent).
   portability, or `.deb`). Autostart = existing XDG `~/.config/autostart/*.desktop`.
   Wayland may refuse programmatic focus on summon (documented limitation).
 
+### Icons — one source, all platforms (extends `just icons`)
+
+The single SVG source in `assets/` (`magpie.svg` colored, `magpie-mono.svg`
+silhouette) already drives the macOS `.icns` + the embedded menu-bar template via
+`just icons`. Extend the **same recipe** to emit the other platforms' formats so no
+icon asset is ever hand-maintained per platform:
+
+- **Windows `.ico`** — rasterize `assets/magpie.svg` at 16/24/32/48/64/128/256 and
+  pack into `packaging/windows/Magpie.ico` (`magick <pngs> Magpie.ico`). Embedded in
+  the `.exe` via a resource script / `winres`/`embed-resource` build step;
+  `package-windows` references it. The tray on Windows can reuse the same colored
+  small PNG (Windows tray icons are not template images).
+- **Linux PNGs** — rasterize `assets/magpie.svg` to
+  `packaging/linux/hicolor/<size>/apps/io.magpie.png` at the freedesktop sizes
+  (32/48/64/128/256); the `.desktop` file's `Icon=io.magpie` resolves to them.
+  `package-linux` installs them under the icon theme dir.
+
+Keep the derived files committed (as macOS already does) so `cargo build` and
+`just package-*` never require a rasterizer; `librsvg` is only needed to re-run
+`just icons` when the logo changes. Each `package-<platform>` copies its
+pre-generated icon into the bundle/installer.
+
 ## Out of scope (explicit)
 
 - **Developer-ID signing + notarization** — own future doc/plan (user: "later… not
@@ -268,3 +290,8 @@ stores or sends (nothing).
    Accessibility button, start-at-login, quick help reusing the Help rows),
    gated by `welcomed` config flag; `--show-welcome` to re-open.
 6. **Docs** — README install + permissions + summon key.
+7. **Cross-platform icons** — extend `just icons` to also emit the Windows `.ico`
+   (`packaging/windows/Magpie.ico`) and Linux hicolor PNGs
+   (`packaging/linux/hicolor/<size>/apps/io.magpie.png`) from the same `assets/`
+   SVG source; `package-windows`/`package-linux` reference them. (macOS `.icns` +
+   embedded menu-bar template already done.)
