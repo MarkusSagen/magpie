@@ -111,6 +111,13 @@ check timestamps and don't assume "no new report" = "not crashing."
 - **Poisoned mutex = crash risk.** A panic while holding a lock poisons it; a later
   `.expect()`/`.unwrap()` lock on the UI thread then panics → abort. Recover with
   `.lock().unwrap_or_else(|e| e.into_inner())` on the UI hot path.
+- **A crash mid-paste can leave ⌘/Ctrl stuck down system-wide.** enigo presses the
+  modifier, sends `v`, then releases it; if the release is skipped (the click
+  errored, or the process died between press and release), the OS thinks Cmd is
+  still held → every keystroke acts as Cmd+<key> and pasting breaks *everywhere*,
+  not just in Magpie. `paste()` now always releases (even on click error) and
+  defensively releases at the start so the next paste self-heals. To clear a stuck
+  modifier by hand: tap each modifier key (⌘⌃⌥⇧) once, or log out/in.
 - **enigo's ⌘V synthesis MUST run on the main thread (macOS).** It calls
   TIS/HIToolbox input-source APIs that `dispatch_assert_queue` — from a background
   thread you get `EXC_BREAKPOINT`/`SIGTRAP` (`TSMGetInputSourceProperty` in the
