@@ -644,12 +644,22 @@ export component LauncherWindow inherits Window {
                                 min-height: 100px;
                                 vertical-stretch: 1;
                                 // Normal-size entries: a selectable, scrollable,
-                                // zoomable read-only TextEdit (drag to select, ⌘C).
-                                if root.preview-text != "": TextEdit {
-                                    read-only: true;
-                                    text: root.preview-text;
-                                    font-size: root.preview-font-size;
-                                    wrap: word-wrap;
+                                // zoomable read-only TextInput (drag to select, ⌘C).
+                                // Plain TextInput (not std TextEdit) so we control the
+                                // text color — the themed TextEdit rendered invisibly
+                                // on the dark pane.
+                                if root.preview-text != "": Flickable {
+                                    viewport-width: self.width;
+                                    viewport-height: pvtext.preferred-height;
+                                    pvtext := TextInput {
+                                        width: parent.width;
+                                        text: root.preview-text;
+                                        color: #d0d0d4;
+                                        font-size: root.preview-font-size;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                    }
                                 }
                                 // Huge entries: fast virtualized line list (not
                                 // selectable) so selection stays instant. Wrapped so
