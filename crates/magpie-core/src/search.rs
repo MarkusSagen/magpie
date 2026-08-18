@@ -85,6 +85,35 @@ fn fts_match(text: &str) -> Option<String> {
     }
 }
 
+/// Levenshtein edit distance between `a` and `b`, but only computed up to `max`:
+/// returns `Some(distance)` if within `max`, else `None` (with early exits so it's
+/// cheap to reject far-apart tokens).
+fn levenshtein_within(a: &str, b: &str, max: usize) -> Option<usize> {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (la, lb) = (a.len(), b.len());
+    if la.abs_diff(lb) > max {
+        return None;
+    }
+    let mut prev: Vec<usize> = (0..=lb).collect();
+    let mut curr: Vec<usize> = vec![0; lb + 1];
+    for i in 1..=la {
+        curr[0] = i;
+        let mut row_min = curr[0];
+        for j in 1..=lb {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            row_min = row_min.min(curr[j]);
+        }
+        if row_min > max {
+            return None; // whole row already exceeds the budget
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    let d = prev[lb];
+    (d <= max).then_some(d)
+}
+
 /// Escape LIKE metacharacters so an exact-substring query is treated literally.
 fn like_escape(text: &str) -> String {
     text.replace('\\', "\\\\")
@@ -159,6 +188,64 @@ impl Store {
             }
         }
         scored.sort_by_key(|s| std::cmp::Reverse(s.0));
+        Ok(scored
+            .into_iter()
+            .take(q.limit as usize)
+            .map(|(_, e)| e)
+            .collect())
+    }
+
+    /// Typo-tolerant fallback for word search: match entries that contain a TOKEN
+    /// within a small edit distance of each query term (Levenshtein ≤1 for short
+    /// terms, ≤2 for longer). Precise where subsequence-fuzzy floods — `enhancr`
+    /// finds `enhancer` but random prose does not match. AND across terms; ranked
+    /// by total edit distance (closest first).
+    fn search_typo_fallback(&self, q: &SearchQuery) -> Result<Vec<Entry>> {
+        let terms: Vec<String> = q
+            .text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_lowercase())
+            .collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Tokenize a bounded head of each entry (typos are in visible content; keeps
+        // per-keystroke cost bounded even for huge entries).
+        const HEAD_CHARS: usize = 2000;
+        let mut scored: Vec<(usize, Entry)> = Vec::new();
+        for e in self.candidates(q)? {
+            let head: String = e
+                .full_text
+                .chars()
+                .take(HEAD_CHARS)
+                .collect::<String>()
+                .to_lowercase();
+            let tokens: std::collections::HashSet<&str> = head
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|t| !t.is_empty())
+                .collect();
+            let mut total = 0usize;
+            let mut all_matched = true;
+            for term in &terms {
+                let max_d = if term.chars().count() <= 4 { 1 } else { 2 };
+                match tokens
+                    .iter()
+                    .filter_map(|tok| levenshtein_within(term, tok, max_d))
+                    .min()
+                {
+                    Some(d) => total += d,
+                    None => {
+                        all_matched = false;
+                        break;
+                    }
+                }
+            }
+            if all_matched {
+                scored.push((total, e));
+            }
+        }
+        scored.sort_by_key(|(d, _)| *d);
         Ok(scored
             .into_iter()
             .take(q.limit as usize)
@@ -259,7 +346,15 @@ impl Store {
 
         let mut stmt = self.conn().prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(params), row_to_entry)?;
-        rows.collect()
+        let out: Vec<Entry> = rows.collect::<Result<Vec<_>>>()?;
+        // Typo/spelling resilience: if the exact word-prefix search found nothing,
+        // fall back to edit-distance token matching — a misspelled query
+        // (`enhancr`) still finds the entry (`enhancer`) without the flood of a
+        // subsequence match over prose. Word mode only; Exact stays strictly exact.
+        if out.is_empty() && !trimmed.is_empty() && matches!(q.mode, SearchMode::Word) {
+            return self.search_typo_fallback(q);
+        }
+        Ok(out)
     }
 }
 
@@ -450,6 +545,22 @@ mod tests {
         let rows = s.search(&q).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind.as_str(), "link");
+    }
+
+    #[test]
+    fn word_search_falls_back_to_fuzzy_on_typo() {
+        // A misspelled query (that FTS prefix can't match) still finds the entry
+        // via the fuzzy fallback — subsequence match, fzf-style.
+        let s = open_in_memory().unwrap();
+        s.ingest(&text_ev("enhancer dashboard is live", 1), &FakeImages)
+            .unwrap();
+        s.ingest(&text_ev("totally unrelated", 2), &FakeImages)
+            .unwrap();
+        let mut q = default_query();
+        q.text = "enhancr".into(); // typo: missing 'e' — no token starts with this
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].full_text.contains("enhancer"));
     }
 
     #[test]
