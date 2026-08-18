@@ -64,17 +64,19 @@ fn order_clause(sort: Sort) -> &'static str {
 }
 
 /// Build an FTS5 MATCH expression from user text. Each whitespace-separated term
-/// is reduced to its alphanumeric/underscore run and quoted, then ANDed:
-/// `alpha, gamma!` -> `"alpha" AND "gamma"`. Returns `None` when the query has no
-/// searchable token (e.g. it was all punctuation) so callers can short-circuit
-/// instead of handing FTS a syntactically invalid expression.
+/// is reduced to its alphanumeric/underscore run, quoted, and turned into a
+/// **prefix** match, then ANDed: `enhanc live` -> `"enhanc"* AND "live"*`. Prefix
+/// matching is what makes search-as-you-type work — typing `enhanc` finds
+/// `enhancer` (FTS5 otherwise only matches whole tokens). Returns `None` when the
+/// query has no searchable token (e.g. all punctuation) so callers can
+/// short-circuit instead of handing FTS a syntactically invalid expression.
 fn fts_match(text: &str) -> Option<String> {
     // Split on any non-alphanumeric boundary, matching how the default unicode61
-    // tokenizer breaks the stored content, so `d.rs` -> `"d" AND "rs"`.
+    // tokenizer breaks the stored content, so `d.rs` -> `"d"* AND "rs"*`.
     let terms: Vec<String> = text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{t}\""))
+        .map(|t| format!("\"{t}\"*"))
         .collect();
     if terms.is_empty() {
         None
@@ -448,6 +450,21 @@ mod tests {
         let rows = s.search(&q).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind.as_str(), "link");
+    }
+
+    #[test]
+    fn word_search_is_prefix_matched() {
+        // Search-as-you-type: a partial word must find the full token.
+        let s = open_in_memory().unwrap();
+        s.ingest(&text_ev("enhancer-live affected in prod", 1), &FakeImages)
+            .unwrap();
+        s.ingest(&text_ev("unrelated note", 2), &FakeImages)
+            .unwrap();
+        let mut q = default_query();
+        q.text = "enhanc".into(); // prefix of "enhancer"
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].full_text.contains("enhancer-live"));
     }
 
     #[test]

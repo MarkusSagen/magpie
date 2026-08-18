@@ -121,6 +121,9 @@ export component LauncherWindow inherits Window {
     // for the selected entry so only visible lines are ever shaped.
     in property <[string]> preview-lines;
     in property <bool> preview-truncated: false;
+    // Preview font size — ⌘+ / ⌘- adjust it, ⌘0 resets (clamped in Rust callbacks).
+    in-out property <length> preview-font-size: 13px;
+    callback zoom-preview(int); // +1 bigger, -1 smaller, 0 reset
     callback preview-select(int, bool, bool);
     callback open-in-editor(int);
     callback activate(int);
@@ -327,6 +330,10 @@ export component LauncherWindow inherits Window {
                                     if event.text == "n" { root.new-snippet(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }
+                                    // Preview zoom: ⌘+ / ⌘= bigger, ⌘- smaller, ⌘0 reset.
+                                    if event.text == "=" || event.text == "+" { root.zoom-preview(1); return accept; }
+                                    if event.text == "-" { root.zoom-preview(-1); return accept; }
+                                    if event.text == "0" { root.zoom-preview(0); return accept; }
                                     if event.text == "1" { root.activate-nth(1); return accept; }
                                     if event.text == "2" { root.activate-nth(2); return accept; }
                                     if event.text == "3" { root.activate-nth(3); return accept; }
@@ -636,13 +643,13 @@ export component LauncherWindow inherits Window {
                                 plist := ListView {
                                     vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                                     for ln in root.preview-lines: Rectangle {
-                                        height: 19px;
+                                        height: root.preview-font-size * 1.5;
                                         Text {
                                             x: 0;
                                             width: parent.width;
                                             text: ln;
                                             color: #d0d0d4;
-                                            font-size: 13px;
+                                            font-size: root.preview-font-size;
                                             overflow: elide;
                                             vertical-alignment: center;
                                         }

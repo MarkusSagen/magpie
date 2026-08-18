@@ -368,25 +368,32 @@ fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
 }
 
 /// After hiding, wait for focus to return to the previous app, send the paste
-/// keystroke, and optionally re-show the window.
+/// keystroke on the MAIN thread, and optionally re-show the window.
 ///
-/// MUST be called on the main (event-loop) thread — callers defer here. enigo's
-/// macOS keystroke synthesis calls TIS/HIToolbox input-source APIs that assert
-/// they run on the main thread (`dispatch_assert_queue` → SIGTRAP otherwise), so
-/// we use a Slint `Timer` (fires on the event loop) rather than a background
-/// thread. The delay lets the window hide and focus return to the app underneath.
+/// A background thread does the delay, then `invoke_from_event_loop` runs the
+/// keystroke on the main/event-loop thread. Two reasons this beats a `Timer`:
+/// (1) enigo's macOS TIS calls assert they run on the main thread
+/// (`dispatch_assert_queue` → SIGTRAP from a background thread); (2)
+/// `invoke_from_event_loop` posts a wakeup, so it fires reliably even while the
+/// app is hidden via `NSApp.hide` (a plain `Timer` may not tick while hidden,
+/// which left the clipboard set but the ⌘V never sent).
 fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
-    slint::Timer::single_shot(Duration::from_millis(120), move || {
-        let _ = magpie_platform::Paster::paste(&EnigoPaster);
-        if keep_open {
-            // ⌘Enter: after pasting into the app underneath, bring Magpie back to
-            // the front, focused, ready to type (same as a fresh summon).
-            if let Some(ui) = weak.upgrade() {
-                let _ = ui.show();
-                magpie_platform::raise_to_front();
-                ui.invoke_summon();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        let log = data_dir().join("logs").join("magpie.log");
+        let _ = slint::invoke_from_event_loop(move || {
+            let r = magpie_platform::Paster::paste(&EnigoPaster);
+            magpie_app::diagnostics::log_line(&log, &format!("paste keystroke sent (enigo={r:?})"));
+            if keep_open {
+                // ⌘Enter: after pasting into the app underneath, bring Magpie back
+                // to the front, focused, ready to type (same as a fresh summon).
+                if let Some(ui) = weak.upgrade() {
+                    let _ = ui.show();
+                    magpie_platform::raise_to_front();
+                    ui.invoke_summon();
+                }
             }
-        }
+        });
     });
 }
 
@@ -449,6 +456,14 @@ fn paste_and_close(
         // Copy only here; the keystroke is sent after the window hides.
         let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
     }
+    magpie_app::diagnostics::log_line(
+        &data_dir().join("logs").join("magpie.log"),
+        &format!(
+            "activate idx={idx}: bundle={} trusted={}",
+            running_as_app_bundle(),
+            magpie_platform::accessibility_trusted()
+        ),
+    );
     // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. Only gate the
     // *installed app* on it: as a bare dev binary the grant belongs to the launching
     // terminal (Ghostty), so prompting for Magpie would nag forever while the paste
@@ -801,6 +816,20 @@ pub fn start() {
             let results = current_results(&s, now_ms());
             if let Some(e) = results.get(idx as usize) {
                 let _ = magpie_app::external_editor::open_text(&e.full_text, &e.content_hash);
+            }
+        });
+    }
+    {
+        // Preview font zoom: ⌘+ bigger, ⌘- smaller, ⌘0 reset. Clamped 9–28px.
+        let w = ui.as_weak();
+        ui.on_zoom_preview(move |dir| {
+            if let Some(ui) = w.upgrade() {
+                let next = if dir == 0 {
+                    13.0
+                } else {
+                    (ui.get_preview_font_size() + dir as f32).clamp(9.0, 28.0)
+                };
+                ui.set_preview_font_size(next);
             }
         });
     }
