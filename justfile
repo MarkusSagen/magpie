@@ -63,13 +63,32 @@ package-macos: release
     cp target/release/magpie "$APP/Contents/MacOS/magpie"
     cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
     cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
-    # Ad-hoc sign with a stable identifier so macOS TCC (Accessibility) can bind the
-    # grant to a consistent identity. Without any signature the grant often won't
-    # apply even when the toggle is on. (Developer-ID signing/notarization is a
-    # separate, later step — see the install spec.)
-    codesign --force --deep --sign - --identifier io.magpie "$APP" \
-      && echo "built $APP (ad-hoc signed)" \
+    # Sign so macOS TCC (Accessibility) binds the grant to a consistent identity.
+    # Ad-hoc (`-`) changes the code hash every build, so the Accessibility grant
+    # RESETS on each rebuild. Set SIGN_ID to a STABLE self-signed cert (see
+    # `just make-signing-cert`) and the grant persists across rebuilds.
+    SIGN_ID="${SIGN_ID:--}"
+    codesign --force --deep --sign "$SIGN_ID" --identifier io.magpie "$APP" \
+      && echo "built $APP (signed: $SIGN_ID)" \
       || echo "built $APP (unsigned — codesign unavailable)"
+    if [ "$SIGN_ID" = "-" ]; then echo "NOTE: ad-hoc signed — the Accessibility grant resets each rebuild. See 'just make-signing-cert' for a stable grant."; fi
+
+# Create a one-time self-signed code-signing cert ("Magpie Dev") so the
+# Accessibility grant survives rebuilds. Then build with: SIGN_ID="Magpie Dev" just package-macos
+make-signing-cert:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="Magpie Dev"
+    if security find-certificate -c "$NAME" >/dev/null 2>&1; then
+      echo "cert '$NAME' already exists — build with: SIGN_ID=\"$NAME\" just package-macos"; exit 0
+    fi
+    echo "Creating a self-signed code-signing certificate '$NAME' via Keychain Access."
+    echo "macOS can't fully script this, so do it once in the GUI:"
+    echo "  1. Open Keychain Access ▸ menu Certificate Assistant ▸ Create a Certificate…"
+    echo "  2. Name: $NAME   Identity Type: Self Signed Root   Certificate Type: Code Signing"
+    echo "  3. Create, then leave it in the 'login' keychain."
+    echo "Then rebuild with:  SIGN_ID=\"$NAME\" just package-macos"
+    open "/System/Applications/Utilities/Keychain Access.app" || true
 
 # Windows: the release .exe is the deliverable
 package-windows: release
