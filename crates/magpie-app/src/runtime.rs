@@ -804,9 +804,26 @@ pub fn start() {
                 }
                 None => (Vec::new(), false),
             };
+            // For normal-size, unmasked entries, also expose the joined text so the
+            // UI can show a selectable/copyable TextEdit. Huge entries keep
+            // preview-text empty and fall back to the fast virtualized line list.
+            const SELECTABLE_MAX_LINES: usize = 800;
+            const SELECTABLE_MAX_CHARS: usize = 40_000;
+            let selectable = match entry {
+                Some(e)
+                    if !(masked && !revealed)
+                        && !truncated
+                        && lines.len() <= SELECTABLE_MAX_LINES
+                        && e.full_text.len() <= SELECTABLE_MAX_CHARS =>
+                {
+                    e.full_text.clone()
+                }
+                _ => String::new(),
+            };
             if let Some(ui) = w.upgrade() {
                 ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
                 ui.set_preview_truncated(truncated);
+                ui.set_preview_text(SharedString::from(selectable));
             }
         });
     }

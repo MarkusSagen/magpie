@@ -120,6 +120,9 @@ export component LauncherWindow inherits Window {
     // Detail preview is a virtualized line list — Rust pushes the (bounded) lines
     // for the selected entry so only visible lines are ever shaped.
     in property <[string]> preview-lines;
+    // Selectable preview text for normal-size entries (empty for huge ones, which
+    // fall back to the fast virtualized line list). Lets the user select + ⌘C copy.
+    in property <string> preview-text;
     in property <bool> preview-truncated: false;
     // Preview font size — ⌘+ / ⌘- adjust it, ⌘0 resets (clamped in Rust callbacks).
     in-out property <length> preview-font-size: 13px;
@@ -640,41 +643,54 @@ export component LauncherWindow inherits Window {
                             Rectangle {
                                 min-height: 100px;
                                 vertical-stretch: 1;
-                                plist := ListView {
-                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    for ln in root.preview-lines: Rectangle {
-                                        height: root.preview-font-size * 1.5;
-                                        Text {
-                                            x: 0;
-                                            width: parent.width;
-                                            text: ln;
-                                            color: #d0d0d4;
-                                            font-size: root.preview-font-size;
-                                            overflow: elide;
-                                            vertical-alignment: center;
-                                        }
-                                    }
+                                // Normal-size entries: a selectable, scrollable,
+                                // zoomable read-only TextEdit (drag to select, ⌘C).
+                                if root.preview-text != "": TextEdit {
+                                    read-only: true;
+                                    text: root.preview-text;
+                                    font-size: root.preview-font-size;
+                                    wrap: word-wrap;
                                 }
-                                // Custom scrollbar for the preview (flush right).
-                                if plist.viewport-height > plist.visible-height + 1px: pv := Rectangle {
-                                    x: parent.width - 6px;
-                                    width: 5px;
-                                    y: 0;
-                                    height: parent.height;
-                                    Rectangle {
-                                        width: parent.width;
-                                        border-radius: 3px;
-                                        background: pvta.pressed ? #6a6a72 : (pvta.has-hover ? #55555f : #3f3f47);
-                                        height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
-                                        y: -plist.viewport-y / plist.viewport-height * pv.height;
-                                    }
-                                    pvta := TouchArea {
-                                        property <length> anchor;
-                                        pointer-event(e) => {
-                                            if (e.kind == PointerEventKind.down) { self.anchor = plist.viewport-y; }
+                                // Huge entries: fast virtualized line list (not
+                                // selectable) so selection stays instant. Wrapped so
+                                // `plist` stays in scope for its custom scrollbar.
+                                if root.preview-text == "": Rectangle {
+                                    plist := ListView {
+                                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                                        for ln in root.preview-lines: Rectangle {
+                                            height: root.preview-font-size * 1.5;
+                                            Text {
+                                                x: 0;
+                                                width: parent.width;
+                                                text: ln;
+                                                color: #d0d0d4;
+                                                font-size: root.preview-font-size;
+                                                overflow: elide;
+                                                vertical-alignment: center;
+                                            }
                                         }
-                                        moved => {
-                                            plist.viewport-y = min(0px, max(-(plist.viewport-height - plist.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (plist.viewport-height / pv.height)));
+                                    }
+                                    // Custom scrollbar for the preview (flush right).
+                                    if plist.viewport-height > plist.visible-height + 1px: pv := Rectangle {
+                                        x: parent.width - 6px;
+                                        width: 5px;
+                                        y: 0;
+                                        height: parent.height;
+                                        Rectangle {
+                                            width: parent.width;
+                                            border-radius: 3px;
+                                            background: pvta.pressed ? #6a6a72 : (pvta.has-hover ? #55555f : #3f3f47);
+                                            height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
+                                            y: -plist.viewport-y / plist.viewport-height * pv.height;
+                                        }
+                                        pvta := TouchArea {
+                                            property <length> anchor;
+                                            pointer-event(e) => {
+                                                if (e.kind == PointerEventKind.down) { self.anchor = plist.viewport-y; }
+                                            }
+                                            moved => {
+                                                plist.viewport-y = min(0px, max(-(plist.viewport-height - plist.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (plist.viewport-height / pv.height)));
+                                            }
                                         }
                                     }
                                 }
