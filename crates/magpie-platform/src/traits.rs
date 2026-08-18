@@ -37,6 +37,11 @@ pub trait Paster: Send {
 pub trait Autostart {
     fn is_enabled(&self) -> bool;
     fn set_enabled(&self, on: bool) -> Result<(), String>;
+    /// Best-effort: make an enable/disable take effect in the current login
+    /// session without a re-login (e.g. macOS `launchctl load/unload`). Default
+    /// no-op; kept separate from `set_enabled` so that stays side-effect-free
+    /// (and unit-testable without touching the real launchd domain).
+    fn take_effect_now(&self, _on: bool) {}
 }
 
 #[cfg(test)]

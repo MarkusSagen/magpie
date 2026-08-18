@@ -597,26 +597,42 @@ fn spawn_watcher(
                 }
             });
         };
+        let log_path = data_dir().join("logs").join("magpie.log");
         loop {
-            if let Some(ev) = watcher.poll_once(now_ms()) {
-                if ingest_event(&state, &ev).is_ok() {
-                    sweep_retention(&state, &retention);
-                    push_refresh(&weak, &state);
-                    // Best-effort site favicon for link entries; refresh again once
-                    // it's cached so the icon appears without waiting on the fetch.
-                    if fetch_favicons {
-                        if let Content::Text(t) = &ev.content {
-                            if let Some(domain) = favicon::domain_of(t) {
-                                let dir = data_dir().join("favicons");
-                                if favicon::ensure_favicon(&dir, &domain, favicon::fetch_favicon)
+            // Guard each iteration: a panic in poll/ingest is logged + surfaced by
+            // the panic hook, but must NOT silently end clipboard capture — catch it
+            // and keep polling so the watcher survives a bad event.
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if let Some(ev) = watcher.poll_once(now_ms()) {
+                    if ingest_event(&state, &ev).is_ok() {
+                        sweep_retention(&state, &retention);
+                        push_refresh(&weak, &state);
+                        // Best-effort site favicon for link entries; refresh again
+                        // once cached so the icon appears without waiting on it.
+                        if fetch_favicons {
+                            if let Content::Text(t) = &ev.content {
+                                if let Some(domain) = favicon::domain_of(t) {
+                                    let dir = data_dir().join("favicons");
+                                    if favicon::ensure_favicon(
+                                        &dir,
+                                        &domain,
+                                        favicon::fetch_favicon,
+                                    )
                                     .is_some()
-                                {
-                                    push_refresh(&weak, &state);
+                                    {
+                                        push_refresh(&weak, &state);
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }));
+            if step.is_err() {
+                magpie_app::diagnostics::log_line(
+                    &log_path,
+                    "watcher iteration panicked; continuing capture",
+                );
             }
             std::thread::sleep(Duration::from_millis(250));
         }
@@ -705,6 +721,18 @@ fn spawn_hotkeys(
 }
 
 pub fn start() {
+    // Diagnostics first: log everything, surface panics, detect a previous silent
+    // crash. Paths live under <data_dir>/logs.
+    let log_dir = data_dir().join("logs");
+    let log_path = log_dir.join("magpie.log");
+    let session_path = log_dir.join("session");
+    let crashes_path = log_dir.join("crashes");
+    use magpie_app::diagnostics as diag;
+    diag::install_panic_hook(log_path.clone());
+    let prev_exit = diag::read_prev_exit(&session_path);
+    diag::mark_running(&session_path);
+    diag::log_line(&log_path, "startup");
+
     let cfg = magpie_app::config::load_or_default(&data_dir().join("config.toml"));
     let mut denylist = default_app_denylist();
     denylist.extend(cfg.app_denylist.clone());
@@ -1305,10 +1333,66 @@ pub fn start() {
     ui.window()
         .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
 
+    // If the previous run ended abnormally, tell the user (loud, not silent).
+    // Only pop a dialog for the installed .app — in a dev binary, Ctrl-C'ing
+    // `cargo run` is a normal "abnormal" exit and shouldn't nag; just log it.
+    if prev_exit == diag::PrevExit::Crashed && running_as_app_bundle() {
+        diag::log_line(&log_path, "previous run ended abnormally");
+        let looping = diag::record_and_check_loop(&crashes_path);
+        if looping {
+            let choice = diag::alert(
+                "Magpie is crashing repeatedly",
+                &format!(
+                    "Magpie has crashed several times in a row.\n\nA log was saved to:\n{}",
+                    log_path.display()
+                ),
+                &["View Log", "Disable auto-start", "Quit"],
+            );
+            match choice.as_deref() {
+                Some("View Log") => diag::reveal(&log_path),
+                Some("Disable auto-start") => {
+                    let exe = std::env::current_exe().unwrap_or_default();
+                    let _ = magpie_platform::platform_autostart(&exe.to_string_lossy())
+                        .set_enabled(false);
+                    diag::log_line(&log_path, "auto-start disabled after crash loop");
+                }
+                Some("Quit") => {
+                    diag::mark_clean(&session_path);
+                    return;
+                }
+                _ => {}
+            }
+        } else {
+            let choice = diag::alert(
+                "Magpie recovered from a crash",
+                &format!(
+                    "Magpie quit unexpectedly last time and has restarted.\n\nA log was saved to:\n{}",
+                    log_path.display()
+                ),
+                &["View Log", "Dismiss"],
+            );
+            if choice.as_deref() == Some("View Log") {
+                diag::reveal(&log_path);
+            }
+        }
+    } else if prev_exit == diag::PrevExit::Crashed {
+        // Dev binary: record + log, but don't pop a dialog (Ctrl-C is routine).
+        let _ = diag::record_and_check_loop(&crashes_path);
+        diag::log_line(
+            &log_path,
+            "previous run ended abnormally (dev — not surfaced)",
+        );
+    }
+
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
     // We deliberately do NOT call `ui.run()` (which would show the window on
     // launch) — `run_event_loop` keeps us alive with the tray icon only.
     slint::run_event_loop().expect("run event loop");
+
+    // Reached only on a real quit (tray Quit → quit_event_loop). Mark the session
+    // clean so the next launch doesn't report a false crash.
+    diag::mark_clean(&session_path);
+    diag::log_line(&log_path, "clean shutdown");
 }
 
 /// Decode the embedded menu-bar template PNG (black magpie silhouette on

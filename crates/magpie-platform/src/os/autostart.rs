@@ -15,6 +15,11 @@ pub fn launch_agent_plist(label: &str, program: &str) -> String {
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
 </dict>
 </plist>
 "#
@@ -47,6 +52,18 @@ impl Autostart for MacAutostart {
             }
         }
     }
+
+    fn take_effect_now(&self, on: bool) {
+        // Best-effort so autostart applies without a re-login. `load`/`unload -w`
+        // are deprecated but still work on current macOS and need no uid. Errors
+        // are ignored — the plist still governs the next login regardless.
+        let sub = if on { "load" } else { "unload" };
+        let _ = std::process::Command::new("launchctl")
+            .arg(sub)
+            .arg("-w")
+            .arg(&self.plist_path)
+            .status();
+    }
 }
 
 #[cfg(test)]
@@ -62,6 +79,9 @@ mod tests {
         assert!(xml.contains("io.magpie.agent"));
         assert!(xml.contains("/Applications/Magpie.app/Contents/MacOS/magpie"));
         assert!(xml.contains("RunAtLoad"));
+        // Auto-restart on crash, but NOT on a clean quit.
+        assert!(xml.contains("KeepAlive"));
+        assert!(xml.contains("SuccessfulExit"));
     }
 
     #[test]

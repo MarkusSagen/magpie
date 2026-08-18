@@ -55,6 +55,8 @@ fn set_autostart(on: bool) -> i32 {
     let auto = magpie_platform::platform_autostart(&exe);
     match auto.set_enabled(on) {
         Ok(()) => {
+            // Apply immediately so it works without a re-login (best-effort).
+            auto.take_effect_now(on);
             println!("autostart {}", if on { "enabled" } else { "disabled" });
             0
         }

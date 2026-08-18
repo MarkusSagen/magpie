@@ -5,6 +5,7 @@
 pub mod app_state;
 pub mod cli;
 pub mod config;
+pub mod diagnostics;
 pub mod external_editor;
 pub mod favicon;
 pub mod format_time;
