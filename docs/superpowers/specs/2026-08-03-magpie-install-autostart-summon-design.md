@@ -169,6 +169,49 @@ Reuse `MacAutostart` (LaunchAgent). Two refinements:
   A "Start at login" toggle in the Settings panel is cross-referenced to the
   Settings & Theming spec (wired there, reading `MacAutostart::is_enabled`).
 
+## Task 4b — Reliability: never fail silently (crash surfacing + auto-restart)
+
+Magpie runs in the background, so a silent death is invisible until the user
+notices paste/capture stopped. Make failures loud and recoverable.
+
+**Logging.** A `diagnostics` module appends timestamped lines to a rotating log
+(`<data_dir>/logs/magpie.log`): startup/shutdown, config/DB errors, captured-panic
+details + backtrace. Bounded size (truncate/rotate at a cap) so it never grows
+unbounded.
+
+**Panic hook** (`std::panic::set_hook`, installed first thing in `start()`): writes
+the panic (thread, location, message, `Backtrace::force_capture`) to the log, leaves
+the session marked "running" (so the next launch also notices), and shows a native
+alert — `⚠ Magpie hit an error … [View Log] [Quit]` — via `osascript display dialog`
+(a separate process, safe to spawn mid-unwind from any thread). Fires for panics on
+the main thread *and* background threads.
+
+**Abnormal-exit detection (catches hard crashes / kills too).** On start, read a
+session-state file **before** overwriting it: `mark_running()` writes `running` at
+startup; `mark_clean()` writes `clean` on a real quit (tray Quit → before
+`quit_event_loop`). If the previous value was `running`, the last run died
+abnormally → record a crash timestamp and show a next-launch notice: *"Magpie quit
+unexpectedly last time — [View Log] [Dismiss]"*.
+
+**Auto-restart + crash-loop guard.** The LaunchAgent gets
+`KeepAlive = { SuccessfulExit = false }` — launchd relaunches Magpie only when it
+exits non-zero/crashes, **not** on a clean quit (so tray Quit stays quit). launchd's
+`ThrottleInterval` (≥10s) rate-limits relaunches. On top of that, Magpie tracks
+crash timestamps: **≥3 crashes within 60s = crash loop** → instead of the normal
+notice, show *"Magpie is crashing repeatedly — [View Log] [Disable auto-start]
+[Quit]"* ("Disable auto-start" calls `MacAutostart::set_enabled(false)` so launchd
+stops relaunching a persistently broken build). On a normal recovery (single crash),
+notify: *"Magpie recovered from a crash."*
+
+**Background-thread resilience.** The watcher (capture) thread is wrapped so a panic
+is logged + surfaced and the thread is **restarted** rather than silently ending
+clipboard capture.
+
+**Testing.** Pure/path-injected: session-state read/mark round-trip
+(`running`→abnormal, `clean`→normal, missing→first-run); crash-loop detection
+(`is_crash_loop(times, now, 60_000, 3)`); log append + rotation cap. OS glue
+(osascript alert/notify, panic hook) is launch-verified, not unit-tested.
+
 ## Task 5 — First-run welcome / intro & help screen
 
 The first time Magpie launches (freshly installed from the `.dmg`), show a
@@ -216,9 +259,33 @@ that Magpie has no Dock icon (it's a menu-bar/tray agent).
   simple NSIS/Inno script). Autostart = existing HKCU `...\Run` key. Summon default
   `Ctrl+Shift+Space`. `LSUIElement` equivalent = no console window (already a GUI
   subsystem bin) + tray.
+  - **Autostart-at-login:** the HKCU `Run` key already starts it at login; there is
+    no launchd-style KeepAlive, so **auto-restart-on-crash** needs either a
+    Scheduled Task with "restart on failure", or an in-process supervisor. Deferred
+    — for v1 Windows relies on the next-launch notice, not auto-restart.
+  - **Crash surfacing:** reuse the shared `diagnostics` core (logging, session
+    state, crash-loop); replace the macOS `osascript` alert/notify with a Win32
+    `MessageBox` (alert) + toast/`Shell_NotifyIcon` balloon (notify).
 - **Linux:** ship the binary + a `.desktop` file; packaging = later (AppImage for
   portability, or `.deb`). Autostart = existing XDG `~/.config/autostart/*.desktop`.
   Wayland may refuse programmatic focus on summon (documented limitation).
+  - **Autostart-at-login:** the XDG autostart `.desktop` starts it at login. For a
+    systemd-user setup, a `magpie.service` with `Restart=on-failure` +
+    `StartLimitIntervalSec`/`StartLimitBurst` gives the crash-loop-guarded
+    auto-restart equivalent of launchd KeepAlive (offered as an alternative to XDG
+    autostart). Deferred to Linux packaging.
+  - **Crash surfacing:** reuse the shared `diagnostics` core; alert via
+    `zenity`/`kdialog` (fallback to a desktop notification via `notify-send`).
+
+### Portability of the crash-surfacing design
+
+`diagnostics` is split so the **logic is shared and cross-platform** (log
+append/rotate, session-state read/mark, crash-timestamp tracking + crash-loop
+detection, panic-hook installation). Only three thin functions are per-OS behind a
+trait/`cfg`: `alert(title,msg,buttons)`, `notify(title,msg)`, and `reveal(path)` —
+macOS `osascript`/`open`, Windows `MessageBox`/toast/Explorer, Linux
+`zenity`/`notify-send`/`xdg-open`. So Windows/Linux inherit all the reliability
+behavior for free once those three functions are implemented.
 
 ### Icons — one source, all platforms (extends `just icons`)
 
@@ -284,8 +351,12 @@ stores or sends (nothing).
 2. **`.app` bundle** — Info.plist (`LSUIElement`, versioned id/version), `.icns`
    icon, `just package-macos` + ad-hoc sign.
 3. **`.dmg`** — `just dmg` (hdiutil, /Applications symlink), quarantine docs.
-4. **Autostart** — LaunchAgent takes-effect-now (`launchctl bootstrap`), app-path
-   program args, first-run hint, Settings cross-ref.
+4. **Autostart** — LaunchAgent takes-effect-now (`launchctl bootstrap`),
+   `KeepAlive={SuccessfulExit=false}` (auto-restart on crash, not on clean quit),
+   app-path program args, first-run hint, Settings cross-ref.
+4b. **Reliability / crash surfacing** — `diagnostics` module (log + rotate, panic
+   hook + native alert, session-state abnormal-exit detection + next-launch notice,
+   crash-loop guard + "Disable auto-start", watcher restart-on-panic).
 5. **First-run welcome / help** — `mode=="welcome"` overlay (summon key,
    Accessibility button, start-at-login, quick help reusing the Help rows),
    gated by `welcomed` config flag; `--show-welcome` to re-open.
