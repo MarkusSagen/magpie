@@ -155,6 +155,19 @@ check timestamps and don't assume "no new report" = "not crashing."
 - **Real-clipboard / real-pasteboard tests must be ONE sequential test per file** —
   parallel `NSPasteboard` access SIGTRAPs on macOS.
 
+## Reliability / crash surfacing
+
+`magpie_app::diagnostics` makes failures loud, not silent. A panic hook logs the
+panic + backtrace to `<data_dir>/logs/magpie.log` and shows a native alert
+(rate-limited 30s). A session-state file (`logs/session` = `running`/`clean`) detects
+abnormal exits — the next launch of the **installed .app** shows "Magpie quit
+unexpectedly / recovered" (dev is log-only; Ctrl-C is routine). ≥3 crashes in 60s =
+crash-loop → alert with "Disable auto-start". The watcher thread `catch_unwind`s each
+iteration so a bad event can't silently stop capture. Autostart LaunchAgent uses
+`KeepAlive={SuccessfulExit=false}` (relaunch on crash, not clean quit);
+`--install-autostart` runs `launchctl load -w` so it applies without a re-login.
+Inspect a crash: `open <data_dir>/logs/magpie.log`.
+
 ## Data & config locations (macOS)
 
 `~/Library/Application Support/magpie/`:
