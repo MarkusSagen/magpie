@@ -8,6 +8,22 @@ test:
 run:
     cargo run -p magpie-app
 
+# Run the debug build SIGNED with a stable identity so macOS Accessibility
+# (auto-paste) actually works in dev. One-time: `just make-signing-cert`, then
+# grant `target/debug/magpie` in System Settings ▸ Accessibility once — the grant
+# then persists across rebuilds because the signing identity is stable.
+#   SIGN_ID defaults to "Magpie Dev" (the cert `just make-signing-cert` creates).
+run-signed: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIGN_ID="${SIGN_ID:-Magpie Dev}"
+    if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+      echo "No code-signing identity '$SIGN_ID'. Create it once: just make-signing-cert"; exit 1
+    fi
+    codesign --force --sign "$SIGN_ID" --identifier io.magpie target/debug/magpie
+    echo "signed target/debug/magpie as '$SIGN_ID' — grant it once in Accessibility, then auto-paste works."
+    ./target/debug/magpie
+
 # Debug build of everything
 build:
     cargo build --workspace
