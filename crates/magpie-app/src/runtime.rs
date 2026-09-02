@@ -1864,6 +1864,37 @@ pub fn start() {
             }
         });
     }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_promote_line(move |byte| {
+            if let Some(ui) = w.upgrade() {
+                let id = ui.get_note_id();
+                if id >= 0 {
+                    let body = ui.get_note_body().to_string();
+                    let new = magpie_app::tasks::promote_line(&body, byte.max(0) as usize);
+                    if new != body {
+                        let store = match s.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        if store
+                            .update_note_body(id as i64, &new, now_ms())
+                            .unwrap_or(false)
+                        {
+                            ui.set_note_body(SharedString::from(new.clone()));
+                            ui.set_note_links(ModelRc::new(VecModel::from(
+                                magpie_app::notes_view::wiki_links(&new)
+                                    .into_iter()
+                                    .map(SharedString::from)
+                                    .collect::<Vec<_>>(),
+                            )));
+                        }
+                    }
+                }
+            }
+        });
+    }
     // ---- Tasks mode ----
     {
         let s = state.clone();

@@ -265,6 +265,8 @@ export component LauncherWindow inherits Window {
     callback open-page(string);
     callback edit-note-body(string);
     callback note-from-entry(int);
+    // Promote the note line containing the given byte offset to a `- [ ]` task.
+    callback promote-line(int);
 
     // ---- Tasks mode ----
     in property <[TaskRow]> tasks;
@@ -1297,7 +1299,20 @@ export component LauncherWindow inherits Window {
                     VerticalLayout {
                         padding: 12px;
                         spacing: 8px;
-                        Text { text: root.note-provenance; color: #8a8a90; font-size: 11px; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: root.note-provenance; color: #8a8a90; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                            // Promote the line the cursor is on to a `- [ ]` task
+                            // (same as ⌘⏎ in the editor).
+                            Rectangle {
+                                width: 100px;
+                                height: 26px;
+                                border-radius: 6px;
+                                background: mktask.has-hover ? #34343c : #2a2a30;
+                                mktask := TouchArea { clicked => { root.promote-line(ned.cursor-position-byte-offset); } }
+                                Text { text: "☑ Make task"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
                         // Editor — a plain TextInput (not std TextEdit, which renders
                         // invisibly on the dark pane) with an explicit text colour.
                         Flickable {
@@ -1312,6 +1327,15 @@ export component LauncherWindow inherits Window {
                                 single-line: false;
                                 wrap: word-wrap;
                                 edited => { root.edit-note-body(self.text); }
+                                key-pressed(event) => {
+                                    // ⌘⏎ promotes the current line to a task; every
+                                    // other key falls through to normal editing.
+                                    if event.modifiers.control && event.text == Key.Return {
+                                        root.promote-line(self.cursor-position-byte-offset);
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
                             }
                         }
                         // Links strip: clickable [[page]] chips parsed from the body.
@@ -1514,6 +1538,8 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘+ / ⌘− / ⌘0", d: "Preview text size" },
                                 { k: "🔒 Mask", d: "Screenshare mode (hide all content)" },
                                 { k: "Notes", d: "Notes & pages" },
+                                { k: "⌘⏎", d: "Make task (in a note)" },
+                                { k: "Tasks", d: "Task list from your notes" },
                                 { k: "Stats", d: "Copy analytics" },
                             ]: HorizontalLayout {
                                 Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
