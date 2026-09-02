@@ -14,8 +14,7 @@ use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
 use magpie_platform::{
-    default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Clipboard, Paster,
-    Watcher,
+    default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Clipboard, Watcher,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
@@ -99,7 +98,7 @@ fn to_rows(
     entries: &[Entry],
     slots: &HashMap<i64, i64>,
     tags: &HashMap<i64, Vec<String>>,
-    merge_set: &[i32],
+    merge_set: &[i64],
     app_names: &HashMap<i64, String>,
     app_icons: &HashMap<i64, String>,
     favicon_dir: &std::path::Path,
@@ -109,8 +108,7 @@ fn to_rows(
 ) -> Vec<EntryRow> {
     entries
         .iter()
-        .enumerate()
-        .map(|(i, e)| {
+        .map(|e| {
             let source = app_names
                 .get(&e.id)
                 .cloned()
@@ -170,7 +168,7 @@ fn to_rows(
                 subtitle: SharedString::from(subtitle),
                 kind: SharedString::from(e.kind.as_str()),
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
-                merged: merge_set.contains(&(i as i32)),
+                merged: merge_set.contains(&e.id),
                 badge: SharedString::from(line_badge(&e.full_text)),
                 glyph: SharedString::from(type_glyph(&e.kind)),
                 source: SharedString::from(source),
@@ -208,10 +206,14 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     let rules = MaskRules::build(&state.mask_apps, &state.mask_patterns, screenshare);
     let visible = state.mask_visible_chars.max(0) as usize;
     ui.set_screenshare(screenshare);
-    // Advanced-search "filtered" indicator.
+    // "Is anything narrowing the list?" — drives the empty state's wording and its
+    // "Clear filters" escape hatch. The type chip and tag count too: filtering to
+    // Image with no images used to say "No clipboard history yet".
     if let Ok(u) = state.ui.lock() {
         let filtered = u.app_filter.is_some()
             || u.pinned_only
+            || u.tag.is_some()
+            || !matches!(u.type_filter, magpie_app::viewmodel::TypeFilter::All)
             || !matches!(u.time_filter, magpie_app::viewmodel::TimeFilter::All);
         ui.set_filtered(filtered);
     }
@@ -703,10 +705,16 @@ fn spawn_watcher(
     });
 }
 
+/// The type-filter chips, in the order `launcher.slint` renders them — the index
+/// into this list IS the argument `set-type-filter` takes (see
+/// `viewmodel::type_filter_from_index`). Used by the UI tour to select a chip by
+/// name; keep in sync with the Slint chip row.
+const TYPE_CHIPS: &[&str] = &["all", "text", "link", "email", "color", "image", "file"];
+
 /// The overlays a UI tour walks through, in order. Each is a `mode`/`view` the
 /// launcher can be driven into without a real keystroke.
 const TOUR_STEPS: &[&str] = &[
-    "list", "help", "actions", "filters", "slots", "stats", "edit",
+    "list", "help", "actions", "filters", "slots", "stats", "edit", "merge", "mask", "empty",
 ];
 
 /// Dev/QA visibility hooks, both opt-in via the environment and no-ops otherwise:
@@ -774,6 +782,25 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "slots" => ui.invoke_open_slots(),
                         "stats" => ui.invoke_toggle_view(),
                         "edit" => ui.invoke_start_edit(ui.get_selected()),
+                        // Queue a few entries so the merge bar is populated.
+                        "merge" => {
+                            for i in 0..3 {
+                                ui.invoke_toggle_merge(i);
+                            }
+                        }
+                        "mask" => ui.invoke_toggle_screenshare(),
+                        "empty" => {
+                            let q = SharedString::from("zzqqxnomatch");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
+                        // "text"/"link"/"color"/"image"/"file" select that type chip.
+                        kind if TYPE_CHIPS.contains(&kind) => {
+                            let idx =
+                                TYPE_CHIPS.iter().position(|c| *c == kind).unwrap_or(0) as i32;
+                            ui.set_type_index(idx);
+                            ui.invoke_set_type_filter(idx);
+                        }
                         other => ui.set_mode(SharedString::from(other)),
                     }
                 }
@@ -1130,15 +1157,22 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_clear_filters(move || {
+            // Clears *every* narrowing control, type chip and tag included — a
+            // partial reset would leave the user still looking at an empty list.
             if let Ok(mut u) = s.ui.lock() {
                 u.app_filter = None;
                 u.time_filter = magpie_app::viewmodel::TimeFilter::All;
+                u.type_filter = magpie_app::viewmodel::TypeFilter::All;
+                u.tag = None;
                 u.pinned_only = false;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_time_index(0);
                 ui.set_app_index(-1);
+                ui.set_type_index(0);
+                ui.set_tag_filter(SharedString::from(""));
                 ui.set_pinned_only(false);
+                ui.set_selected(0);
                 ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
             }
@@ -1430,11 +1464,17 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_toggle_merge(move |index| {
+            // Resolve the row to its entry id up front — the queue is keyed by id
+            // so it stays correct across searches and filter changes.
+            let results = current_results(&s, now_ms());
+            let Some(id) = results.get(index as usize).map(|e| e.id) else {
+                return;
+            };
             if let Ok(mut m) = s.merge_set.lock() {
-                if let Some(pos) = m.iter().position(|&x| x == index) {
+                if let Some(pos) = m.iter().position(|&x| x == id) {
                     m.remove(pos);
                 } else {
-                    m.push(index);
+                    m.push(id);
                 }
             }
             if let Some(ui) = w.upgrade() {
@@ -1458,35 +1498,40 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_merge_paste(move || {
-            let indices: Vec<i32> = s.merge_set.lock().map(|m| m.clone()).unwrap_or_default();
-            let results = current_results(&s, now_ms());
-            let ids: Vec<i64> = indices
-                .iter()
-                .filter_map(|&i| results.get(i as usize).map(|e| e.id))
-                .collect();
-            let sep = w
-                .upgrade()
-                .map(|ui| separator_str(ui.get_merge_sep()))
-                .unwrap_or("\n");
-            let merged = s
-                .store
-                .lock()
-                .ok()
-                .and_then(|st| st.merged_text(&ids, sep).ok())
-                .unwrap_or_default();
-            if !merged.is_empty() {
+            // Deferred, then hide → paste, exactly like `paste_and_close`. Pasting
+            // straight from here sent ⌘V to the *launcher* (it still had focus), so
+            // the merged text landed in Magpie's own search field instead of the
+            // app the user came from.
+            let (s, w) = (s.clone(), w.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                let ids: Vec<i64> = s.merge_set.lock().map(|m| m.clone()).unwrap_or_default();
+                let sep = w
+                    .upgrade()
+                    .map(|ui| separator_str(ui.get_merge_sep()))
+                    .unwrap_or("\n");
+                let merged = s
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|st| st.merged_text(&ids, sep).ok())
+                    .unwrap_or_default();
+                if merged.is_empty() {
+                    return;
+                }
                 if let Ok(mut clip) = magpie_platform::platform_clipboard() {
-                    if clip.set_content(&Content::Text(merged)).is_ok() {
-                        let _ = EnigoPaster.paste();
+                    if clip.set_content(&Content::Text(merged)).is_err() {
+                        return;
                     }
                 }
-            }
-            if let Ok(mut m) = s.merge_set.lock() {
-                m.clear();
-            }
-            if let Some(ui) = w.upgrade() {
-                refresh(&ui, &s);
-            }
+                if let Ok(mut m) = s.merge_set.lock() {
+                    m.clear();
+                }
+                if let Some(ui) = w.upgrade() {
+                    refresh(&ui, &s);
+                    hide_launcher(&ui);
+                }
+                spawn_paste(w.clone(), false);
+            });
         });
     }
     {

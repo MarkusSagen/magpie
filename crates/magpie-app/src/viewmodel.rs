@@ -26,14 +26,18 @@ impl TypeFilter {
 }
 
 /// Map a type-filter row index to a `TypeFilter` (0 All · 1 Text · 2 Link ·
-/// 3 Color · 4 Image · 5 File; out-of-range → All).
+/// 3 Email · 4 Color · 5 Image · 6 File; out-of-range → All). **Must match the
+/// chip order in `launcher.slint` / `runtime::TYPE_CHIPS`** — Email had no index
+/// at all, so `TypeFilter::Email` was unreachable even though the capture layer
+/// classifies entries as `Kind::Email`.
 pub fn type_filter_from_index(i: i32) -> TypeFilter {
     match i {
         1 => TypeFilter::Text,
         2 => TypeFilter::Link,
-        3 => TypeFilter::Color,
-        4 => TypeFilter::Image,
-        5 => TypeFilter::File,
+        3 => TypeFilter::Email,
+        4 => TypeFilter::Color,
+        5 => TypeFilter::Image,
+        6 => TypeFilter::File,
         _ => TypeFilter::All,
     }
 }
@@ -150,10 +154,29 @@ mod tests {
         assert_eq!(type_filter_from_index(0), TypeFilter::All);
         assert_eq!(type_filter_from_index(1), TypeFilter::Text);
         assert_eq!(type_filter_from_index(2), TypeFilter::Link);
-        assert_eq!(type_filter_from_index(3), TypeFilter::Color);
-        assert_eq!(type_filter_from_index(4), TypeFilter::Image);
-        assert_eq!(type_filter_from_index(5), TypeFilter::File);
+        assert_eq!(type_filter_from_index(3), TypeFilter::Email);
+        assert_eq!(type_filter_from_index(4), TypeFilter::Color);
+        assert_eq!(type_filter_from_index(5), TypeFilter::Image);
+        assert_eq!(type_filter_from_index(6), TypeFilter::File);
         assert_eq!(type_filter_from_index(99), TypeFilter::All);
+    }
+
+    /// Every `TypeFilter` must be selectable from the chip row — an unreachable
+    /// variant is a filter the user can never apply.
+    #[test]
+    fn every_type_filter_has_an_index() {
+        let reachable: Vec<TypeFilter> = (0..7).map(type_filter_from_index).collect();
+        for want in [
+            TypeFilter::All,
+            TypeFilter::Text,
+            TypeFilter::Link,
+            TypeFilter::Email,
+            TypeFilter::Color,
+            TypeFilter::Image,
+            TypeFilter::File,
+        ] {
+            assert!(reachable.contains(&want), "{want:?} has no chip index");
+        }
     }
 
     #[test]

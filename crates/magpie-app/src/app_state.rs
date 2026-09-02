@@ -7,8 +7,10 @@ pub struct AppState {
     pub store: Mutex<Store>,
     pub images: FsImageStore,
     pub ui: Mutex<UiState>,
-    /// Entry indices (into the current results) queued for merge-paste.
-    pub merge_set: Mutex<Vec<i32>>,
+    /// Entry **ids** queued for merge, in the order they were added. Ids, not
+    /// list indices: the queue has to survive a search or filter change, which
+    /// reorders (and re-populates) the result list under it.
+    pub merge_set: Mutex<Vec<i64>>,
     /// Session-only screensharing mode (masks everything). Not persisted.
     pub screenshare: Mutex<bool>,
     /// Masking config snapshot (from `Config`, immutable for the session).
