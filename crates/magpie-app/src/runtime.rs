@@ -75,12 +75,22 @@ fn line_badge(full_text: &str) -> String {
     }
 }
 
+/// The row's one-line title: the first line that actually has content. Using
+/// only `lines().next()` made every entry that starts with a blank line render
+/// as a useless "text" row.
 fn preview_title(e: &Entry) -> String {
-    let line = e.full_text.lines().next().unwrap_or("").trim();
-    if line.is_empty() {
-        e.kind.as_str().to_string()
+    match e.full_text.lines().map(str::trim).find(|l| !l.is_empty()) {
+        Some(line) => line.chars().take(80).collect(),
+        None => e.kind.as_str().to_string(),
+    }
+}
+
+/// "1 line" / "3 lines" — a naive `{n} lines` printed "1 lines".
+fn plural(n: i64, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
     } else {
-        line.chars().take(80).collect()
+        format!("{n} {many}")
     }
 }
 
@@ -150,7 +160,11 @@ fn to_rows(
             } else {
                 format!("{source} · {when} · {tagline}")
             };
-            let size = format!("{} chars · {} lines", e.char_count, e.line_count);
+            let size = format!(
+                "{} · {}",
+                plural(e.char_count, "char", "chars"),
+                plural(e.line_count, "line", "lines")
+            );
             EntryRow {
                 title: SharedString::from(title),
                 subtitle: SharedString::from(subtitle),
@@ -167,9 +181,11 @@ fn to_rows(
                 icon: icon_img,
                 has_icon,
                 words: e.word_count as i32,
-                section: SharedString::from(
-                    grouping::section_for(e.last_copied_at_ms, now).label(),
-                ),
+                section: SharedString::from(grouping::section_label(
+                    e.pinned,
+                    e.last_copied_at_ms,
+                    now,
+                )),
                 copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
                 pinned: e.pinned,
             }
@@ -241,11 +257,29 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     };
     ui.set_slots(ModelRc::new(VecModel::from(
         slot_items
-            .into_iter()
+            .iter()
             .map(|(n, title)| SlotItem {
-                n: n as i32,
-                title: SharedString::from(title),
+                n: *n as i32,
+                title: SharedString::from(title.clone()),
                 filled: true,
+            })
+            .collect::<Vec<_>>(),
+    )));
+    // The ⌘S picker needs all nine rows, empty ones included — `slots` above is
+    // filled-only because it drives the speed-dial strip.
+    ui.set_all_slots(ModelRc::new(VecModel::from(
+        (1..=9)
+            .map(|n| match slot_items.iter().find(|(s, _)| *s == n) {
+                Some((_, title)) => SlotItem {
+                    n: n as i32,
+                    title: SharedString::from(title.clone()),
+                    filled: true,
+                },
+                None => SlotItem {
+                    n: n as i32,
+                    title: SharedString::from("Empty"),
+                    filled: false,
+                },
             })
             .collect::<Vec<_>>(),
     )));
@@ -335,15 +369,19 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
 /// `run-action`.
+/// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
+/// hint is worse than none. `📝` (not `✏️`) because the pencil-with-VS16
+/// rendered as tofu in Slint's text shaping.
 const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("paste", "📋", "Paste", "⏎"),
     ("copy", "📄", "Copy", "⌘C"),
-    ("keep", "📎", "Paste & keep open", "⌥⏎"),
-    ("edit", "✏️", "Edit", "⌘E"),
+    ("keep", "📎", "Paste & keep open", "⌘⏎"),
+    ("edit", "📝", "Edit", "⌘E"),
     ("snippet", "🧩", "New snippet", "⌘N"),
     ("pin", "📌", "Pin / Unpin", "⌘P"),
+    ("slot", "🔢", "Assign to slot…", "⌘S"),
     ("merge", "➕", "Add to merge", "⌘G"),
-    ("delete", "🗑", "Delete", "⌃X"),
+    ("delete", "🗑", "Delete", "⌘⌫"),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -494,9 +532,13 @@ fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
     ModelRc::new(VecModel::from(bars))
 }
 
+/// A one-line chart label. Falls back to the first line WITH content, then to a
+/// placeholder — blank labels left anonymous bars in the "Most copied" chart.
 fn truncate(s: &str, n: usize) -> String {
-    let one_line = s.lines().next().unwrap_or("");
-    one_line.chars().take(n).collect()
+    match s.lines().map(str::trim).find(|l| !l.is_empty()) {
+        Some(line) => line.chars().take(n).collect(),
+        None => "(whitespace)".to_string(),
+    }
 }
 
 fn empty_stats() -> Stats {
@@ -541,6 +583,23 @@ fn refresh_stats(ui: &LauncherWindow, state: &AppState, range_index: i32) {
         .iter()
         .map(|k| (k.kind.as_str().to_string(), k.count.to_string(), k.count))
         .collect();
+
+    // Weekly buckets kick in for an all-time range spanning >90 days; infer it
+    // from the gap between the first two buckets rather than duplicating the rule.
+    let weekly = stats
+        .over_time
+        .windows(2)
+        .next()
+        .map(|w| w[1].start_ms - w[0].start_ms > 86_400_000)
+        .unwrap_or(false);
+    let ot_pairs: Vec<(i64, i64)> = stats
+        .over_time
+        .iter()
+        .map(|b| (b.start_ms, b.count))
+        .collect();
+    ui.set_over_time_caption(SharedString::from(
+        magpie_app::stats_view::over_time_caption(&ot_pairs, weekly),
+    ));
 
     ui.set_over_time_bars(to_slint_bars(&ot));
     ui.set_most_copied_bars(to_slint_bars(&mc));
@@ -640,6 +699,85 @@ fn spawn_watcher(
                 );
             }
             std::thread::sleep(Duration::from_millis(250));
+        }
+    });
+}
+
+/// The overlays a UI tour walks through, in order. Each is a `mode`/`view` the
+/// launcher can be driven into without a real keystroke.
+const TOUR_STEPS: &[&str] = &[
+    "list", "help", "actions", "filters", "slots", "stats", "edit",
+];
+
+/// Dev/QA visibility hooks, both opt-in via the environment and no-ops otherwise:
+///
+/// * `MAGPIE_SHOW_ON_LAUNCH=1` — summon the launcher right after startup instead
+///   of waiting for the global hotkey. Magpie normally boots as a hidden tray
+///   daemon, so without this there is nothing on screen to look at (or to
+///   `screencapture`) unless you can press the hotkey.
+/// * `MAGPIE_UI_TOUR=1` — additionally step through every overlay
+///   (help → actions → filters → slots → stats → edit), pausing
+///   `MAGPIE_UI_TOUR_MS` (default 3000) on each, so one run yields a screenshot
+///   of every screen. Set it to a comma-separated subset instead
+///   (`MAGPIE_UI_TOUR=slots,edit`) to go straight to the screens you care about —
+///   a short run is far less likely to be cut off by the display locking.
+///
+/// Both drive the window through `invoke_from_event_loop`, i.e. on the UI thread
+/// as a user event — never synchronously from another thread.
+fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
+    if std::env::var_os("MAGPIE_SHOW_ON_LAUNCH").is_none() {
+        return;
+    }
+    let steps: Vec<String> = match std::env::var("MAGPIE_UI_TOUR") {
+        Err(_) => Vec::new(),
+        // "1" (or any truthy-looking single value) means "the whole tour".
+        Ok(v) if v.trim().is_empty() || v == "1" => TOUR_STEPS
+            .iter()
+            .skip(1)
+            .map(|s| (*s).to_string())
+            .collect(),
+        Ok(v) => v
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+    };
+    let step_ms: u64 = std::env::var("MAGPIE_UI_TOUR_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3000);
+
+    std::thread::spawn(move || {
+        // Let the event loop and the tray settle before summoning.
+        std::thread::sleep(Duration::from_millis(900));
+        {
+            let (w, s) = (weak.clone(), state.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    show_window(&ui, &s);
+                    // A fresh window for screenshots: no leftover query.
+                    ui.set_query(SharedString::from(""));
+                }
+            });
+        }
+        for step in steps {
+            std::thread::sleep(Duration::from_millis(step_ms));
+            let w = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    // Reset to the list first so each step starts from a known state.
+                    ui.set_mode(SharedString::from("list"));
+                    ui.set_view(SharedString::from("list"));
+                    match step.as_str() {
+                        "actions" => ui.invoke_open_actions(),
+                        "filters" => ui.invoke_open_search(),
+                        "slots" => ui.invoke_open_slots(),
+                        "stats" => ui.invoke_toggle_view(),
+                        "edit" => ui.invoke_start_edit(ui.get_selected()),
+                        other => ui.set_mode(SharedString::from(other)),
+                    }
+                }
+            });
         }
     });
 }
@@ -964,7 +1102,25 @@ pub fn start() {
                 u.app_filter = if id >= 0 { Some(id as i64) } else { None };
             }
             if let Some(ui) = w.upgrade() {
+                // Mirrored into the window so the Filters overlay can tick the
+                // active source app.
+                ui.set_app_index(id);
                 ui.set_mode(SharedString::from("list"));
+                ui.set_selected(0);
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        // "Pinned only" — the query layer always supported it, but nothing in the
+        // UI could turn it on.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_pinned_only(move |on| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.pinned_only = on;
+            }
+            if let Some(ui) = w.upgrade() {
                 ui.set_selected(0);
                 refresh(&ui, &s);
             }
@@ -981,6 +1137,7 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_time_index(0);
+                ui.set_app_index(-1);
                 ui.set_pinned_only(false);
                 ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
@@ -1044,6 +1201,14 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_open_slots(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_mode(SharedString::from("slots"));
             }
         });
     }
@@ -1420,46 +1585,8 @@ pub fn start() {
         );
     }
 
-    if std::env::var("MAGPIE_SHOW_ON_LAUNCH").is_ok() {
-        let (w, s) = (weak.clone(), state.clone());
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(900));
-            {
-                let (w, s) = (w.clone(), s.clone());
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = w.upgrade() {
-                        show_window(&ui, &s);
-                        ui.set_query(SharedString::from(""));
-                    }
-                });
-            }
-            for step in ["help", "actions", "search", "stats", "edit"] {
-                std::thread::sleep(Duration::from_millis(3000));
-                let w2 = w.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = w2.upgrade() {
-                        ui.set_mode(SharedString::from("list"));
-                        ui.set_view(SharedString::from("list"));
-                        match step {
-                            "actions" => {
-                                ui.invoke_open_actions();
-                            }
-                            "search" => {
-                                ui.invoke_open_search();
-                            }
-                            "stats" => {
-                                ui.invoke_toggle_view();
-                            }
-                            "edit" => {
-                                ui.invoke_start_edit(ui.get_selected());
-                            }
-                            other => ui.set_mode(SharedString::from(other)),
-                        }
-                    }
-                });
-            }
-        });
-    }
+    // Opt-in dev hooks (MAGPIE_SHOW_ON_LAUNCH / MAGPIE_UI_TOUR); no-op otherwise.
+    spawn_dev_ui_hooks(weak.clone(), state.clone());
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
     // We deliberately do NOT call `ui.run()` (which would show the window on

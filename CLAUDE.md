@@ -44,10 +44,55 @@ echo "exit=$?"     # 124 = still alive after 6s (good); 101/134 = panicked/abort
 grep -iE "panic|error" /tmp/m.log
 ```
 
-**`exit 124` (timeout killed a living process) is the pass signal.** The agent host
-has no screen-recording permission, so GUI *visuals* and real key events can't be
-driven from here — those need the user. But you can still prove "launches without
-panicking."
+**`exit 124` (timeout killed a living process) is the pass signal.** Real *key
+events* still can't be synthesized from here (that needs Accessibility) — but
+GUI **visuals can** be inspected; see the next section.
+
+### Seeing the UI: `MAGPIE_SHOW_ON_LAUNCH` + `screencapture`
+
+`screencapture -x shot.png` **works from the agent host** — screenshots of the
+real window are available, so never review layout from code alone. Magpie boots
+as a *hidden* tray daemon, so there are two opt-in env flags (see
+`runtime::spawn_dev_ui_hooks`) to put it on screen:
+
+| Flag | Effect |
+|---|---|
+| `MAGPIE_SHOW_ON_LAUNCH=1` | summon the launcher right after startup |
+| `MAGPIE_UI_TOUR=1` | additionally step help → actions → filters → stats → edit |
+| `MAGPIE_UI_TOUR_MS=3000` | pause per tour step (default 3000) |
+
+Shoot one screen at a time (`MAGPIE_UI_TOUR=<step>`) and crop to the window by
+*asking* the window server where it is — a hardcoded crop rect misses, because
+the window is centred on whatever display/scale is current:
+
+```bash
+caffeinate -u -t 2                         # wake the display first
+MAGPIE_SHOW_ON_LAUNCH=1 MAGPIE_UI_TOUR=slots MAGPIE_UI_TOUR_MS=700 \
+  ./target/debug/magpie &
+sleep 1.0
+PROC=$(pgrep -x magpie | head -1)          # -x, not -f: -f matches the wrapper shell
+osascript -e "tell application \"System Events\" \
+  to set frontmost of (first process whose unix id is $PROC) to true"
+sleep 1.0
+RECT=$(osascript -e "tell application \"System Events\" \
+  to tell (first process whose unix id is $PROC)
+    set p to position of window 1
+    set z to size of window 1
+    return (item 1 of p as string) & \",\" & (item 2 of p as string) & \",\" \
+         & (item 1 of z as string) & \",\" & (item 2 of z as string)
+  end tell")
+screencapture -x -R"$RECT" slots.png
+kill $PROC
+```
+
+Gotchas: without the `osascript` activation the window opens *behind* the
+terminal; `pgrep -f magpie` matches the invoking shell and makes System Events
+fail with *"Invalid index"* (retry a few times — the process only appears once
+it's a registered GUI app); an **all-black capture means the display slept or
+locked** — `caffeinate -u -t 2` wakes a slept display, but a *locked* one always
+captures black, so check that before concluding the window didn't render.
+Identical file sizes across successive captures is the tell. This steals focus
+for the duration, so keep runs short — the user may be typing.
 
 ### Exercising GUI callbacks headlessly (main-thread paths)
 
