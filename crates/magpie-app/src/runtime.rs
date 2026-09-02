@@ -380,10 +380,8 @@ fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
 fn spawn_paste(weak: slint::Weak<LauncherWindow>, keep_open: bool) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(120));
-        let log = data_dir().join("logs").join("magpie.log");
         let _ = slint::invoke_from_event_loop(move || {
-            let r = magpie_platform::Paster::paste(&EnigoPaster);
-            magpie_app::diagnostics::log_line(&log, &format!("paste keystroke sent (enigo={r:?})"));
+            let _ = magpie_platform::Paster::paste(&EnigoPaster);
             if keep_open {
                 // ⌘Enter: after pasting into the app underneath, bring Magpie back
                 // to the front, focused, ready to type (same as a fresh summon).
@@ -456,14 +454,6 @@ fn paste_and_close(
         // Copy only here; the keystroke is sent after the window hides.
         let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
     }
-    magpie_app::diagnostics::log_line(
-        &data_dir().join("logs").join("magpie.log"),
-        &format!(
-            "activate idx={idx}: bundle={} trusted={}",
-            running_as_app_bundle(),
-            magpie_platform::accessibility_trusted()
-        ),
-    );
     // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. Only gate the
     // *installed app* on it: as a bare dev binary the grant belongs to the launching
     // terminal (Ghostty), so prompting for Magpie would nag forever while the paste
@@ -811,7 +801,7 @@ pub fn start() {
             const SELECTABLE_MAX_CHARS: usize = 40_000;
             let selectable = match entry {
                 Some(e)
-                    if !(masked && !revealed)
+                    if (!masked || revealed)
                         && !truncated
                         && lines.len() <= SELECTABLE_MAX_LINES
                         && e.full_text.len() <= SELECTABLE_MAX_CHARS =>
@@ -1428,6 +1418,47 @@ pub fn start() {
             &log_path,
             "previous run ended abnormally (dev — not surfaced)",
         );
+    }
+
+    if std::env::var("MAGPIE_SHOW_ON_LAUNCH").is_ok() {
+        let (w, s) = (weak.clone(), state.clone());
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(900));
+            {
+                let (w, s) = (w.clone(), s.clone());
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = w.upgrade() {
+                        show_window(&ui, &s);
+                        ui.set_query(SharedString::from(""));
+                    }
+                });
+            }
+            for step in ["help", "actions", "search", "stats", "edit"] {
+                std::thread::sleep(Duration::from_millis(3000));
+                let w2 = w.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = w2.upgrade() {
+                        ui.set_mode(SharedString::from("list"));
+                        ui.set_view(SharedString::from("list"));
+                        match step {
+                            "actions" => {
+                                ui.invoke_open_actions();
+                            }
+                            "search" => {
+                                ui.invoke_open_search();
+                            }
+                            "stats" => {
+                                ui.invoke_toggle_view();
+                            }
+                            "edit" => {
+                                ui.invoke_start_edit(ui.get_selected());
+                            }
+                            other => ui.set_mode(SharedString::from(other)),
+                        }
+                    }
+                });
+            }
+        });
     }
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.

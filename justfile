@@ -17,10 +17,12 @@ run-signed: build
     #!/usr/bin/env bash
     set -euo pipefail
     SIGN_ID="${SIGN_ID:-Magpie Dev}"
-    if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
-      echo "No code-signing identity '$SIGN_ID'. Create it once: just make-signing-cert"; exit 1
+    # Just try to sign — a self-signed cert works with `codesign` even though it is
+    # NOT listed by `security find-identity -v -p codesigning` (that flag only shows
+    # certs trusted for the whole chain). If it fails, the cert is missing.
+    if ! codesign --force --sign "$SIGN_ID" --identifier io.magpie target/debug/magpie 2>/dev/null; then
+      echo "Could not sign with identity '$SIGN_ID'. Create it once: just make-signing-cert"; exit 1
     fi
-    codesign --force --sign "$SIGN_ID" --identifier io.magpie target/debug/magpie
     echo "signed target/debug/magpie as '$SIGN_ID' — grant it once in Accessibility, then auto-paste works."
     ./target/debug/magpie
 
