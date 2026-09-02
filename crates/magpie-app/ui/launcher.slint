@@ -92,6 +92,63 @@ global Pal {
     out property <color> on-accent: #101426;
 }
 
+// Custom monochrome line icons (replace emoji glyphs). Each is a single-colour SVG
+// tinted at the use-site via `Image.colorize`, so one file serves every state.
+global Icons {
+    out property <image> tab-tasks: @image-url("../../../assets/icons/tab-tasks.svg");
+    out property <image> tab-today: @image-url("../../../assets/icons/tab-today.svg");
+    out property <image> tab-daily: @image-url("../../../assets/icons/tab-daily.svg");
+    out property <image> tab-clipboard: @image-url("../../../assets/icons/tab-clipboard.svg");
+    out property <image> type-text: @image-url("../../../assets/icons/type-text.svg");
+    out property <image> type-link: @image-url("../../../assets/icons/type-link.svg");
+    out property <image> type-color: @image-url("../../../assets/icons/type-color.svg");
+    out property <image> type-email: @image-url("../../../assets/icons/type-email.svg");
+    out property <image> type-image: @image-url("../../../assets/icons/type-image.svg");
+    out property <image> type-file: @image-url("../../../assets/icons/type-file.svg");
+    out property <image> act-paste: @image-url("../../../assets/icons/act-paste.svg");
+    out property <image> act-copy: @image-url("../../../assets/icons/act-copy.svg");
+    out property <image> act-keep: @image-url("../../../assets/icons/act-keep.svg");
+    out property <image> act-edit: @image-url("../../../assets/icons/act-edit.svg");
+    out property <image> act-snippet: @image-url("../../../assets/icons/act-snippet.svg");
+    out property <image> act-pin: @image-url("../../../assets/icons/act-pin.svg");
+    out property <image> act-slot: @image-url("../../../assets/icons/act-slot.svg");
+    out property <image> act-merge: @image-url("../../../assets/icons/act-merge.svg");
+    out property <image> act-note: @image-url("../../../assets/icons/act-note.svg");
+    out property <image> act-delete: @image-url("../../../assets/icons/act-delete.svg");
+}
+
+// A type-kind glyph: picks the icon by `Kind::as_str()` value (rtf/html/text → text).
+component TypeIcon inherits Image {
+    in property <string> kind;
+    in property <color> tint: #b8b8be;
+    image-fit: contain;
+    colorize: root.tint;
+    source: root.kind == "link" ? Icons.type-link
+        : root.kind == "color" ? Icons.type-color
+        : root.kind == "email" ? Icons.type-email
+        : root.kind == "image" ? Icons.type-image
+        : root.kind == "file" ? Icons.type-file
+        : Icons.type-text;
+}
+
+// A ⌘K action glyph: picks the icon by action id (unknown → paste).
+component ActionIcon inherits Image {
+    in property <string> id;
+    in property <color> tint: #d0d0d4;
+    image-fit: contain;
+    colorize: root.tint;
+    source: root.id == "copy" ? Icons.act-copy
+        : root.id == "keep" ? Icons.act-keep
+        : root.id == "edit" ? Icons.act-edit
+        : root.id == "snippet" ? Icons.act-snippet
+        : root.id == "pin" ? Icons.act-pin
+        : root.id == "slot" ? Icons.act-slot
+        : root.id == "merge" ? Icons.act-merge
+        : root.id == "note" ? Icons.act-note
+        : root.id == "delete" ? Icons.act-delete
+        : Icons.act-paste;
+}
+
 // A labeled horizontal bar: [ label ][=== track ===][ value ]
 component HBar inherits Rectangle {
     in property <string> label;
@@ -746,7 +803,7 @@ export component LauncherWindow inherits Window {
                                         border-color: #55555f;
                                     }
                                     if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
-                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: Text { text: row.glyph; y: 6px; font-size: 18px; }
+                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: #c2c2c8; }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -1881,7 +1938,7 @@ export component LauncherWindow inherits Window {
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 spacing: 10px;
-                                Text { text: a.icon; font-size: 15px; vertical-alignment: center; width: 22px; horizontal-alignment: center; }
+                                ActionIcon { id: a.id; width: 22px; height: 18px; tint: a.id == "delete" ? #ff9a9a : #d0d0d4; }
                                 Text { text: a.label; color: a.id == "delete" ? #ff9a9a : white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
                                 Text { text: a.key; color: #85858d; font-size: 12px; vertical-alignment: center; }
                             }
@@ -2171,16 +2228,21 @@ export component Popover inherits Window {
                 HorizontalLayout {
                     spacing: 18px;
                     alignment: start;
-                    for tb[i] in [
-                        { g: "✓" }, { g: "▦" }, { g: "🗒" }, { g: "📋" }
-                    ]: VerticalLayout {
+                    for i in [0, 1, 2, 3]: VerticalLayout {
                         spacing: 3px;
                         TouchArea { clicked => { root.tab = i; } }
-                        Text {
-                            text: tb.g;
-                            font-size: 16px;
-                            color: root.tab == i ? Pal.accent : #7a7a80;
-                            horizontal-alignment: center;
+                        HorizontalLayout {
+                            alignment: center;
+                            Image {
+                                source: i == 0 ? Icons.tab-tasks
+                                    : i == 1 ? Icons.tab-today
+                                    : i == 2 ? Icons.tab-daily
+                                    : Icons.tab-clipboard;
+                                colorize: root.tab == i ? Pal.accent : #7a7a80;
+                                width: 20px;
+                                height: 20px;
+                                image-fit: contain;
+                            }
                         }
                         Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
                     }
@@ -2306,7 +2368,7 @@ export component Popover inherits Window {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 8px;
-                                Text { text: c.glyph; font-size: 13px; vertical-alignment: center; }
+                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: #b8b8be; }
                                 Text {
                                     text: c.title;
                                     color: white;
