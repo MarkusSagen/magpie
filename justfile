@@ -44,6 +44,11 @@ fmt:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# Reclaim disk: target/debug balloons with Slint's generated code + incremental
+# artifacts (many GB). Removes build output; next build is a full recompile.
+clean:
+    cargo clean
+
 # Install login autostart using the built release binary
 install-autostart: release
     ./target/release/magpie --install-autostart
