@@ -236,6 +236,34 @@ pub fn append_task_line(body: &str, text: &str) -> String {
     format!("{body}{sep}- [ ] {t}")
 }
 
+/// Open tasks that have a due date, split relative to `today_ms` (a day-epoch,
+/// midnight-UTC ms). `overdue` is strictly before today; `today` is exactly today.
+/// Tasks due later, with no due date, or already done are excluded. Each bucket is
+/// sorted by (due date, priority).
+pub struct DueBuckets {
+    pub overdue: Vec<Task>,
+    pub today: Vec<Task>,
+}
+
+pub fn partition_due(tasks: Vec<Task>, today_ms: i64) -> DueBuckets {
+    let mut overdue = Vec::new();
+    let mut today = Vec::new();
+    for t in tasks {
+        if t.done {
+            continue;
+        }
+        match t.due_ms {
+            Some(d) if d < today_ms => overdue.push(t),
+            Some(d) if d == today_ms => today.push(t),
+            _ => {}
+        }
+    }
+    let by = |a: &Task, b: &Task| a.due_ms.cmp(&b.due_ms).then(a.priority.cmp(&b.priority));
+    overdue.sort_by(by);
+    today.sort_by(by);
+    DueBuckets { overdue, today }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +351,35 @@ mod tests {
         // within "a": open before done, due asc
         let titles: Vec<&str> = g[0].tasks.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, vec!["soon", "later", "done"]);
+    }
+
+    #[test]
+    fn partition_due_splits_overdue_and_today() {
+        const DAY: i64 = 86_400_000;
+        let today = 20_000 * DAY;
+        let mk = |due: Option<i64>, done: bool, pri: Priority| Task {
+            note_id: 1,
+            note_name: "n".into(),
+            line_index: 0,
+            done,
+            title: "t".into(),
+            priority: pri,
+            due_ms: due,
+            project: None,
+            source_app_id: None,
+            source_entry_id: None,
+        };
+        let tasks = vec![
+            mk(Some(today - DAY), false, Priority::None), // overdue
+            mk(Some(today), false, Priority::None),       // today
+            mk(Some(today + DAY), false, Priority::None), // later → dropped
+            mk(None, false, Priority::None),              // no due → dropped
+            mk(Some(today), true, Priority::None),        // done → dropped
+        ];
+        let b = partition_due(tasks, today);
+        assert_eq!(b.overdue.len(), 1);
+        assert_eq!(b.overdue[0].due_ms, Some(today - DAY));
+        assert_eq!(b.today.len(), 1);
+        assert_eq!(b.today[0].due_ms, Some(today));
     }
 }
