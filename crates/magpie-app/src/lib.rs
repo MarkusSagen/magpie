@@ -3,6 +3,7 @@
 //! state, CLI). The Slint UI + runtime wiring live in the `magpie` binary.
 
 pub mod app_state;
+pub mod backlinks;
 pub mod cli;
 pub mod color_view;
 pub mod config;
