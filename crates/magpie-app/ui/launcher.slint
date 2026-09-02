@@ -45,6 +45,13 @@ struct AppItem {
     name: string,
 }
 
+// Accent + the text colour that is legible ON the accent. White-on-accent only
+// reaches ~2.9:1, so filled controls use `on-accent` for their label.
+global Pal {
+    out property <color> accent: #6a8cff;
+    out property <color> on-accent: #101426;
+}
+
 // A labeled horizontal bar: [ label ][=== track ===][ value ]
 component HBar inherits Rectangle {
     in property <string> label;
@@ -166,6 +173,7 @@ export component LauncherWindow inherits Window {
         root.mode = "list";
     }
 
+    // "none" | "entry" | "snippet" — also drives the edit modal.
     in-out property <string> edit-mode: "none";
     in-out property <string> edit-text;
     callback start-edit(int);
@@ -195,6 +203,8 @@ export component LauncherWindow inherits Window {
 
     // ⌘F advanced search.
     in property <[AppItem]> apps;
+    // Active source-app filter (-1 = any) so the overlay can mark the current one.
+    in-out property <int> app-index: -1;
     in-out property <int> time-index: 0;
     in property <bool> filtered: false;
     callback open-search();
@@ -302,7 +312,24 @@ export component LauncherWindow inherits Window {
                                     return accept;
                                 }
                                 if root.view == "stats" {
-                                    if event.text == Key.Escape { root.view = "list"; }
+                                    if event.text == Key.Escape { root.view = "list"; return accept; }
+                                    // Type-to-search from Stats: a printable key drops back to
+                                    // the list and lands in the search field (so the field is
+                                    // never a dead control).
+                                    if event.text == Key.Return || event.text == Key.Backspace
+                                        || event.text == Key.Tab || event.text == Key.Delete
+                                        || event.text == Key.UpArrow || event.text == Key.DownArrow
+                                        || event.text == Key.LeftArrow || event.text == Key.RightArrow
+                                        || event.text == Key.Home || event.text == Key.End
+                                        || event.text == Key.PageUp || event.text == Key.PageDown
+                                        || event.text == Key.Shift || event.text == Key.Control
+                                        || event.text == Key.Alt || event.text == Key.Meta {
+                                        return accept;
+                                    }
+                                    if !event.modifiers.control && event.text.character-count == 1 {
+                                        root.view = "list";
+                                        return reject;
+                                    }
                                     return accept;
                                 }
                                 // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
@@ -325,6 +352,9 @@ export component LauncherWindow inherits Window {
                                     return accept;
                                 }
                                 if event.modifiers.control {
+                                    // ⌘⌫ deletes the selected entry (Finder's "move to trash"
+                                    // idiom). Esc still clears the whole query, ⌥⌫ a word.
+                                    if event.text == Key.Backspace { root.delete-entry(root.selected); return accept; }
                                     if event.text == "c" { root.copy-only(root.selected); return accept; }
                                     if event.text == "k" { root.open-actions(); return accept; }
                                     if event.text == "f" { root.open-search(); return accept; }
@@ -367,35 +397,29 @@ export component LauncherWindow inherits Window {
                     for label[i] in ["All", "Text", "Link", "Color", "Image", "File"]: Rectangle {
                         height: 26px;
                         width: 54px;
-                        background: i == root.type-index ? #6a8cff : (fta.has-hover ? #35353d : #2a2a30);
+                        background: i == root.type-index ? Pal.accent : (fta.has-hover ? #35353d : #2a2a30);
                         border-radius: 6px;
                         fta := TouchArea { clicked => { root.type-index = i; root.set-type-filter(i); } }
-                        Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: i == root.type-index ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    for label[i] in ["Recent", "Most"]: Rectangle {
+                    for label[i] in ["Recent", "Most copied"]: Rectangle {
                         height: 26px;
-                        width: 58px;
+                        width: i == 0 ? 62px : 92px;
                         background: i == root.sort-index ? #3a3a40 : (sta.has-hover ? #2c2c33 : #202024);
                         border-radius: 6px;
                         sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
                         Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
+                    // Divider: filters/sort to the left, view + utility controls to the right.
+                    Rectangle { width: 1px; height: 18px; y: 4px; background: #33333c; }
                     Rectangle {
-                        width: 40px;
+                        width: 84px;
                         height: 26px;
                         background: root.screenshare ? #b04a4a : (lockta.has-hover ? #2c2c33 : #202024);
                         border-radius: 6px;
                         lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
-                        Text { text: "🔒"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                    Rectangle {
-                        width: 34px;
-                        height: 26px;
-                        background: helpta.has-hover ? #2c2c33 : #202024;
-                        border-radius: 6px;
-                        helpta := TouchArea { clicked => { root.mode = "help"; } }
-                        Text { text: "?"; color: white; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: root.screenshare ? "🔒 Masked" : "🔒 Mask"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 58px;
@@ -405,6 +429,14 @@ export component LauncherWindow inherits Window {
                         statsta := TouchArea { clicked => { root.toggle-view(); } }
                         Text { text: "Stats"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
+                    Rectangle {
+                        width: 34px;
+                        height: 26px;
+                        background: helpta.has-hover ? #2c2c33 : #202024;
+                        border-radius: 6px;
+                        helpta := TouchArea { clicked => { root.mode = "help"; } }
+                        Text { text: "?"; color: white; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
                 }
 
                 if root.all-tags.length > 0: HorizontalLayout {
@@ -413,12 +445,12 @@ export component LauncherWindow inherits Window {
                     for t in root.all-tags: Rectangle {
                         height: 22px;
                         width: 64px;
-                        background: root.tag-filter == t ? #6a8cff : #2a2a30;
+                        background: root.tag-filter == t ? Pal.accent : (tagta.has-hover ? #35353d : #2a2a30);
                         border-radius: 11px;
-                        TouchArea { clicked => { root.set-tag-filter(t); } }
+                        tagta := TouchArea { clicked => { root.set-tag-filter(t); } }
                         Text {
                             text: "#" + t;
-                            color: white;
+                            color: root.tag-filter == t ? Pal.on-accent : white;
                             font-size: 11px;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -439,25 +471,25 @@ export component LauncherWindow inherits Window {
                     for label[si] in ["↵", "␣", ","]: Rectangle {
                         width: 30px;
                         height: 26px;
-                        background: si == root.merge-sep ? #6a8cff : #2a2a30;
+                        background: si == root.merge-sep ? Pal.accent : (msta.has-hover ? #35353d : #2a2a30);
                         border-radius: 6px;
-                        TouchArea { clicked => { root.merge-sep = si; } }
-                        Text { text: label; color: white; horizontal-alignment: center; vertical-alignment: center; }
+                        msta := TouchArea { clicked => { root.merge-sep = si; } }
+                        Text { text: label; color: si == root.merge-sep ? Pal.on-accent : white; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 110px;
                         height: 26px;
-                        background: #6a8cff;
+                        background: mpta.has-hover ? #7f9dff : Pal.accent;
                         border-radius: 6px;
-                        TouchArea { clicked => { root.merge-paste(); } }
-                        Text { text: "Merge & paste"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        mpta := TouchArea { clicked => { root.merge-paste(); } }
+                        Text { text: "Merge & paste"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 54px;
                         height: 26px;
-                        background: #2a2a30;
+                        background: mcta.has-hover ? #35353d : #2a2a30;
                         border-radius: 6px;
-                        TouchArea { clicked => { root.clear-merge(); } }
+                        mcta := TouchArea { clicked => { root.clear-merge(); } }
                         Text { text: "Clear"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
@@ -636,6 +668,37 @@ export component LauncherWindow inherits Window {
                         VerticalLayout {
                             padding: 12px;
                             spacing: 10px;
+                            // Preview header: the pane's own label plus its actions.
+                            // These live ABOVE the text so they always sit in the same
+                            // place — previously they floated in the middle of the
+                            // empty space left by a short entry.
+                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Preview";
+                                    color: #8a8a92;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                if entries[root.selected].masked && !root.revealed: Rectangle {
+                                    height: 26px;
+                                    width: 88px;
+                                    background: revta.has-hover ? #35353d : #2a2a30;
+                                    border-radius: 6px;
+                                    revta := TouchArea { clicked => { root.revealed = true; } }
+                                    Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                Rectangle {
+                                    height: 26px;
+                                    width: 116px;
+                                    background: oeta.has-hover ? #35353d : #2a2a30;
+                                    border-radius: 6px;
+                                    oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
+                                    Text { text: "↗ Open in editor"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+
                             // Detail preview — a VIRTUALIZED line list. Only the
                             // visible lines are shaped, so huge entries are instant.
                             // Rust pushes preview-lines (masked→bullets, else the
@@ -706,80 +769,73 @@ export component LauncherWindow inherits Window {
                                 }
                             }
 
-                            // Preview controls: truncation note · Reveal · Open in editor.
-                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
-                                spacing: 8px;
-                                if root.preview-truncated: Text { text: "Preview truncated — open in editor for all"; color: #6a6a70; font-size: 11px; vertical-alignment: center; }
-                                Rectangle { horizontal-stretch: 1; }
-                                if entries[root.selected].masked && !root.revealed: Rectangle {
-                                    height: 26px;
-                                    width: 92px;
-                                    background: revta.has-hover ? #35353d : #2a2a30;
-                                    border-radius: 6px;
-                                    revta := TouchArea { clicked => { root.revealed = true; } }
-                                    Text { text: "👁 Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                }
-                                Rectangle {
-                                    height: 26px;
-                                    width: 116px;
-                                    background: oeta.has-hover ? #35353d : #2a2a30;
-                                    border-radius: 6px;
-                                    oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
-                                    Text { text: "↗ Open in editor"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                }
+                            if root.preview-truncated: Text {
+                                text: "Preview truncated — open in editor to see all";
+                                color: #6a6a70;
+                                font-size: 11px;
+                                wrap: word-wrap;
                             }
 
                             // Metadata "Information" block (Raycast-style; right-aligned values).
                             if entries.length > 0 && root.selected < entries.length: VerticalLayout {
                                 spacing: 5px;
                                 Rectangle { height: 1px; background: #2a2a30; }
-                                Text { text: "Information"; color: #6a6a70; font-size: 12px; }
+                                Text { text: "Information"; color: #8a8a92; font-size: 12px; }
                                 HorizontalLayout {
-                                    spacing: 6px;
-                                    Text { text: "Source"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Source"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
                                     Text { text: entries[root.selected].source; color: #d0d0d4; font-size: 11px; overflow: elide; }
                                 }
+                                // spacing keeps the label and its right-aligned value from
+                                // touching once the pane is narrow.
                                 HorizontalLayout {
-                                    Text { text: "Content type"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Content type"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].kind; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Characters"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    spacing: 12px;
+                                    Text { text: "Size"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; overflow: elide; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Words"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Words"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].words; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Times copied"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Times copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].copied; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Last used"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Last used"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].when; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Copied"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].copied-date; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
-                                    Text { text: "Slot"; color: #6a6a70; font-size: 11px; horizontal-stretch: 1; }
+                                    spacing: 12px;
+                                    Text { text: "Slot"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                             }
 
                             // Tag chips for the selected entry (click to remove).
-                            if root.edit-mode == "none" && root.selected-tags.length > 0: HorizontalLayout {
+                            if root.selected-tags.length > 0: HorizontalLayout {
                                 spacing: 4px;
                                 alignment: start;
                                 for t in root.selected-tags: Rectangle {
                                     height: 22px;
                                     width: 74px;
-                                    background: #3a3a40;
+                                    background: chipta.has-hover ? #4a4a52 : #3a3a40;
                                     border-radius: 11px;
-                                    TouchArea { clicked => { root.remove-tag(root.selected, t); } }
+                                    chipta := TouchArea { clicked => { root.remove-tag(root.selected, t); } }
                                     Text {
                                         text: "#" + t + " ✕";
                                         color: #d0d0d4;
@@ -791,52 +847,23 @@ export component LauncherWindow inherits Window {
                                 }
                             }
 
-                            // Add-tag input.
-                            if root.edit-mode == "none" && entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                            // Add-tag input. Enter commits, so the button is a fallback.
+                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
                                 spacing: 6px;
                                 alignment: start;
                                 tagfield := LineEdit {
-                                    placeholder-text: "add tag…";
+                                    placeholder-text: "Add tag…";
                                     width: 140px;
                                     text <=> root.add-tag-text;
+                                    accepted => { root.add-tag(root.selected, root.add-tag-text); }
                                 }
                                 Rectangle {
                                     width: 48px;
                                     height: 26px;
-                                    background: #2a2a30;
+                                    background: addta.has-hover ? #35353d : #2a2a30;
                                     border-radius: 6px;
-                                    TouchArea { clicked => { root.add-tag(root.selected, root.add-tag-text); } }
+                                    addta := TouchArea { clicked => { root.add-tag(root.selected, root.add-tag-text); } }
                                     Text { text: "Add"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                }
-                            }
-
-                            // Edit-mode editor.
-                            if root.edit-mode != "none": VerticalLayout {
-                                spacing: 6px;
-                                editor := TextEdit {
-                                    min-height: 120px;
-                                    text <=> root.edit-text;
-                                    init => { editor.focus(); }
-                                }
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    alignment: start;
-                                    Rectangle {
-                                        width: 60px;
-                                        height: 26px;
-                                        background: #6a8cff;
-                                        border-radius: 6px;
-                                        TouchArea { clicked => { root.save-edit(root.edit-text); } }
-                                        Text { text: "Save"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                    }
-                                    Rectangle {
-                                        width: 60px;
-                                        height: 26px;
-                                        background: #2a2a30;
-                                        border-radius: 6px;
-                                        TouchArea { clicked => { root.cancel-edit(); } }
-                                        Text { text: "Cancel"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                    }
                                 }
                             }
                         }
@@ -852,8 +879,9 @@ export component LauncherWindow inherits Window {
                         padding-left: 12px;
                         padding-right: 12px;
                         spacing: 12px;
+                        // "From <app>" — a bare app name here read as a stray word.
                         Text {
-                            text: (entries.length > 0 && root.selected < entries.length) ? entries[root.selected].source : "";
+                            text: (entries.length > 0 && root.selected < entries.length) ? "From " + entries[root.selected].source : "";
                             color: #9a9aa0;
                             font-size: 12px;
                             vertical-alignment: center;
@@ -975,56 +1003,64 @@ export component LauncherWindow inherits Window {
             TouchArea { clicked => { root.mode = "list"; } }
             Rectangle {
                 width: 460px;
-                height: 460px;
+                // Tall enough for the whole table — at 460px the last row was clipped
+                // mid-line, which reads as a rendering bug rather than "scroll me".
+                height: 540px;
                 background: #1e1e21;
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: #3a3a40;
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 6px;
-                        Text { text: "Keyboard Shortcuts"; color: white; font-size: 15px; }
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+                    Text { text: "Keyboard Shortcuts"; color: white; font-size: 15px; font-weight: 700; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 6px;
 
-                        Text { text: "Navigation"; color: #6a8cff; font-size: 12px; }
-                        for row in [
-                            { k: "↑ / ↓", d: "Move selection" },
-                            { k: "⏎", d: "Paste to the previous app + close" },
-                            { k: "⌘⏎", d: "Paste + keep Magpie open" },
-                            { k: "Esc", d: "Clear search, then close" },
-                            { k: "type", d: "Filter entries" },
-                            { k: "⌘1–9", d: "Paste the Nth entry" },
-                        ]: HorizontalLayout {
-                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
-                        }
+                            Text { text: "Navigation"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "↑ / ↓", d: "Move selection" },
+                                { k: "⏎", d: "Paste to the previous app + close" },
+                                { k: "⌘⏎", d: "Paste + keep Magpie open" },
+                                { k: "Esc", d: "Clear search, then close" },
+                                { k: "type", d: "Filter entries" },
+                                { k: "⌘1–9", d: "Paste the Nth entry" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                            }
 
-                        Text { text: "Actions"; color: #6a8cff; font-size: 12px; }
-                        for row in [
-                            { k: "⌘K", d: "Open the actions menu" },
-                            { k: "⌘F", d: "Advanced search (app / time)" },
-                            { k: "⌘C", d: "Copy (no paste)" },
-                            { k: "⌘E", d: "Edit the entry" },
-                            { k: "⌘N", d: "New snippet" },
-                            { k: "⌘P", d: "Pin / unpin" },
-                            { k: "⌘G", d: "Add to merge" },
-                            { k: "⌘V", d: "Paste clipboard into search" },
-                            { k: "⌃X", d: "Delete the entry" },
-                        ]: HorizontalLayout {
-                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
-                        }
+                            Text { text: "Actions"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "⌘K", d: "Open the actions menu" },
+                                { k: "⌘F", d: "Filters (source app / time)" },
+                                { k: "⌘C", d: "Copy (no paste)" },
+                                { k: "⌘E", d: "Edit the entry" },
+                                { k: "⌘N", d: "New snippet" },
+                                { k: "⌘P", d: "Pin / unpin" },
+                                { k: "⌘G", d: "Add to merge" },
+                                { k: "⌘V", d: "Paste clipboard into search" },
+                                { k: "⌘⌫", d: "Delete the entry" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                            }
 
-                        Text { text: "Views"; color: #6a8cff; font-size: 12px; }
-                        for row in [
-                            { k: "⌘/  or  ?", d: "This help" },
-                            { k: "🔒", d: "Screenshare (mask everything)" },
-                            { k: "Stats", d: "Copy analytics" },
-                        ]: HorizontalLayout {
-                            Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                            Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                            Text { text: "Views"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "⌘/  or  ?", d: "This help" },
+                                { k: "⌘+ / ⌘− / ⌘0", d: "Preview text size" },
+                                { k: "🔒 Mask", d: "Screenshare mode (hide all content)" },
+                                { k: "Stats", d: "Copy analytics" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                            }
                         }
                     }
+                    Text { text: "Esc to close"; color: #6a6a70; font-size: 11px; horizontal-alignment: center; }
                 }
             }
         }
@@ -1065,12 +1101,12 @@ export component LauncherWindow inherits Window {
                         spacing: 10px;
                         Rectangle {
                             height: 34px;
-                            background: openta.has-hover ? #5a7cff : #6a8cff;
+                            background: openta.has-hover ? #7f9dff : Pal.accent;
                             border-radius: 8px;
                             openta := TouchArea {
                                 clicked => { root.open-accessibility-settings(); }
                             }
-                            Text { text: "Open System Settings"; color: white; font-size: 13px; }
+                            Text { text: "Open System Settings"; color: Pal.on-accent; font-size: 13px; }
                         }
                         Rectangle {
                             height: 34px;
@@ -1112,59 +1148,78 @@ export component LauncherWindow inherits Window {
                 VerticalLayout {
                     padding: 14px;
                     spacing: 10px;
-                    Text { text: "Advanced search"; color: white; font-size: 14px; }
+                    Text { text: "Filters"; color: white; font-size: 14px; font-weight: 700; }
 
-                    Text { text: "Time range"; color: #6a6a70; font-size: 11px; }
+                    Text { text: "Time range"; color: #8a8a92; font-size: 11px; }
                     HorizontalLayout {
                         spacing: 6px;
                         for label[i] in ["All", "Today", "Last 7 days", "Last 30 days"]: Rectangle {
                             height: 28px;
                             width: 100px;
-                            background: i == root.time-index ? #6a8cff : #2a2a30;
+                            background: i == root.time-index ? Pal.accent : (tfta.has-hover ? #35353d : #2a2a30);
                             border-radius: 6px;
-                            TouchArea { clicked => { root.time-index = i; root.set-time-filter(i); } }
-                            Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            tfta := TouchArea { clicked => { root.time-index = i; root.set-time-filter(i); } }
+                            Text { text: label; color: i == root.time-index ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
 
-                    Text { text: "Sort"; color: #6a6a70; font-size: 11px; }
+                    Text { text: "Sort"; color: #8a8a92; font-size: 11px; }
                     HorizontalLayout {
                         spacing: 6px;
                         alignment: start;
                         for label[i] in ["Recent", "Most copied"]: Rectangle {
                             height: 28px;
                             width: 110px;
-                            background: i == root.sort-index ? #3a3a40 : #202024;
+                            background: i == root.sort-index ? #3a3a40 : (sota.has-hover ? #2c2c33 : #202024);
                             border-radius: 6px;
-                            TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
+                            sota := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
                             Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
 
-                    Text { text: "Source app"; color: #6a6a70; font-size: 11px; }
+                    Text { text: "Source app"; color: #8a8a92; font-size: 11px; }
+                    // Left-aligned rows with hover + a ✓ on the active filter — the
+                    // previous centred labels read as floating text, and there was no
+                    // way to tell which app was filtered.
                     Rectangle {
                         height: 30px;
-                        background: transparent;
-                        TouchArea { clicked => { root.set-app-filter(-1); } }
-                        Text { text: "Any app"; color: #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                        border-radius: 6px;
+                        background: root.app-index == -1 ? #2f2f37 : (anyta.has-hover ? #232329 : transparent);
+                        anyta := TouchArea { clicked => { root.set-app-filter(-1); } }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text { text: "Any app"; color: white; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: root.app-index == -1 ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
+                        }
                     }
                     ListView {
                         vertical-stretch: 1;
                         for a in root.apps: Rectangle {
                             height: 30px;
                             border-radius: 6px;
-                            TouchArea { clicked => { root.set-app-filter(a.id); } }
-                            Text { text: a.name; color: white; font-size: 12px; vertical-alignment: center; }
+                            background: root.app-index == a.id ? #2f2f37 : (apta.has-hover ? #232329 : transparent);
+                            apta := TouchArea { clicked => { root.set-app-filter(a.id); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text { text: a.name; color: white; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Text { text: root.app-index == a.id ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
+                            }
                         }
                     }
 
-                    Rectangle {
-                        height: 30px;
-                        width: 110px;
-                        background: #2a2a30;
-                        border-radius: 6px;
-                        TouchArea { clicked => { root.clear-filters(); } }
-                        Text { text: "Clear filters"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            height: 30px;
+                            width: 110px;
+                            background: cfta.has-hover ? #35353d : #2a2a30;
+                            border-radius: 6px;
+                            cfta := TouchArea { clicked => { root.clear-filters(); } }
+                            Text { text: "Clear filters"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Text { text: "Esc to close"; color: #6a6a70; font-size: 11px; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; }
                     }
                 }
             }
@@ -1183,8 +1238,40 @@ export component LauncherWindow inherits Window {
                 border-color: #3a3a40;
                 VerticalLayout {
                     padding: 10px;
-                    spacing: 4px;
-                    Text { text: "Actions"; color: #9a9aa0; font-size: 12px; }
+                    spacing: 8px;
+                    // Search field on TOP, the way every command palette does it
+                    // (Spotlight / Raycast / ⌘K). Keys are fed in by the search
+                    // field's key handler while actions are open, so a drawn caret
+                    // stands in for the real one.
+                    Rectangle {
+                        height: 34px;
+                        background: #161618;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #33333c;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 2px;
+                            Text { text: "🔍"; font-size: 13px; vertical-alignment: center; }
+                            Rectangle { width: 4px; }
+                            Text {
+                                text: root.actions-query;
+                                color: white;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Rectangle { width: 2px; height: 17px; background: Pal.accent; }
+                            if root.actions-query == "": Text {
+                                text: "Search actions…";
+                                color: #6a6a70;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
                     ListView {
                         vertical-stretch: 1;
                         for a[i] in root.actions: Rectangle {
@@ -1196,30 +1283,102 @@ export component LauncherWindow inherits Window {
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 spacing: 10px;
-                                Text { text: a.icon; font-size: 15px; vertical-alignment: center; width: 22px; }
-                                Text { text: a.label; color: white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
-                                Text { text: a.key; color: #6a6a70; font-size: 12px; vertical-alignment: center; }
+                                Text { text: a.icon; font-size: 15px; vertical-alignment: center; width: 22px; horizontal-alignment: center; }
+                                Text { text: a.label; color: a.id == "delete" ? #ff9a9a : white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: a.key; color: #85858d; font-size: 12px; vertical-alignment: center; }
                             }
                         }
                     }
-                    // Search field (keys fed by the FocusScope while actions are open).
-                    Rectangle {
-                        height: 34px;
-                        background: #161618;
-                        border-radius: 8px;
-                        HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            spacing: 6px;
-                            Text { text: "🔍"; font-size: 13px; vertical-alignment: center; }
-                            Text {
-                                text: root.actions-query == "" ? "Search actions…" : root.actions-query;
-                                color: root.actions-query == "" ? #6a6a70 : white;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                                overflow: elide;
+                    if root.actions.length == 0: Text {
+                        text: "No matching action";
+                        color: #6a6a70;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "↑↓ Move · ⏎ Run · Esc Close";
+                        color: #6a6a70;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // ---- Edit / new-snippet modal ----
+        // A centred modal like the other overlays. It used to be squeezed into the
+        // bottom of the (narrow) detail pane, which pushed Save/Cancel off the
+        // window edge and left no way to tell edit from new-snippet.
+        if root.edit-mode != "none": Rectangle {
+            background: #000000cc;
+            TouchArea {} // swallow clicks behind the modal
+            Rectangle {
+                width: 540px;
+                height: 420px;
+                background: #1e1e21;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #3a3a40;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: root.edit-mode == "snippet" ? "New snippet" : "Edit entry";
+                        color: white;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.edit-mode == "snippet"
+                            ? "Snippets are saved alongside your history — search and paste them like any other entry."
+                            : "Saving replaces this entry’s text. The original is not kept.";
+                        color: #9a9aa0;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    // FocusScope so Esc / ⌘⏎ still work while the editor has focus
+                    // (TextEdit rejects them, so they bubble up here).
+                    FocusScope {
+                        vertical-stretch: 1;
+                        key-pressed(event) => {
+                            if event.text == Key.Escape { root.cancel-edit(); return accept; }
+                            if event.modifiers.control && event.text == Key.Return {
+                                root.save-edit(root.edit-text);
+                                return accept;
                             }
+                            return reject;
+                        }
+                        editor := TextEdit {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.edit-text;
+                            init => { editor.focus(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "⌘⏎ Save · Esc Cancel";
+                            color: #6a6a70;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 74px;
+                            height: 30px;
+                            background: cancelta.has-hover ? #35353d : #2a2a30;
+                            border-radius: 6px;
+                            cancelta := TouchArea { clicked => { root.cancel-edit(); } }
+                            Text { text: "Cancel"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 74px;
+                            height: 30px;
+                            background: saveta.has-hover ? #7f9dff : Pal.accent;
+                            border-radius: 6px;
+                            saveta := TouchArea { clicked => { root.save-edit(root.edit-text); } }
+                            Text { text: "Save"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
                 }

@@ -19,6 +19,18 @@ impl Section {
     }
 }
 
+/// The list-header label for an entry. Pinned entries always sort to the top
+/// (see `search::order_by`), so they get their own "Pinned" header — bucketing
+/// them by date instead produced a bogus leading "Older" group followed by
+/// "Today" and then a second "Older".
+pub fn section_label(pinned: bool, last_copied_ms: i64, now_ms: i64) -> &'static str {
+    if pinned {
+        "Pinned"
+    } else {
+        section_for(last_copied_ms, now_ms).label()
+    }
+}
+
 pub fn section_for(last_copied_ms: i64, now_ms: i64) -> Section {
     let today = now_ms.div_euclid(DAY_MS);
     let day = last_copied_ms.div_euclid(DAY_MS);
@@ -65,6 +77,14 @@ mod tests {
         assert!(matches!(section_for(100 * DAY + 1, now), Section::Today));
         assert!(matches!(section_for(99 * DAY + 1, now), Section::Yesterday));
         assert!(matches!(section_for(90 * DAY, now), Section::Older));
+    }
+
+    #[test]
+    fn pinned_entries_get_their_own_header() {
+        let now = 100 * DAY + 5_000;
+        assert_eq!(section_label(true, 40 * DAY, now), "Pinned");
+        assert_eq!(section_label(false, 100 * DAY + 1, now), "Today");
+        assert_eq!(section_label(false, 40 * DAY, now), "Older");
     }
 
     #[test]

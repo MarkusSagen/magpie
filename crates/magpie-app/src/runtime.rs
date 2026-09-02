@@ -75,12 +75,22 @@ fn line_badge(full_text: &str) -> String {
     }
 }
 
+/// The row's one-line title: the first line that actually has content. Using
+/// only `lines().next()` made every entry that starts with a blank line render
+/// as a useless "text" row.
 fn preview_title(e: &Entry) -> String {
-    let line = e.full_text.lines().next().unwrap_or("").trim();
-    if line.is_empty() {
-        e.kind.as_str().to_string()
+    match e.full_text.lines().map(str::trim).find(|l| !l.is_empty()) {
+        Some(line) => line.chars().take(80).collect(),
+        None => e.kind.as_str().to_string(),
+    }
+}
+
+/// "1 line" / "3 lines" — a naive `{n} lines` printed "1 lines".
+fn plural(n: i64, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
     } else {
-        line.chars().take(80).collect()
+        format!("{n} {many}")
     }
 }
 
@@ -150,7 +160,11 @@ fn to_rows(
             } else {
                 format!("{source} · {when} · {tagline}")
             };
-            let size = format!("{} chars · {} lines", e.char_count, e.line_count);
+            let size = format!(
+                "{} · {}",
+                plural(e.char_count, "char", "chars"),
+                plural(e.line_count, "line", "lines")
+            );
             EntryRow {
                 title: SharedString::from(title),
                 subtitle: SharedString::from(subtitle),
@@ -167,9 +181,11 @@ fn to_rows(
                 icon: icon_img,
                 has_icon,
                 words: e.word_count as i32,
-                section: SharedString::from(
-                    grouping::section_for(e.last_copied_at_ms, now).label(),
-                ),
+                section: SharedString::from(grouping::section_label(
+                    e.pinned,
+                    e.last_copied_at_ms,
+                    now,
+                )),
                 copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
                 pinned: e.pinned,
             }
@@ -335,15 +351,18 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
 /// `run-action`.
+/// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
+/// hint is worse than none. `📝` (not `✏️`) because the pencil-with-VS16
+/// rendered as tofu in Slint's text shaping.
 const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("paste", "📋", "Paste", "⏎"),
     ("copy", "📄", "Copy", "⌘C"),
-    ("keep", "📎", "Paste & keep open", "⌥⏎"),
-    ("edit", "✏️", "Edit", "⌘E"),
+    ("keep", "📎", "Paste & keep open", "⌘⏎"),
+    ("edit", "📝", "Edit", "⌘E"),
     ("snippet", "🧩", "New snippet", "⌘N"),
     ("pin", "📌", "Pin / Unpin", "⌘P"),
     ("merge", "➕", "Add to merge", "⌘G"),
-    ("delete", "🗑", "Delete", "⌃X"),
+    ("delete", "🗑", "Delete", "⌘⌫"),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -494,9 +513,13 @@ fn to_slint_bars(items: &[(String, String, i64)]) -> ModelRc<Bar> {
     ModelRc::new(VecModel::from(bars))
 }
 
+/// A one-line chart label. Falls back to the first line WITH content, then to a
+/// placeholder — blank labels left anonymous bars in the "Most copied" chart.
 fn truncate(s: &str, n: usize) -> String {
-    let one_line = s.lines().next().unwrap_or("");
-    one_line.chars().take(n).collect()
+    match s.lines().map(str::trim).find(|l| !l.is_empty()) {
+        Some(line) => line.chars().take(n).collect(),
+        None => "(whitespace)".to_string(),
+    }
 }
 
 fn empty_stats() -> Stats {
@@ -964,6 +987,9 @@ pub fn start() {
                 u.app_filter = if id >= 0 { Some(id as i64) } else { None };
             }
             if let Some(ui) = w.upgrade() {
+                // Mirrored into the window so the Filters overlay can tick the
+                // active source app.
+                ui.set_app_index(id);
                 ui.set_mode(SharedString::from("list"));
                 ui.set_selected(0);
                 refresh(&ui, &s);
@@ -981,6 +1007,7 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_time_index(0);
+                ui.set_app_index(-1);
                 ui.set_pinned_only(false);
                 ui.set_mode(SharedString::from("list"));
                 refresh(&ui, &s);
@@ -1418,47 +1445,6 @@ pub fn start() {
             &log_path,
             "previous run ended abnormally (dev — not surfaced)",
         );
-    }
-
-    if std::env::var("MAGPIE_SHOW_ON_LAUNCH").is_ok() {
-        let (w, s) = (weak.clone(), state.clone());
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(900));
-            {
-                let (w, s) = (w.clone(), s.clone());
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = w.upgrade() {
-                        show_window(&ui, &s);
-                        ui.set_query(SharedString::from(""));
-                    }
-                });
-            }
-            for step in ["help", "actions", "search", "stats", "edit"] {
-                std::thread::sleep(Duration::from_millis(3000));
-                let w2 = w.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = w2.upgrade() {
-                        ui.set_mode(SharedString::from("list"));
-                        ui.set_view(SharedString::from("list"));
-                        match step {
-                            "actions" => {
-                                ui.invoke_open_actions();
-                            }
-                            "search" => {
-                                ui.invoke_open_search();
-                            }
-                            "stats" => {
-                                ui.invoke_toggle_view();
-                            }
-                            "edit" => {
-                                ui.invoke_start_edit(ui.get_selected());
-                            }
-                            other => ui.set_mode(SharedString::from(other)),
-                        }
-                    }
-                });
-            }
-        });
     }
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
