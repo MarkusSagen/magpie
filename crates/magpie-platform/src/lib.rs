@@ -15,6 +15,7 @@ pub use os::accessibility::{
     accessibility_trusted, open_accessibility_settings, prompt_accessibility,
 };
 pub use os::factory::{platform_autostart, platform_clipboard};
+pub use os::notify::{notify, request_notification_authorization};
 pub use os::window::{hide_and_yield_focus, raise_to_front};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};

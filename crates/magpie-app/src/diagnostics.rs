@@ -146,18 +146,12 @@ pub fn alert(title: &str, message: &str, buttons: &[&str]) -> Option<String> {
         .map(|r| r.split(',').next().unwrap_or("").trim().to_string())
 }
 
-/// Post a non-blocking notification. macOS: `osascript display notification`.
+/// Post a non-blocking notification. Delegates to the platform layer, which posts a
+/// branded `UNUserNotificationCenter` notification from the packaged `.app` and falls
+/// back to `osascript` in dev.
 #[cfg(target_os = "macos")]
 pub fn notify(title: &str, message: &str) {
-    let script = format!(
-        "display notification {msg} with title {title}",
-        msg = as_applescript_str(message),
-        title = as_applescript_str(title),
-    );
-    let _ = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .spawn();
+    magpie_platform::notify(title, message);
 }
 
 /// Reveal a file/path in the OS. macOS: `open -R` (reveal in Finder).

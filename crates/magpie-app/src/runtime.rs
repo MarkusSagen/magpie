@@ -2272,6 +2272,9 @@ pub fn start() {
         cfg.fetch_link_favicons,
         weak.clone(),
     );
+    // Ask for notification permission once (macOS bundle only; no-op in dev), so
+    // reminder banners show as "Magpie" instead of being silently dropped.
+    magpie_platform::request_notification_authorization();
     spawn_reminders(state.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());

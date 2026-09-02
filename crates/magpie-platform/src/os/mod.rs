@@ -1,5 +1,6 @@
 pub mod accessibility;
 pub mod hotkeys;
+pub mod notify;
 pub mod paste;
 pub mod source_app;
 pub mod window;
