@@ -1,4 +1,4 @@
-use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, SlotItem};
+use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, SlotItem};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::config::Config;
 use magpie_app::favicon;
@@ -347,6 +347,73 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
     magpie_platform::raise_to_front();
     // Focus the search field and highlight the top item, ready to type.
     ui.invoke_summon();
+}
+
+/// Rebuild the notes list and push it (plus the currently-open note's body,
+/// provenance, and links) into the window. When no note is open (`note-id < 0`)
+/// or the open note vanished, it lands on today's daily note.
+fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let day = abs_date(now); // "YYYY-MM-DD"
+    let (rows, open_id, body, prov, links) = {
+        let store = match state.store.lock() {
+            Ok(s) => s,
+            Err(e) => e.into_inner(),
+        };
+        // Ensure today's daily note exists.
+        let daily = store.daily_note(&day, now).ok();
+        let recent = store.recent_notes(200).unwrap_or_default();
+        let rows: Vec<NoteRow> = recent
+            .iter()
+            .map(|n| NoteRow {
+                id: n.id as i32,
+                title: SharedString::from(magpie_app::notes_view::note_list_title(
+                    &n.name, &n.body,
+                )),
+                when: SharedString::from(relative_time(n.updated_at_ms, now)),
+                is_daily: n.is_daily,
+            })
+            .collect();
+        // Which note is open? Keep the current one if still present, else the daily note.
+        let cur = ui.get_note_id();
+        let open = if cur >= 0 && recent.iter().any(|n| n.id as i32 == cur) {
+            cur
+        } else {
+            daily.as_ref().map(|d| d.id as i32).unwrap_or(-1)
+        };
+        let opened = recent.iter().find(|n| n.id as i32 == open);
+        let (body, prov, links) = match opened {
+            Some(n) => (
+                n.body.clone(),
+                note_provenance(n),
+                magpie_app::notes_view::wiki_links(&n.body),
+            ),
+            None => (String::new(), String::new(), Vec::new()),
+        };
+        (rows, open, body, prov, links)
+    };
+    ui.set_notes(ModelRc::new(VecModel::from(rows)));
+    ui.set_note_id(open_id);
+    ui.set_note_body(SharedString::from(body));
+    ui.set_note_provenance(SharedString::from(prov));
+    ui.set_note_links(ModelRc::new(VecModel::from(
+        links
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+}
+
+/// Provenance line. Phase 1 keeps it simple: whether the note was captured from a
+/// clip or authored in Magpie, plus the creation date. (Enriching "captured" with
+/// the exact source app name — via an app-id→name lookup — is a later refinement.)
+fn note_provenance(n: &magpie_core::Note) -> String {
+    let when = abs_date(n.created_at_ms);
+    if n.source_entry_id.is_some() {
+        format!("captured · {when}")
+    } else {
+        format!("created in Magpie · {when}")
+    }
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
@@ -1370,6 +1437,29 @@ pub fn start() {
         ui.on_stats_range_changed(move |idx| {
             if let Some(ui) = w.upgrade() {
                 refresh_stats(&ui, &s, idx);
+            }
+        });
+    }
+    // ---- Notes mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_notes(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_notes_mode(on);
+                if on {
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_note(move |id| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_id(id);
+                refresh_notes(&ui, &s);
             }
         });
     }
