@@ -94,6 +94,14 @@ impl Store {
         rows.collect()
     }
 
+    pub fn all_notes(&self) -> Result<Vec<Note>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {NOTE_COLS} FROM notes ORDER BY updated_at_ms DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map([], row_to_note)?;
+        rows.collect()
+    }
+
     pub fn all_note_names(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn()

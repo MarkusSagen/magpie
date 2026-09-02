@@ -72,6 +72,16 @@ fn all_note_names_sorted_distinct() {
 }
 
 #[test]
+fn all_notes_returns_every_note() {
+    let s = store();
+    s.upsert_note_by_name("a", 100).unwrap();
+    s.daily_note("2026-09-02", 200).unwrap();
+    let names: Vec<String> = s.all_notes().unwrap().into_iter().map(|n| n.name).collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.contains(&"a".to_string()) && names.contains(&"2026-09-02".to_string()));
+}
+
+#[test]
 fn create_note_from_entry_copies_provenance() {
     let s = store();
     let ing = s
