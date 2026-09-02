@@ -102,3 +102,14 @@ fn create_note_from_entry_copies_provenance() {
     let note2 = s.create_note_from_entry(ing.entry_id, 200).unwrap();
     assert_eq!(note2.name, "Fix the mount (2)");
 }
+
+#[test]
+fn reminder_fired_roundtrip() {
+    let s = store();
+    assert!(!s.reminder_fired("fp1").unwrap());
+    s.mark_reminder("fp1", 123).unwrap();
+    assert!(s.reminder_fired("fp1").unwrap());
+    assert!(!s.reminder_fired("other").unwrap());
+    s.mark_reminder("fp1", 456).unwrap();
+    assert!(s.reminder_fired("fp1").unwrap());
+}

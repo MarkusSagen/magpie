@@ -149,4 +149,23 @@ impl Store {
         let id = self.conn().last_insert_rowid();
         Ok(self.get_note(id)?.expect("row exists after INSERT"))
     }
+
+    /// Whether a reminder with this fingerprint has already fired.
+    pub fn reminder_fired(&self, fingerprint: &str) -> Result<bool> {
+        let n: i64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM task_reminders WHERE fingerprint = ?1",
+            [fingerprint],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Record that a reminder with this fingerprint has fired.
+    pub fn mark_reminder(&self, fingerprint: &str, now_ms: i64) -> Result<()> {
+        self.conn().execute(
+            "INSERT OR REPLACE INTO task_reminders (fingerprint, fired_at_ms) VALUES (?1, ?2)",
+            rusqlite::params![fingerprint, now_ms],
+        )?;
+        Ok(())
+    }
 }

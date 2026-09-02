@@ -78,3 +78,8 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_name ON notes(name);
 CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at_ms);
+
+CREATE TABLE IF NOT EXISTS task_reminders (
+  fingerprint TEXT PRIMARY KEY,
+  fired_at_ms INTEGER NOT NULL
+);
