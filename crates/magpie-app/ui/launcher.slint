@@ -19,6 +19,12 @@ struct EntryRow {
     section: string,
     copied_date: string,
     pinned: bool,
+    // The entry's OWN content preview, as opposed to `icon` (the source app):
+    // a thumbnail for image entries, a swatch colour for colour entries.
+    thumb: image,
+    has_thumb: bool,
+    swatch: color,
+    has_swatch: bool,
 }
 
 struct Bar {
@@ -129,6 +135,10 @@ export component LauncherWindow inherits Window {
     // Detail preview is a virtualized line list — Rust pushes the (bounded) lines
     // for the selected entry so only visible lines are ever shaped.
     in property <[string]> preview-lines;
+    // Image entries: the decoded bitmap for the selected entry. Without this the
+    // preview pane was simply blank for every image.
+    in property <image> preview-image;
+    in property <bool> preview-has-image: false;
     // Selectable preview text for normal-size entries (empty for huge ones, which
     // fall back to the fast virtualized line list). Lets the user select + ⌘C copy.
     in property <string> preview-text;
@@ -631,11 +641,31 @@ export component LauncherWindow inherits Window {
                                         horizontal-alignment: center;
                                     }
                                 }
-                                // Icon aligned with the top line of the text.
+                                // Leading visual, most content-specific first: the
+                                // image itself, then a colour swatch, then the
+                                // source-app icon (or the kind glyph). Showing the
+                                // app icon for an image entry told you where it came
+                                // from but never WHICH image it was.
                                 Rectangle {
                                     width: 28px;
-                                    if row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
-                                    if !row.has-icon: Text { text: row.glyph; y: 6px; font-size: 18px; }
+                                    if row.has-thumb: Image {
+                                        source: row.thumb;
+                                        y: 8px;
+                                        width: 24px;
+                                        height: 20px;
+                                        image-fit: contain;
+                                    }
+                                    if !row.has-thumb && row.has-swatch: Rectangle {
+                                        y: 8px;
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 4px;
+                                        background: row.swatch;
+                                        border-width: 1px;
+                                        border-color: #55555f;
+                                    }
+                                    if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
+                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: Text { text: row.glyph; y: 6px; font-size: 18px; }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -785,12 +815,33 @@ export component LauncherWindow inherits Window {
                             Rectangle {
                                 min-height: 100px;
                                 vertical-stretch: 1;
+                                // Image entries: the bitmap itself, scaled to fit.
+                                if root.preview-has-image: Image {
+                                    source: root.preview-image;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    image-fit: contain;
+                                }
+                                // Colour entries: a large swatch above the value, so
+                                // "#333" is something you can actually see.
+                                if !root.preview-has-image && root.selected < entries.length && entries[root.selected].has-swatch: VerticalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Rectangle {
+                                        height: 72px;
+                                        border-radius: 8px;
+                                        background: entries[root.selected].swatch;
+                                        border-width: 1px;
+                                        border-color: #55555f;
+                                    }
+                                }
                                 // Normal-size entries: a selectable, scrollable,
                                 // zoomable read-only TextInput (drag to select, ⌘C).
                                 // Plain TextInput (not std TextEdit) so we control the
                                 // text color — the themed TextEdit rendered invisibly
                                 // on the dark pane.
-                                if root.preview-text != "": Flickable {
+                                if !root.preview-has-image && root.preview-text != "": Flickable {
+                                    y: (root.selected < entries.length && entries[root.selected].has-swatch) ? 88px : 0px;
                                     viewport-width: self.width;
                                     viewport-height: pvtext.preferred-height;
                                     pvtext := TextInput {
@@ -806,7 +857,7 @@ export component LauncherWindow inherits Window {
                                 // Huge entries: fast virtualized line list (not
                                 // selectable) so selection stays instant. Wrapped so
                                 // `plist` stays in scope for its custom scrollbar.
-                                if root.preview-text == "": Rectangle {
+                                if !root.preview-has-image && root.preview-text == "": Rectangle {
                                     plist := ListView {
                                         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                                         for ln in root.preview-lines: Rectangle {
@@ -878,7 +929,9 @@ export component LauncherWindow inherits Window {
                                     Text { text: "Size"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; overflow: elide; }
                                 }
-                                HorizontalLayout {
+                                // Images and file lists have no words — a hard "0"
+                                // read as a bug rather than "not applicable".
+                                if entries[root.selected].words > 0: HorizontalLayout {
                                     spacing: 12px;
                                     Text { text: "Words"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].words; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }

@@ -1,9 +1,11 @@
 use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, SlotItem};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
+use magpie_app::color_view;
 use magpie_app::config::Config;
 use magpie_app::favicon;
 use magpie_app::format_time::{abs_date, relative_time};
 use magpie_app::grouping;
+use magpie_app::image_cache::FsImageStore;
 use magpie_app::mask_view::{mask_render, should_mask, MaskRules};
 use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
@@ -77,10 +79,57 @@ fn line_badge(full_text: &str) -> String {
 /// The row's one-line title: the first line that actually has content. Using
 /// only `lines().next()` made every entry that starts with a blank line render
 /// as a useless "text" row.
-fn preview_title(e: &Entry) -> String {
+fn preview_title(images: &FsImageStore, e: &Entry) -> String {
     match e.full_text.lines().map(str::trim).find(|l| !l.is_empty()) {
         Some(line) => line.chars().take(80).collect(),
+        // Image entries carry no text at all, so this is their only title. Say
+        // "Image" with its dimensions rather than the bare kind string "image",
+        // which made every image in the list look identical.
+        None if matches!(e.kind, Kind::Image) => format!("Image · {}", size_line(images, e)),
         None => e.kind.as_str().to_string(),
+    }
+}
+
+/// Longest edge of the cached display thumbnail. Big enough to fill the preview
+/// pane of a 900px window, small enough that the row list stays cheap — and it's
+/// written once, then reloaded from disk.
+const THUMB_MAX_EDGE: u32 = 640;
+
+/// Load an image entry's own bitmap for Slint, via the cached `.thumb.png`
+/// (see `FsImageStore::ensure_thumbnail` for why the original can't be used).
+fn load_entry_image(images: &FsImageStore, e: &Entry) -> (slint::Image, bool) {
+    let none = (slint::Image::default(), false);
+    let Some(bin) = e.image_path.as_deref() else {
+        return none;
+    };
+    let Some(thumb) = images.ensure_thumbnail(bin, &e.content_hash, THUMB_MAX_EDGE) else {
+        return none;
+    };
+    match slint::Image::load_from_path(std::path::Path::new(&thumb)) {
+        Ok(img) => (img, true),
+        Err(_) => none,
+    }
+}
+
+/// The `Size` metadata line, per kind. Chars-and-lines is meaningless for an
+/// image (it read "0 chars · 0 lines") and barely better for a file list.
+fn size_line(images: &FsImageStore, e: &Entry) -> String {
+    match e.kind {
+        Kind::Image => {
+            let dims = e
+                .image_path
+                .as_deref()
+                .and_then(|p| images.dimensions(p))
+                .map(|(w, h)| format!("{w} × {h} · "))
+                .unwrap_or_default();
+            format!("{dims}{}", color_view::human_bytes(e.byte_size))
+        }
+        Kind::File => plural(e.line_count, "file", "files"),
+        _ => format!(
+            "{} · {}",
+            plural(e.char_count, "char", "chars"),
+            plural(e.line_count, "line", "lines")
+        ),
     }
 }
 
@@ -102,6 +151,7 @@ fn to_rows(
     app_names: &HashMap<i64, String>,
     app_icons: &HashMap<i64, String>,
     favicon_dir: &std::path::Path,
+    images: &FsImageStore,
     now: i64,
     rules: &MaskRules,
     visible: usize,
@@ -138,7 +188,7 @@ fn to_rows(
                 app_names.get(&e.id).map(|s| s.as_str()),
                 &e.full_text,
             );
-            let base_title = preview_title(e);
+            let base_title = preview_title(images, e);
             let title = if masked {
                 mask_render(&base_title, visible)
             } else {
@@ -158,11 +208,20 @@ fn to_rows(
             } else {
                 format!("{source} · {when} · {tagline}")
             };
-            let size = format!(
-                "{} · {}",
-                plural(e.char_count, "char", "chars"),
-                plural(e.line_count, "line", "lines")
-            );
+            let size = size_line(images, e);
+            // The entry's own visual: a thumbnail for images, a swatch for
+            // colours. Masked entries get neither — a screenshare must not leak
+            // the picture just because the text is dotted out.
+            let (thumb, has_thumb) = if masked {
+                (slint::Image::default(), false)
+            } else {
+                load_entry_image(images, e)
+            };
+            let swatch_rgb = if masked || !matches!(e.kind, Kind::Color) {
+                None
+            } else {
+                color_view::parse_color(&e.full_text)
+            };
             EntryRow {
                 title: SharedString::from(title),
                 subtitle: SharedString::from(subtitle),
@@ -186,6 +245,13 @@ fn to_rows(
                 )),
                 copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
                 pinned: e.pinned,
+                thumb,
+                has_thumb,
+                swatch: match swatch_rgb {
+                    Some((r, g, b)) => slint::Color::from_rgb_u8(r, g, b),
+                    None => slint::Color::default(),
+                },
+                has_swatch: swatch_rgb.is_some(),
             }
         })
         .collect()
@@ -227,7 +293,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
             let mut slot_items: Vec<(i64, String)> = Vec::new();
             for &(slot, _eid) in &slot_pairs {
                 if let Ok(Some(e)) = store.slot_entry(slot) {
-                    slot_items.push((slot, preview_title(&e)));
+                    slot_items.push((slot, preview_title(&state.images, &e)));
                 }
             }
             slot_items.sort_by_key(|(n, _)| *n);
@@ -320,6 +386,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         &app_names,
         &app_icons,
         &data_dir().join("favicons"),
+        &state.images,
         now_ms(),
         &rules,
         visible,
@@ -975,10 +1042,18 @@ pub fn start() {
                 }
                 _ => String::new(),
             };
+            // Image entries have no text at all, so without this the preview pane
+            // was blank. A masked entry stays hidden until Reveal.
+            let (preview_image, has_preview_image) = match entry {
+                Some(e) if !masked || revealed => load_entry_image(&s.images, e),
+                _ => (slint::Image::default(), false),
+            };
             if let Some(ui) = w.upgrade() {
                 ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
                 ui.set_preview_truncated(truncated);
                 ui.set_preview_text(SharedString::from(selectable));
+                ui.set_preview_image(preview_image);
+                ui.set_preview_has_image(has_preview_image);
             }
         });
     }

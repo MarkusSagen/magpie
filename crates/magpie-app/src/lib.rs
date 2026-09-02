@@ -4,6 +4,7 @@
 
 pub mod app_state;
 pub mod cli;
+pub mod color_view;
 pub mod config;
 pub mod diagnostics;
 pub mod external_editor;
