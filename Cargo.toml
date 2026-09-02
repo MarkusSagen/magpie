@@ -13,3 +13,13 @@ lto = true
 strip = true
 codegen-units = 1
 panic = "abort"
+
+# Dev builds: keep them small + fast to link. The default (full debuginfo for the
+# whole dep tree — Slint/skia/femtovg/winit) balloons the debug binary to ~125 MB
+# and slows every link.
+[profile.dev]
+# Trim debug info a bit (125 MB -> ~110 MB, faster links) while keeping symbolic
+# backtraces for the panic hook. The debug binary is large mainly because Slint
+# generates a lot of unoptimized Rust from the .slint markup — not from debuginfo,
+# so this is only a mild win. `cargo clean` reclaims target/debug when it balloons.
+debug = "line-tables-only"
