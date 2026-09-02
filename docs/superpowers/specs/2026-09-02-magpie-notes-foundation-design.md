@@ -29,7 +29,9 @@ was made from that Slack message at 1:48 PM."
    from a clipboard entry with provenance).
 2. **Tasks** — parse `- [ ]` lines → Tasks index + view; promote-line-to-task;
    toggle-done writes back; inline `!priority @due #project`.
-3. **Backlinks & link graph** — backlinks panel, unlinked mentions.
+3. **Backlinks & link graph (org-roam style)** — per-page backlinks panel, unlinked
+   mentions, and a link graph across pages/tasks/clips. The Phase-1 unique-page-name
+   model + `[[link]]` storage is chosen to make this a clean additive layer later.
 4. **Reminders** — `@due` → notifications (reuses the diagnostics notify infra).
 5. **Keyboard navigation** — jump between notes/tasks/panes (the queued kbd spec).
 
