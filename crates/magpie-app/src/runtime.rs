@@ -1,4 +1,4 @@
-use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, SlotItem};
+use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, SlotItem};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
 use magpie_app::config::Config;
@@ -436,6 +436,73 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
     ui.invoke_summon();
 }
 
+/// Rebuild the notes list and push it (plus the currently-open note's body,
+/// provenance, and links) into the window. When no note is open (`note-id < 0`)
+/// or the open note vanished, it lands on today's daily note.
+fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let day = abs_date(now); // "YYYY-MM-DD"
+    let (rows, open_id, body, prov, links) = {
+        let store = match state.store.lock() {
+            Ok(s) => s,
+            Err(e) => e.into_inner(),
+        };
+        // Ensure today's daily note exists.
+        let daily = store.daily_note(&day, now).ok();
+        let recent = store.recent_notes(200).unwrap_or_default();
+        let rows: Vec<NoteRow> = recent
+            .iter()
+            .map(|n| NoteRow {
+                id: n.id as i32,
+                title: SharedString::from(magpie_app::notes_view::note_list_title(
+                    &n.name, &n.body,
+                )),
+                when: SharedString::from(relative_time(n.updated_at_ms, now)),
+                is_daily: n.is_daily,
+            })
+            .collect();
+        // Which note is open? Keep the current one if still present, else the daily note.
+        let cur = ui.get_note_id();
+        let open = if cur >= 0 && recent.iter().any(|n| n.id as i32 == cur) {
+            cur
+        } else {
+            daily.as_ref().map(|d| d.id as i32).unwrap_or(-1)
+        };
+        let opened = recent.iter().find(|n| n.id as i32 == open);
+        let (body, prov, links) = match opened {
+            Some(n) => (
+                n.body.clone(),
+                note_provenance(n),
+                magpie_app::notes_view::wiki_links(&n.body),
+            ),
+            None => (String::new(), String::new(), Vec::new()),
+        };
+        (rows, open, body, prov, links)
+    };
+    ui.set_notes(ModelRc::new(VecModel::from(rows)));
+    ui.set_note_id(open_id);
+    ui.set_note_body(SharedString::from(body));
+    ui.set_note_provenance(SharedString::from(prov));
+    ui.set_note_links(ModelRc::new(VecModel::from(
+        links
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+}
+
+/// Provenance line. Phase 1 keeps it simple: whether the note was captured from a
+/// clip or authored in Magpie, plus the creation date. (Enriching "captured" with
+/// the exact source app name — via an app-id→name lookup — is a later refinement.)
+fn note_provenance(n: &magpie_core::Note) -> String {
+    let when = abs_date(n.created_at_ms);
+    if n.source_entry_id.is_some() {
+        format!("captured · {when}")
+    } else {
+        format!("created in Magpie · {when}")
+    }
+}
+
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
 /// `run-action`.
 /// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
@@ -450,6 +517,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("pin", "📌", "Pin / Unpin", "⌘P"),
     ("slot", "🔢", "Assign to slot…", "⌘S"),
     ("merge", "➕", "Add to merge", "⌘G"),
+    ("note", "🗒", "New note from this entry", "⌘J"),
     ("delete", "🗑", "Delete", "⌘⌫"),
 ];
 
@@ -856,6 +924,7 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             }
                         }
                         "mask" => ui.invoke_toggle_screenshare(),
+                        "notes" => ui.invoke_set_mode_notes(true),
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
@@ -1631,6 +1700,130 @@ pub fn start() {
         ui.on_stats_range_changed(move |idx| {
             if let Some(ui) = w.upgrade() {
                 refresh_stats(&ui, &s, idx);
+            }
+        });
+    }
+    // ---- Notes mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_notes(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_notes_mode(on);
+                if on {
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_note(move |id| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_id(id);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_edit_note_body(move |body| {
+            if let Some(ui) = w.upgrade() {
+                let id = ui.get_note_id();
+                if id >= 0 {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let _ = store.update_note_body(id as i64, body.as_str(), now_ms());
+                }
+                // Refresh only the links strip (cheap) — don't rebuild the list on
+                // every keystroke.
+                ui.set_note_links(ModelRc::new(VecModel::from(
+                    magpie_app::notes_view::wiki_links(body.as_str())
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect::<Vec<_>>(),
+                )));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_page(move |name| {
+            if let Some(ui) = w.upgrade() {
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store
+                        .upsert_note_by_name(name.as_str(), now_ms())
+                        .ok()
+                        .map(|n| n.id as i32)
+                };
+                if let Some(id) = id {
+                    ui.set_note_id(id);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_new_note(move || {
+            if let Some(ui) = w.upgrade() {
+                // Unique "Untitled" page.
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let mut name = "Untitled".to_string();
+                    let mut i = 2;
+                    while store.note_by_name(&name).ok().flatten().is_some() {
+                        name = format!("Untitled ({i})");
+                        i += 1;
+                    }
+                    store
+                        .upsert_note_by_name(&name, now_ms())
+                        .ok()
+                        .map(|n| n.id as i32)
+                };
+                if let Some(id) = id {
+                    ui.set_note_id(id);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_note_from_entry(move |idx| {
+            if let Some(ui) = w.upgrade() {
+                let recent = current_results(&s, now_ms());
+                if let Some(entry) = recent.get(idx as usize) {
+                    let id = {
+                        let store = match s.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        store
+                            .create_note_from_entry(entry.id, now_ms())
+                            .ok()
+                            .map(|n| n.id as i32)
+                    };
+                    if let Some(id) = id {
+                        ui.set_note_id(id);
+                        ui.set_notes_mode(true);
+                        refresh_notes(&ui, &s);
+                    }
+                }
             }
         });
     }

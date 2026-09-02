@@ -51,6 +51,13 @@ struct AppItem {
     name: string,
 }
 
+struct NoteRow {
+    id: int,
+    title: string,
+    when: string,
+    is_daily: bool,
+}
+
 // Accent + the text colour that is legible ON the accent. White-on-accent only
 // reaches ~2.9:1, so filled controls use `on-accent` for their label.
 global Pal {
@@ -184,6 +191,7 @@ export component LauncherWindow inherits Window {
         else if id == "pin" { root.toggle-pin(root.selected); }
         else if id == "slot" { root.open-slots(); }
         else if id == "merge" { root.toggle-merge(root.selected); }
+        else if id == "note" { root.note-from-entry(root.selected); }
         else if id == "delete" { root.delete-entry(root.selected); }
     }
 
@@ -228,6 +236,21 @@ export component LauncherWindow inherits Window {
     callback set-time-filter(int);
     callback set-app-filter(int);
     callback clear-filters();
+
+    // ---- Notes mode ----
+    in property <[NoteRow]> notes;
+    in-out property <int> note-id: -1;
+    in property <string> note-body;
+    in property <string> note-provenance;
+    in property <[string]> note-links;
+    in-out property <string> note-filter;
+    in-out property <bool> notes-mode: false;
+    callback set-mode-notes(bool);
+    callback open-note(int);
+    callback new-note();
+    callback open-page(string);
+    callback edit-note-body(string);
+    callback note-from-entry(int);
 
     // Re-focus the search field whenever we return to list mode.
     changed mode => {
@@ -395,6 +418,7 @@ export component LauncherWindow inherits Window {
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
+                                    if event.text == "j" { root.note-from-entry(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }
                                     // Preview zoom: ⌘+ / ⌘= bigger, ⌘- smaller, ⌘0 reset.
                                     if event.text == "=" || event.text == "+" { root.zoom-preview(1); return accept; }
@@ -455,6 +479,14 @@ export component LauncherWindow inherits Window {
                         border-radius: 6px;
                         lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
                         Text { text: root.screenshare ? "🔒 Masked" : "🔒 Mask"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 62px;
+                        height: 26px;
+                        background: root.notes-mode ? Pal.accent : (notesta.has-hover ? #2c2c33 : #202024);
+                        border-radius: 6px;
+                        notesta := TouchArea { clicked => { root.set-mode-notes(!root.notes-mode); } }
+                        Text { text: "Notes"; color: root.notes-mode ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 58px;
@@ -1154,6 +1186,125 @@ export component LauncherWindow inherits Window {
 
         }
 
+        // ---- Notes mode (opaque overlay covering the clipboard body) ----
+        if root.notes-mode: Rectangle {
+            background: #1e1e21;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                // Left: back + filter + new + list
+                VerticalLayout {
+                    width: 300px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            width: 92px;
+                            height: 30px;
+                            border-radius: 6px;
+                            background: nback.has-hover ? #34343c : #2a2a30;
+                            nback := TouchArea { clicked => { root.set-mode-notes(false); } }
+                            Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 30px;
+                            background: #2a2a30;
+                            border-radius: 6px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                if root.note-filter == "": Text {
+                                    text: "Filter notes…";
+                                    color: #6a6a70;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                                nfilter := TextInput {
+                                    text <=> root.note-filter;
+                                    color: #d0d0d4;
+                                    font-size: 13px;
+                                    single-line: true;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        Rectangle {
+                            width: 60px;
+                            height: 30px;
+                            border-radius: 6px;
+                            background: nnew.has-hover ? #34343c : #2a2a30;
+                            nnew := TouchArea { clicked => { root.new-note(); } }
+                            Text { text: "New"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    ListView {
+                        for n in root.notes: Rectangle {
+                            height: 44px;
+                            background: n.id == root.note-id ? #2f2f37 : (nrow.has-hover ? #26262c : transparent);
+                            border-radius: 6px;
+                            nrow := TouchArea { clicked => { root.open-note(n.id); } }
+                            VerticalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 4px;
+                                padding-bottom: 4px;
+                                Text { text: (n.is_daily ? "📌 " : "") + n.title; color: #e6e6ea; font-size: 13px; overflow: elide; }
+                                Text { text: n.when; color: #8a8a90; font-size: 11px; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+                // Right: editor pane (editor body filled in Task 5)
+                Rectangle {
+                    background: #161618;
+                    border-radius: 8px;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+                        Text { text: root.note-provenance; color: #8a8a90; font-size: 11px; }
+                        // Editor — a plain TextInput (not std TextEdit, which renders
+                        // invisibly on the dark pane) with an explicit text colour.
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            viewport-height: ned.preferred-height;
+                            ned := TextInput {
+                                width: parent.width;
+                                text: root.note-body;
+                                color: #d0d0d4;
+                                font-size: 13px;
+                                single-line: false;
+                                wrap: word-wrap;
+                                edited => { root.edit-note-body(self.text); }
+                            }
+                        }
+                        // Links strip: clickable [[page]] chips parsed from the body.
+                        if root.note-links.length > 0: HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            Text { text: "Links:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                            for name in root.note-links: Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: chip.has-hover ? #34343c : #2a2a30;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: name; color: #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                }
+                                chip := TouchArea { clicked => { root.open-page(name); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ---- Help modal (centered overlay) ----
         if root.mode == "help": Rectangle {
             background: #000000aa;
@@ -1199,6 +1350,7 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘P", d: "Pin / unpin" },
                                 { k: "⌘S", d: "Assign to a ⌘1–9 slot" },
                                 { k: "⌘G", d: "Add to merge" },
+                                { k: "⌘J", d: "New note from this entry" },
                                 { k: "⌘V", d: "Paste clipboard into search" },
                                 { k: "⌘⌫", d: "Delete the entry" },
                             ]: HorizontalLayout {
@@ -1211,6 +1363,7 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘/  or  ?", d: "This help" },
                                 { k: "⌘+ / ⌘− / ⌘0", d: "Preview text size" },
                                 { k: "🔒 Mask", d: "Screenshare mode (hide all content)" },
+                                { k: "Notes", d: "Notes & pages" },
                                 { k: "Stats", d: "Copy analytics" },
                             ]: HorizontalLayout {
                                 Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
