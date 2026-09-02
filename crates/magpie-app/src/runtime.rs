@@ -429,6 +429,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("snippet", "🧩", "New snippet", "⌘N"),
     ("pin", "📌", "Pin / Unpin", "⌘P"),
     ("merge", "➕", "Add to merge", "⌘G"),
+    ("note", "🗒", "New note from this entry", "⌘J"),
     ("delete", "🗑", "Delete", "⌘⌫"),
 ];
 
@@ -1534,6 +1535,32 @@ pub fn start() {
                 if let Some(id) = id {
                     ui.set_note_id(id);
                     refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_note_from_entry(move |idx| {
+            if let Some(ui) = w.upgrade() {
+                let recent = current_results(&s, now_ms());
+                if let Some(entry) = recent.get(idx as usize) {
+                    let id = {
+                        let store = match s.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        store
+                            .create_note_from_entry(entry.id, now_ms())
+                            .ok()
+                            .map(|n| n.id as i32)
+                    };
+                    if let Some(id) = id {
+                        ui.set_note_id(id);
+                        ui.set_notes_mode(true);
+                        refresh_notes(&ui, &s);
+                    }
                 }
             }
         });

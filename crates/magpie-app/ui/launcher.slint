@@ -176,6 +176,7 @@ export component LauncherWindow inherits Window {
         else if id == "snippet" { root.new-snippet(); }
         else if id == "pin" { root.toggle-pin(root.selected); }
         else if id == "merge" { root.toggle-merge(root.selected); }
+        else if id == "note" { root.note-from-entry(root.selected); }
         else if id == "delete" { root.delete-entry(root.selected); }
         root.mode = "list";
     }
@@ -384,6 +385,7 @@ export component LauncherWindow inherits Window {
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
+                                    if event.text == "j" { root.note-from-entry(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }
                                     // Preview zoom: ⌘+ / ⌘= bigger, ⌘- smaller, ⌘0 reset.
                                     if event.text == "=" || event.text == "+" { root.zoom-preview(1); return accept; }
@@ -1190,6 +1192,7 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘N", d: "New snippet" },
                                 { k: "⌘P", d: "Pin / unpin" },
                                 { k: "⌘G", d: "Add to merge" },
+                                { k: "⌘J", d: "New note from this entry" },
                                 { k: "⌘V", d: "Paste clipboard into search" },
                                 { k: "⌘⌫", d: "Delete the entry" },
                             ]: HorizontalLayout {
