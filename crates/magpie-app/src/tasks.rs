@@ -109,6 +109,119 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
     out
 }
 
+use magpie_core::Store;
+
+/// Prepend `- [ ] ` to the line containing byte offset `cursor_byte` (preserving
+/// indentation). No-op if that line is already a task.
+pub fn promote_line(body: &str, cursor_byte: usize) -> String {
+    let cb = cursor_byte.min(body.len());
+    let start = body[..cb].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = body[cb..].find('\n').map(|i| cb + i).unwrap_or(body.len());
+    let line = &body[start..end];
+    if task_marker(line.trim_start()).is_some() {
+        return body.to_string();
+    }
+    let indent = line.len() - line.trim_start().len();
+    let (ind, content) = line.split_at(indent);
+    format!("{}{ind}- [ ] {content}{}", &body[..start], &body[end..])
+}
+
+/// Flip the checkbox on line `line_index`. No-op if it's not a task line.
+pub fn toggle_line(body: &str, line_index: usize) -> String {
+    let mut lines: Vec<String> = body.split('\n').map(|s| s.to_string()).collect();
+    if line_index >= lines.len() {
+        return body.to_string();
+    }
+    let line = &lines[line_index];
+    let indent = line.len() - line.trim_start().len();
+    let (ind, rest) = line.split_at(indent);
+    let flipped = if let Some(r) = rest.strip_prefix("- [ ]") {
+        Some(format!("{ind}- [x]{r}"))
+    } else {
+        rest.strip_prefix("- [x]")
+            .or_else(|| rest.strip_prefix("- [X]"))
+            .map(|r| format!("{ind}- [ ]{r}"))
+    };
+    if let Some(f) = flipped {
+        lines[line_index] = f;
+    }
+    lines.join("\n")
+}
+
+/// Toggle a task's done state and persist it to its note. Returns whether it changed.
+pub fn toggle_task(store: &Store, note_id: i64, line_index: usize, now_ms: i64) -> bool {
+    let body = match store.get_note(note_id) {
+        Ok(Some(n)) => n.body,
+        _ => return false,
+    };
+    let new = toggle_line(&body, line_index);
+    new != body
+        && store
+            .update_note_body(note_id, &new, now_ms)
+            .unwrap_or(false)
+}
+
+/// Every task across all notes.
+pub fn all_tasks(store: &Store, now_ms: i64) -> Vec<Task> {
+    store
+        .all_notes()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|n| parse_tasks_in(n, now_ms))
+        .collect()
+}
+
+pub struct TaskGroup {
+    pub project: String,
+    pub tasks: Vec<Task>,
+}
+
+fn cmp_due(a: Option<i64>, b: Option<i64>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less, // scheduled before unscheduled
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+/// Group by project (alphabetical; "No project" last), sort within: open before
+/// done, then due ascending (unscheduled last), then priority (High first), title.
+pub fn group_sort(tasks: Vec<Task>) -> Vec<TaskGroup> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<String, Vec<Task>> = BTreeMap::new();
+    for t in tasks {
+        let key = t
+            .project
+            .clone()
+            .unwrap_or_else(|| "No project".to_string());
+        map.entry(key).or_default().push(t);
+    }
+    let mut groups = Vec::new();
+    let mut no_project = None;
+    for (project, mut ts) in map {
+        ts.sort_by(|a, b| {
+            a.done
+                .cmp(&b.done)
+                .then_with(|| cmp_due(a.due_ms, b.due_ms))
+                .then(a.priority.cmp(&b.priority))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        if project == "No project" {
+            no_project = Some(ts);
+        } else {
+            groups.push(TaskGroup { project, tasks: ts });
+        }
+    }
+    if let Some(ts) = no_project {
+        groups.push(TaskGroup {
+            project: "No project".to_string(),
+            tasks: ts,
+        });
+    }
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +253,50 @@ mod tests {
         assert_eq!(ts[0].line_index, 1);
         assert_eq!(ts[0].source_app_id, Some(7));
         assert!(ts[1].done && ts[1].title == "done thing");
+    }
+
+    #[test]
+    fn promote_and_toggle_lines() {
+        let body = "note title\nfix the bug\ndone already";
+        // cursor somewhere in "fix the bug" (line 1)
+        let cb = body.find("fix").unwrap() + 1;
+        let promoted = promote_line(body, cb);
+        assert!(promoted.contains("- [ ] fix the bug"));
+        assert_eq!(promote_line(&promoted, cb), promoted); // no double-add
+                                                           // toggle that now-task line (index 1)
+        let toggled = toggle_line(&promoted, 1);
+        assert!(toggled.contains("- [x] fix the bug"));
+        assert!(toggle_line(&toggled, 1).contains("- [ ] fix the bug"));
+        assert_eq!(toggle_line(body, 0), body); // non-task line: no-op
+    }
+
+    #[test]
+    fn group_sort_orders_open_due_priority() {
+        let mk =
+            |title: &str, done: bool, due: Option<i64>, p: Priority, proj: Option<&str>| Task {
+                note_id: 1,
+                note_name: "n".into(),
+                line_index: 0,
+                done,
+                title: title.into(),
+                priority: p,
+                due_ms: due,
+                project: proj.map(|s| s.into()),
+                source_app_id: None,
+                source_entry_id: None,
+            };
+        let tasks = vec![
+            mk("done", true, None, Priority::High, Some("a")),
+            mk("later", false, Some(200), Priority::Low, Some("a")),
+            mk("soon", false, Some(100), Priority::Low, Some("a")),
+            mk("noproj", false, None, Priority::High, None),
+        ];
+        let g = group_sort(tasks);
+        // "a" group first, "No project" last
+        assert_eq!(g[0].project, "a");
+        assert_eq!(g.last().unwrap().project, "No project");
+        // within "a": open before done, due asc
+        let titles: Vec<&str> = g[0].tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["soon", "later", "done"]);
     }
 }
