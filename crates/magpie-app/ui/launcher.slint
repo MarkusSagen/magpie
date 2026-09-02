@@ -2225,13 +2225,17 @@ export component Popover inherits Window {
                 spacing: 10px;
 
                 // Interactive 4-icon tab row: click a glyph to switch panels.
+                // Each tab is a FIXED-size Rectangle (so the row doesn't stretch and
+                // push the icons down) with the TouchArea as the last child, so it
+                // overlays the whole cell and the click lands on the icon.
                 HorizontalLayout {
-                    spacing: 18px;
+                    spacing: 16px;
                     alignment: start;
-                    for i in [0, 1, 2, 3]: VerticalLayout {
-                        spacing: 3px;
-                        TouchArea { clicked => { root.tab = i; } }
-                        HorizontalLayout {
+                    for i in [0, 1, 2, 3]: Rectangle {
+                        width: 30px;
+                        height: 28px;
+                        VerticalLayout {
+                            spacing: 3px;
                             alignment: center;
                             Image {
                                 source: i == 0 ? Icons.tab-tasks
@@ -2239,12 +2243,13 @@ export component Popover inherits Window {
                                     : i == 2 ? Icons.tab-daily
                                     : Icons.tab-clipboard;
                                 colorize: root.tab == i ? Pal.accent : #7a7a80;
-                                width: 20px;
-                                height: 20px;
+                                width: 22px;
+                                height: 22px;
                                 image-fit: contain;
                             }
+                            Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
                         }
-                        Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
+                        ta := TouchArea { clicked => { root.tab = i; } }
                     }
                 }
 

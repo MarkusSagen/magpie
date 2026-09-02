@@ -29,9 +29,15 @@ pub fn raise_to_front() {
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
 
-    // Raise every window, let it join the active Space and float over full-screen
-    // apps, and make it the key (focused) window so typing goes to the search box.
+    // Raise each ALREADY-VISIBLE window, let it join the active Space and float over
+    // full-screen apps, and make it the key (focused) window so typing goes to it.
+    // The visibility guard matters now that the app owns two windows (launcher +
+    // popover): without it, showing the popover would force-order the never-shown
+    // launcher to the front as a collapsed, empty window.
     for window in app.windows().iter() {
+        if !window.isVisible() {
+            continue;
+        }
         window.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::FullScreenAuxiliary,
