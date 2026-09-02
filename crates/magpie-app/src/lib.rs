@@ -18,4 +18,5 @@ pub mod notes_view;
 pub mod paste_action;
 pub mod retention;
 pub mod stats_view;
+pub mod tasks;
 pub mod viewmodel;

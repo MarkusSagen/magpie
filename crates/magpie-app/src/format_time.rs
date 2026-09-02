@@ -45,6 +45,62 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+const DAY_MS: i64 = 86_400_000;
+
+/// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm; inverse of
+/// `civil_from_days`).
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// Day-of-week for a day number, 0 = Sunday (1970-01-01 was a Thursday).
+fn weekday(days: i64) -> i64 {
+    (days.rem_euclid(7) + 4) % 7
+}
+
+/// Resolve a `@due` token (without the `@`) to a day-epoch (midnight UTC), using
+/// `now_ms` for relative dates. Supports today/tomorrow/tmr, mon..sun (next
+/// occurrence), and absolute YYYY-MM-DD.
+pub fn parse_due(token: &str, now_ms: i64) -> Option<i64> {
+    let t = token.to_ascii_lowercase();
+    let today = now_ms.div_euclid(DAY_MS);
+    let wd = |target: i64| {
+        let cur = weekday(today);
+        let mut delta = (target - cur).rem_euclid(7);
+        if delta == 0 {
+            delta = 7;
+        } // "@mon" means the NEXT Monday, not today
+        today + delta
+    };
+    let day = match t.as_str() {
+        "today" => today,
+        "tomorrow" | "tmr" => today + 1,
+        "sun" => wd(0),
+        "mon" => wd(1),
+        "tue" => wd(2),
+        "wed" => wd(3),
+        "thu" => wd(4),
+        "fri" => wd(5),
+        "sat" => wd(6),
+        _ => {
+            let mut it = t.split('-');
+            let y: i64 = it.next()?.parse().ok()?;
+            let m: i64 = it.next()?.parse().ok()?;
+            let d: i64 = it.next()?.parse().ok()?;
+            if it.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+                return None;
+            }
+            days_from_civil(y, m, d)
+        }
+    };
+    Some(day * DAY_MS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::relative_time;
@@ -82,5 +138,27 @@ mod tests {
         assert_eq!(out.len(), 10); // YYYY-MM-DD
         assert_eq!(out.as_bytes()[4], b'-');
         assert_eq!(out.as_bytes()[7], b'-');
+    }
+
+    #[test]
+    fn days_from_civil_roundtrips() {
+        assert_eq!(super::days_from_civil(1970, 1, 1), 0);
+        for z in [-1000i64, 0, 1, 12000, 20000] {
+            let (y, m, d) = super::civil_from_days(z);
+            assert_eq!(super::days_from_civil(y, m as i64, d as i64), z);
+        }
+    }
+
+    #[test]
+    fn parse_due_relative_and_absolute() {
+        const DAY: i64 = 86_400_000;
+        let now = 20_000 * DAY + 5_000; // arbitrary mid-day
+        assert_eq!(super::parse_due("today", now), Some(20_000 * DAY));
+        assert_eq!(super::parse_due("tomorrow", now), Some(20_001 * DAY));
+        assert_eq!(
+            super::parse_due("2026-09-10", now),
+            Some(super::days_from_civil(2026, 9, 10) * DAY)
+        );
+        assert!(super::parse_due("notadate", now).is_none());
     }
 }
