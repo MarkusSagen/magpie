@@ -1108,7 +1108,39 @@ export component LauncherWindow inherits Window {
                         padding: 12px;
                         spacing: 8px;
                         Text { text: root.note-provenance; color: #8a8a90; font-size: 11px; }
-                        // editor + links strip added in Task 5
+                        // Editor — a plain TextInput (not std TextEdit, which renders
+                        // invisibly on the dark pane) with an explicit text colour.
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            viewport-height: ned.preferred-height;
+                            ned := TextInput {
+                                width: parent.width;
+                                text: root.note-body;
+                                color: #d0d0d4;
+                                font-size: 13px;
+                                single-line: false;
+                                wrap: word-wrap;
+                                edited => { root.edit-note-body(self.text); }
+                            }
+                        }
+                        // Links strip: clickable [[page]] chips parsed from the body.
+                        if root.note-links.length > 0: HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            Text { text: "Links:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                            for name in root.note-links: Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: chip.has-hover ? #34343c : #2a2a30;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: name; color: #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                }
+                                chip := TouchArea { clicked => { root.open-page(name); } }
+                            }
+                        }
                     }
                 }
             }

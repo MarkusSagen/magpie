@@ -1463,6 +1463,81 @@ pub fn start() {
             }
         });
     }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_edit_note_body(move |body| {
+            if let Some(ui) = w.upgrade() {
+                let id = ui.get_note_id();
+                if id >= 0 {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let _ = store.update_note_body(id as i64, body.as_str(), now_ms());
+                }
+                // Refresh only the links strip (cheap) — don't rebuild the list on
+                // every keystroke.
+                ui.set_note_links(ModelRc::new(VecModel::from(
+                    magpie_app::notes_view::wiki_links(body.as_str())
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect::<Vec<_>>(),
+                )));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_page(move |name| {
+            if let Some(ui) = w.upgrade() {
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store
+                        .upsert_note_by_name(name.as_str(), now_ms())
+                        .ok()
+                        .map(|n| n.id as i32)
+                };
+                if let Some(id) = id {
+                    ui.set_note_id(id);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_new_note(move || {
+            if let Some(ui) = w.upgrade() {
+                // Unique "Untitled" page.
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let mut name = "Untitled".to_string();
+                    let mut i = 2;
+                    while store.note_by_name(&name).ok().flatten().is_some() {
+                        name = format!("Untitled ({i})");
+                        i += 1;
+                    }
+                    store
+                        .upsert_note_by_name(&name, now_ms())
+                        .ok()
+                        .map(|n| n.id as i32)
+                };
+                if let Some(id) = id {
+                    ui.set_note_id(id);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
 
     // Retention: sweep once at startup, then after each capture (in the watcher).
     let retention = policy_from_config(&cfg);
