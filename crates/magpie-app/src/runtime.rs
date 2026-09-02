@@ -970,6 +970,84 @@ fn spawn_watcher(
     });
 }
 
+/// Local UTC offset in seconds, via `date +%z` (no dependency). 0 on failure/non-unix.
+fn local_offset_seconds() -> i64 {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("date")
+            .arg("+%z")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| magpie_app::reminders::parse_offset(s.trim()))
+            .unwrap_or(0)
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Reminder scheduler: first tick ~4 s after launch, then every 60 s. Fires a
+/// native notification for each newly-ripe open task (deduped via task_reminders);
+/// the first tick coalesces a >1 backlog into a single summary.
+fn spawn_reminders(state: Arc<AppState>) {
+    const DEFAULT_MIN: i64 = 540; // 09:00 local for date-only tasks
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(4));
+        let mut first = true;
+        loop {
+            let s = state.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                reminder_tick(&s, first, DEFAULT_MIN);
+            }));
+            first = false;
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    });
+}
+
+fn reminder_tick(state: &AppState, first: bool, default_min: i64) {
+    let now = now_ms();
+    let offset = local_offset_seconds();
+    let mut to_fire: Vec<(magpie_app::tasks::Task, String)> = Vec::new();
+    {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let tasks = magpie_app::tasks::all_tasks(&store, now);
+        for t in magpie_app::reminders::due_before(tasks, now, offset, default_min) {
+            let fp = magpie_app::reminders::fingerprint(&t);
+            if !store.reminder_fired(&fp).unwrap_or(false) {
+                to_fire.push((t, fp));
+            }
+        }
+    }
+    if to_fire.is_empty() {
+        return;
+    }
+    if first && to_fire.len() > 1 {
+        magpie_app::diagnostics::notify("Magpie", &format!("{} tasks due", to_fire.len()));
+    } else {
+        for (t, _) in &to_fire {
+            let msg = if t.note_name.is_empty() {
+                t.title.clone()
+            } else {
+                format!("{} · {}", t.title, t.note_name)
+            };
+            magpie_app::diagnostics::notify("Task due", &msg);
+        }
+    }
+    let store = match state.store.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    for (_, fp) in &to_fire {
+        let _ = store.mark_reminder(fp, now);
+    }
+}
+
 /// The type-filter chips, in the order `launcher.slint` renders them — the index
 /// into this list IS the argument `set-type-filter` takes (see
 /// `viewmodel::type_filter_from_index`). Used by the UI tour to select a chip by
@@ -2194,6 +2272,7 @@ pub fn start() {
         cfg.fetch_link_favicons,
         weak.clone(),
     );
+    spawn_reminders(state.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
