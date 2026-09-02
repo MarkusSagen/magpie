@@ -1,7 +1,15 @@
 use magpie_core::{open_in_memory, Store};
+use magpie_core::{CaptureEvent, Content, ImageStore};
 
 fn store() -> Store {
     open_in_memory().unwrap()
+}
+
+struct NoopImg;
+impl ImageStore for NoopImg {
+    fn put(&self, h: &str, _b: &[u8]) -> std::io::Result<String> {
+        Ok(h.to_string())
+    }
 }
 
 #[test]
@@ -61,4 +69,26 @@ fn all_note_names_sorted_distinct() {
         s.all_note_names().unwrap(),
         vec!["alpha".to_string(), "zeta".to_string()]
     );
+}
+
+#[test]
+fn create_note_from_entry_copies_provenance() {
+    let s = store();
+    let ing = s
+        .ingest(
+            &CaptureEvent {
+                content: Content::Text("Fix the mount\nsecond line".into()),
+                source_app: None,
+                copied_at_ms: 42,
+            },
+            &NoopImg,
+        )
+        .unwrap();
+    let note = s.create_note_from_entry(ing.entry_id, 100).unwrap();
+    assert_eq!(note.name, "Fix the mount"); // first line
+    assert_eq!(note.body, "Fix the mount\nsecond line");
+    assert_eq!(note.source_entry_id, Some(ing.entry_id));
+    // A second capture of the same entry gets a suffixed unique name.
+    let note2 = s.create_note_from_entry(ing.entry_id, 200).unwrap();
+    assert_eq!(note2.name, "Fix the mount (2)");
 }

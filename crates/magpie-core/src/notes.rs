@@ -101,4 +101,44 @@ impl Store {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect()
     }
+
+    fn unique_note_name(&self, base: &str) -> Result<String> {
+        if self.note_by_name(base)?.is_none() {
+            return Ok(base.to_string());
+        }
+        for i in 2..10_000 {
+            let cand = format!("{base} ({i})");
+            if self.note_by_name(&cand)?.is_none() {
+                return Ok(cand);
+            }
+        }
+        Ok(format!("{base} (dup)"))
+    }
+
+    pub fn create_note_from_entry(&self, entry_id: i64, now_ms: i64) -> Result<Note> {
+        let (full_text, app_id): (String, Option<i64>) = self.conn().query_row(
+            "SELECT full_text, source_app_id FROM entries WHERE id = ?1",
+            [entry_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let first = full_text
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim();
+        let base: String = if first.is_empty() {
+            format!("Note {now_ms}")
+        } else {
+            first.chars().take(60).collect()
+        };
+        let name = self.unique_note_name(&base)?;
+        self.conn().execute(
+            "INSERT INTO notes
+               (name, is_daily, body, created_at_ms, updated_at_ms, source_app_id, source_entry_id)
+             VALUES (?1, 0, ?2, ?3, ?3, ?4, ?5)",
+            rusqlite::params![name, full_text, now_ms, app_id, entry_id],
+        )?;
+        let id = self.conn().last_insert_rowid();
+        Ok(self.get_note(id)?.expect("row exists after INSERT"))
+    }
 }
