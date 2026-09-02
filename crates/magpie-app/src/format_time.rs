@@ -101,6 +101,53 @@ pub fn parse_due(token: &str, now_ms: i64) -> Option<i64> {
     Some(day * DAY_MS)
 }
 
+/// Parse a clock time into minutes past midnight (0..=1439). Accepts "HH:MM" (24h),
+/// "H:MMam|pm", and "Ham|Hpm" (e.g. "9am", "5pm", "9:30am"). A bare number without
+/// `:` or an am/pm suffix is NOT a time (returns None), so it can't eat titles.
+pub fn parse_time(token: &str) -> Option<i64> {
+    let t = token.trim().to_ascii_lowercase();
+    let (body, pm) = if let Some(b) = t.strip_suffix("am") {
+        (b.trim(), Some(false))
+    } else if let Some(b) = t.strip_suffix("pm") {
+        (b.trim(), Some(true))
+    } else {
+        (t.as_str(), None)
+    };
+    let (h, m) = match body.split_once(':') {
+        Some((hh, mm)) => (
+            hh.trim().parse::<i64>().ok()?,
+            mm.trim().parse::<i64>().ok()?,
+        ),
+        None => {
+            pm?;
+            (body.parse::<i64>().ok()?, 0)
+        }
+    };
+    if !(0..=59).contains(&m) {
+        return None;
+    }
+    let h = match pm {
+        Some(is_pm) => {
+            if !(1..=12).contains(&h) {
+                return None;
+            }
+            let base = if h == 12 { 0 } else { h };
+            if is_pm {
+                base + 12
+            } else {
+                base
+            }
+        }
+        None => {
+            if !(0..=23).contains(&h) {
+                return None;
+            }
+            h
+        }
+    };
+    Some(h * 60 + m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::relative_time;
@@ -160,5 +207,19 @@ mod tests {
             Some(super::days_from_civil(2026, 9, 10) * DAY)
         );
         assert!(super::parse_due("notadate", now).is_none());
+    }
+
+    #[test]
+    fn parse_time_formats() {
+        use super::parse_time;
+        assert_eq!(parse_time("14:00"), Some(840));
+        assert_eq!(parse_time("9am"), Some(540));
+        assert_eq!(parse_time("5pm"), Some(1020));
+        assert_eq!(parse_time("9:30am"), Some(570));
+        assert_eq!(parse_time("12am"), Some(0));
+        assert_eq!(parse_time("12pm"), Some(720));
+        assert_eq!(parse_time("5"), None);
+        assert_eq!(parse_time("24:00"), None);
+        assert_eq!(parse_time("banana"), None);
     }
 }

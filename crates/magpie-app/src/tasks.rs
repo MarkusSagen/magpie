@@ -21,6 +21,7 @@ pub struct Task {
     pub title: String,
     pub priority: Priority,
     pub due_ms: Option<i64>,
+    pub due_time_min: Option<i64>,
     pub project: Option<String>,
     pub source_app_id: Option<i64>,
     pub source_entry_id: Option<i64>,
@@ -68,7 +69,9 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
         let mut due_ms = None;
         let mut project = None;
         let mut title_toks: Vec<&str> = Vec::new();
-        for tok in rest.split_whitespace() {
+        let mut due_time_min: Option<i64> = None;
+        let mut toks = rest.split_whitespace().peekable();
+        while let Some(tok) = toks.next() {
             if priority == Priority::None {
                 if let Some(p) = parse_priority(tok) {
                     priority = p;
@@ -79,6 +82,12 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
                 if let Some(s) = tok.strip_prefix('@') {
                     if let Some(d) = parse_due(s, now_ms) {
                         due_ms = Some(d);
+                        if let Some(next) = toks.peek() {
+                            if let Some(tm) = crate::format_time::parse_time(next) {
+                                due_time_min = Some(tm);
+                                toks.next();
+                            }
+                        }
                         continue;
                     }
                 }
@@ -101,6 +110,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
             title: title_toks.join(" "),
             priority,
             due_ms,
+            due_time_min,
             project,
             source_app_id: note.source_app_id,
             source_entry_id: note.source_entry_id,
@@ -334,6 +344,7 @@ mod tests {
                 title: title.into(),
                 priority: p,
                 due_ms: due,
+                due_time_min: None,
                 project: proj.map(|s| s.into()),
                 source_app_id: None,
                 source_entry_id: None,
@@ -365,6 +376,7 @@ mod tests {
             title: "t".into(),
             priority: pri,
             due_ms: due,
+            due_time_min: None,
             project: None,
             source_app_id: None,
             source_entry_id: None,
@@ -381,5 +393,25 @@ mod tests {
         assert_eq!(b.overdue[0].due_ms, Some(today - DAY));
         assert_eq!(b.today.len(), 1);
         assert_eq!(b.today[0].due_ms, Some(today));
+    }
+
+    #[test]
+    fn parses_due_with_time_and_leaves_bare_number() {
+        let n = Note {
+            id: 1,
+            name: "n".into(),
+            is_daily: false,
+            body: "- [ ] ship it @today 14:00\n- [ ] count to @today 5".into(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            source_app_id: None,
+            source_entry_id: None,
+        };
+        let ts = parse_tasks_in(&n, 0);
+        assert_eq!(ts[0].title, "ship it");
+        assert_eq!(ts[0].due_time_min, Some(840));
+        assert!(ts[0].due_ms.is_some());
+        assert_eq!(ts[1].title, "count to 5");
+        assert_eq!(ts[1].due_time_min, None);
     }
 }
