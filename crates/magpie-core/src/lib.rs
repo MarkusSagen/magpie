@@ -20,6 +20,7 @@ pub mod mask_support;
 pub mod merge;
 pub mod metrics;
 pub mod model;
+pub mod notes;
 pub mod retention;
 pub mod search;
 pub mod slots;
@@ -29,6 +30,7 @@ pub mod tags;
 
 pub use detect::Kind;
 pub use model::{AppInfo, CaptureEvent, Content, Entry};
+pub use notes::Note;
 pub use retention::{Removed, RetentionPolicy};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
 pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};

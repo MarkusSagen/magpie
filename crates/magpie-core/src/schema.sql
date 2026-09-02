@@ -65,3 +65,16 @@ CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
   INSERT INTO entries_fts(entries_fts, rowid, full_text) VALUES ('delete', old.id, old.full_text);
   INSERT INTO entries_fts(rowid, full_text) VALUES (new.id, new.full_text);
 END;
+
+CREATE TABLE IF NOT EXISTS notes (
+  id              INTEGER PRIMARY KEY,
+  name            TEXT NOT NULL,
+  is_daily        INTEGER NOT NULL DEFAULT 0,
+  body            TEXT NOT NULL DEFAULT '',
+  created_at_ms   INTEGER NOT NULL,
+  updated_at_ms   INTEGER NOT NULL,
+  source_app_id   INTEGER,
+  source_entry_id INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_name ON notes(name);
+CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at_ms);
