@@ -222,6 +222,20 @@ pub fn group_sort(tasks: Vec<Task>) -> Vec<TaskGroup> {
     groups
 }
 
+/// Append a new `- [ ] <text>` task line to `body`. No-op if `text` is blank.
+pub fn append_task_line(body: &str, text: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() {
+        return body.to_string();
+    }
+    let sep = if body.is_empty() || body.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    format!("{body}{sep}- [ ] {t}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +282,17 @@ mod tests {
         assert!(toggled.contains("- [x] fix the bug"));
         assert!(toggle_line(&toggled, 1).contains("- [ ] fix the bug"));
         assert_eq!(toggle_line(body, 0), body); // non-task line: no-op
+    }
+
+    #[test]
+    fn append_task_line_adds_checkbox() {
+        assert_eq!(append_task_line("", "buy milk"), "- [ ] buy milk");
+        assert_eq!(append_task_line("note", "buy milk"), "note\n- [ ] buy milk");
+        assert_eq!(
+            append_task_line("note\n", "  buy milk "),
+            "note\n- [ ] buy milk"
+        );
+        assert_eq!(append_task_line("note", "   "), "note"); // empty text: no-op
     }
 
     #[test]
