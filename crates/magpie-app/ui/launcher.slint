@@ -907,11 +907,18 @@ export component LauncherWindow inherits Window {
                             }
 
                             // Metadata "Information" block (Raycast-style; right-aligned values).
+                            // `vertical-stretch: 0` + fixed row heights: in a tall
+                            // window the block used to absorb the slack and its rows
+                            // drifted apart unevenly. All spare height belongs to the
+                            // preview area above.
                             if entries.length > 0 && root.selected < entries.length: VerticalLayout {
                                 spacing: 5px;
+                                vertical-stretch: 0;
+                                alignment: start;
                                 Rectangle { height: 1px; background: #2a2a30; }
                                 Text { text: "Information"; color: #8a8a92; font-size: 12px; }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Source"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
@@ -920,11 +927,13 @@ export component LauncherWindow inherits Window {
                                 // spacing keeps the label and its right-aligned value from
                                 // touching once the pane is narrow.
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Content type"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].kind; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Size"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; overflow: elide; }
@@ -937,21 +946,25 @@ export component LauncherWindow inherits Window {
                                     Text { text: entries[root.selected].words; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Times copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].copied; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Last used"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].when; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].copied-date; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
+                                    height: 16px;
                                     spacing: 12px;
                                     Text { text: "Slot"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
                                     Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
@@ -962,6 +975,7 @@ export component LauncherWindow inherits Window {
                             if root.selected-tags.length > 0: HorizontalLayout {
                                 spacing: 4px;
                                 alignment: start;
+                                vertical-stretch: 0;
                                 for t in root.selected-tags: Rectangle {
                                     height: 22px;
                                     width: 74px;
@@ -983,6 +997,7 @@ export component LauncherWindow inherits Window {
                             if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
                                 spacing: 6px;
                                 alignment: start;
+                                vertical-stretch: 0;
                                 tagfield := LineEdit {
                                     placeholder-text: "Add tag…";
                                     width: 140px;

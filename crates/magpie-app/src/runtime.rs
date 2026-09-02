@@ -856,6 +856,9 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             }
                         }
                         "mask" => ui.invoke_toggle_screenshare(),
+                        // Toggle slot 1 on the selection, to see the speed-dial
+                        // strip populated. Running it twice clears it again.
+                        "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
                         "empty" => {
                             let q = SharedString::from("zzqqxnomatch");
                             ui.set_query(q.clone());
