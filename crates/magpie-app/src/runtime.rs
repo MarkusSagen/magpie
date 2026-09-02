@@ -1,6 +1,6 @@
 use crate::{
-    ActionItem, AppItem, Bar, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover, SlotItem,
-    TaskRow,
+    ActionItem, AppItem, Bar, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover, RefRow,
+    SlotItem, TaskRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -445,7 +445,7 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
 fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
     let day = abs_date(now); // "YYYY-MM-DD"
-    let (rows, open_id, body, prov, links) = {
+    let (rows, open_id, body, prov, links, refs) = {
         let store = match state.store.lock() {
             Ok(s) => s,
             Err(e) => e.into_inner(),
@@ -480,7 +480,10 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
             ),
             None => (String::new(), String::new(), Vec::new()),
         };
-        (rows, open, body, prov, links)
+        let open_name = opened.map(|n| n.name.clone()).unwrap_or_default();
+        let all = store.all_notes().unwrap_or_default();
+        let refs = magpie_app::backlinks::find_references(&open_name, &all);
+        (rows, open, body, prov, links, refs)
     };
     ui.set_notes(ModelRc::new(VecModel::from(rows)));
     ui.set_note_id(open_id);
@@ -490,6 +493,21 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         links
             .into_iter()
             .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    let to_ref_row = |r: magpie_app::backlinks::Reference| RefRow {
+        note_id: r.note_id as i32,
+        line_index: r.line_index as i32,
+        source: SharedString::from(r.note_name),
+        line: SharedString::from(r.line),
+    };
+    ui.set_backlinks(ModelRc::new(VecModel::from(
+        refs.linked.into_iter().map(to_ref_row).collect::<Vec<_>>(),
+    )));
+    ui.set_unlinked(ModelRc::new(VecModel::from(
+        refs.unlinked
+            .into_iter()
+            .map(to_ref_row)
             .collect::<Vec<_>>(),
     )));
 }
@@ -1991,6 +2009,34 @@ pub fn start() {
                     ui.set_note_id(id);
                     refresh_notes(&ui, &s);
                 }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_link_mention(move |note_id, line_index| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                if let Some(ui) = w.upgrade() {
+                    let open_id = ui.get_note_id() as i64;
+                    let target = store.get_note(open_id).ok().flatten().map(|n| n.name);
+                    let src = store.get_note(note_id as i64).ok().flatten();
+                    if let (Some(target), Some(src)) = (target, src) {
+                        let body = magpie_app::backlinks::link_mention(
+                            &src.body,
+                            line_index as usize,
+                            &target,
+                        );
+                        let _ = store.update_note_body(src.id, &body, now_ms());
+                    }
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_notes(&ui, &s);
             }
         });
     }
