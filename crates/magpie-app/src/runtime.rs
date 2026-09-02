@@ -1,4 +1,4 @@
-use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, SlotItem};
+use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, SlotItem, TaskRow};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
 use magpie_app::config::Config;
@@ -501,6 +501,43 @@ fn note_provenance(n: &magpie_core::Note) -> String {
     } else {
         format!("created in Magpie · {when}")
     }
+}
+
+/// Rebuild the Tasks-mode list: every task across all notes, grouped/sorted, then
+/// flattened into a flat model. Done tasks are skipped unless "Show done" is on;
+/// `due_ms` is formatted as an absolute date and `Priority` mapped to 0..3
+/// (High=0, Medium=1, Low=2, None=3). `source` is the owning note's name.
+fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let show_done = ui.get_show_done();
+    let rows: Vec<TaskRow> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let tasks = magpie_app::tasks::all_tasks(&store, now);
+        magpie_app::tasks::group_sort(tasks)
+            .into_iter()
+            .flat_map(|g| g.tasks)
+            .filter(|t| show_done || !t.done)
+            .map(|t| TaskRow {
+                note_id: t.note_id as i32,
+                line_index: t.line_index as i32,
+                title: SharedString::from(t.title),
+                done: t.done,
+                priority: match t.priority {
+                    magpie_app::tasks::Priority::High => 0,
+                    magpie_app::tasks::Priority::Medium => 1,
+                    magpie_app::tasks::Priority::Low => 2,
+                    magpie_app::tasks::Priority::None => 3,
+                },
+                due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+                project: SharedString::from(t.project.unwrap_or_default()),
+                source: SharedString::from(t.note_name),
+            })
+            .collect()
+    };
+    ui.set_tasks(ModelRc::new(VecModel::from(rows)));
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
@@ -1824,6 +1861,61 @@ pub fn start() {
                         refresh_notes(&ui, &s);
                     }
                 }
+            }
+        });
+    }
+    // ---- Tasks mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_tasks(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_tasks_mode(on);
+                if on {
+                    refresh_tasks(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_task(move |note_id, line_index| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                magpie_app::tasks::toggle_task(
+                    &store,
+                    note_id as i64,
+                    line_index as usize,
+                    now_ms(),
+                );
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_task_note(move |note_id| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_id(note_id);
+                ui.set_tasks_mode(false);
+                ui.set_notes_mode(true);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_refresh_tasks(move || {
+            if let Some(ui) = w.upgrade() {
+                refresh_tasks(&ui, &s);
             }
         });
     }
