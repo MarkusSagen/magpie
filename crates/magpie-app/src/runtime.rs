@@ -542,6 +542,41 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     ui.set_tasks(ModelRc::new(VecModel::from(rows)));
 }
 
+/// Rebuild the popover's Tasks tab: every **open** (`!done`) task across all
+/// notes, grouped/sorted, mapped to `TaskRow`s exactly as `refresh_tasks` does.
+/// Poison-tolerant lock so a panic elsewhere can't take the popover down.
+fn refresh_popover(popover: &Popover, state: &AppState) {
+    let now = now_ms();
+    let rows: Vec<TaskRow> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let tasks = magpie_app::tasks::all_tasks(&store, now);
+        magpie_app::tasks::group_sort(tasks)
+            .into_iter()
+            .flat_map(|g| g.tasks)
+            .filter(|t| !t.done)
+            .map(|t| TaskRow {
+                note_id: t.note_id as i32,
+                line_index: t.line_index as i32,
+                title: SharedString::from(t.title),
+                done: t.done,
+                priority: match t.priority {
+                    magpie_app::tasks::Priority::High => 0,
+                    magpie_app::tasks::Priority::Medium => 1,
+                    magpie_app::tasks::Priority::Low => 2,
+                    magpie_app::tasks::Priority::None => 3,
+                },
+                due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+                project: SharedString::from(t.project.unwrap_or_default()),
+                source: SharedString::from(t.note_name),
+            })
+            .collect()
+    };
+    popover.set_ptasks(ModelRc::new(VecModel::from(rows)));
+}
+
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
 /// `run-action`.
 /// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
@@ -1114,11 +1149,66 @@ pub fn start() {
             }
         });
     }
-    // Tasks-tab actions are wired in Task 3; register empty handlers now so the
-    // popover compiles and launches clean.
-    popover.on_add_task(|_text| {});
-    popover.on_toggle_ptask(|_note_id, _line_index| {});
-    popover.on_open_task_note(|_note_id| {});
+    // Tasks-tab actions: toggle a task's checkbox, quick-add to today's daily
+    // note, and jump to a task's owning note in the full window.
+    {
+        let s = state.clone();
+        let pw = popover.as_weak();
+        popover.on_toggle_ptask(move |note_id, line_index| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = magpie_app::tasks::toggle_task(
+                    &store,
+                    note_id as i64,
+                    line_index as usize,
+                    now_ms(),
+                );
+            }
+            if let Some(p) = pw.upgrade() {
+                refresh_popover(&p, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let pw = popover.as_weak();
+        popover.on_add_task(move |text| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let day = abs_date(now_ms());
+                if let Ok(n) = store.daily_note(&day, now_ms()) {
+                    let body = magpie_app::tasks::append_task_line(&n.body, text.as_str());
+                    let _ = store.update_note_body(n.id, &body, now_ms());
+                }
+            }
+            if let Some(p) = pw.upgrade() {
+                refresh_popover(&p, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        let pw = popover.as_weak();
+        popover.on_open_task_note(move |note_id| {
+            if let Some(p) = pw.upgrade() {
+                let _ = p.hide();
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_id(note_id);
+                ui.set_notes_mode(true);
+                ui.set_tasks_mode(false);
+                show_window(&ui, &s);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
 
     // Callbacks: search updates the UI state and refreshes; activate/copy-only paste.
     {
@@ -2144,6 +2234,7 @@ fn build_tray(
     // (macOS/Windows; Linux emits no click events, so "Show Magpie" is the door).
     {
         let popover = popover.clone();
+        let state = state.clone();
         std::thread::spawn(move || {
             let rx = TrayIconEvent::receiver();
             while let Ok(ev) = rx.recv() {
@@ -2155,6 +2246,7 @@ fn build_tray(
                 } = ev
                 {
                     let pw = popover.clone();
+                    let s = state.clone();
                     // Centre the 360px-wide popover under the icon, clamped to the
                     // left screen edge, and drop it just below the menu bar.
                     let (px, py) = (
@@ -2166,6 +2258,7 @@ fn build_tray(
                             if p.window().is_visible() {
                                 let _ = p.hide();
                             } else {
+                                refresh_popover(&p, &s);
                                 p.window().set_position(slint::WindowPosition::Physical(
                                     slint::PhysicalPosition::new(px, py),
                                 ));
