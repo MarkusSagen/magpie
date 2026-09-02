@@ -1,5 +1,6 @@
 use crate::{
-    ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, Popover, SlotItem, TaskRow,
+    ActionItem, AppItem, Bar, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover, SlotItem,
+    TaskRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -547,34 +548,71 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
 /// Poison-tolerant lock so a panic elsewhere can't take the popover down.
 fn refresh_popover(popover: &Popover, state: &AppState) {
     let now = now_ms();
-    let rows: Vec<TaskRow> = {
+    {
         let store = match state.store.lock() {
             Ok(g) => g,
             Err(e) => e.into_inner(),
         };
-        let tasks = magpie_app::tasks::all_tasks(&store, now);
-        magpie_app::tasks::group_sort(tasks)
+        let to_row = |t: magpie_app::tasks::Task| TaskRow {
+            note_id: t.note_id as i32,
+            line_index: t.line_index as i32,
+            title: SharedString::from(t.title),
+            done: t.done,
+            priority: match t.priority {
+                magpie_app::tasks::Priority::High => 0,
+                magpie_app::tasks::Priority::Medium => 1,
+                magpie_app::tasks::Priority::Low => 2,
+                magpie_app::tasks::Priority::None => 3,
+            },
+            due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+            project: SharedString::from(t.project.unwrap_or_default()),
+            source: SharedString::from(t.note_name),
+        };
+
+        let all = magpie_app::tasks::all_tasks(&store, now);
+
+        // Tasks tab: open tasks in group_sort order (unchanged Slice A behavior).
+        let open_rows: Vec<TaskRow> = magpie_app::tasks::group_sort(all.clone())
             .into_iter()
             .flat_map(|g| g.tasks)
             .filter(|t| !t.done)
-            .map(|t| TaskRow {
-                note_id: t.note_id as i32,
-                line_index: t.line_index as i32,
-                title: SharedString::from(t.title),
-                done: t.done,
-                priority: match t.priority {
-                    magpie_app::tasks::Priority::High => 0,
-                    magpie_app::tasks::Priority::Medium => 1,
-                    magpie_app::tasks::Priority::Low => 2,
-                    magpie_app::tasks::Priority::None => 3,
-                },
-                due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
-                project: SharedString::from(t.project.unwrap_or_default()),
-                source: SharedString::from(t.note_name),
-            })
-            .collect()
-    };
-    popover.set_ptasks(ModelRc::new(VecModel::from(rows)));
+            .map(to_row)
+            .collect();
+        popover.set_ptasks(ModelRc::new(VecModel::from(open_rows)));
+
+        // Today tab: overdue + due-today.
+        let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
+        let buckets = magpie_app::tasks::partition_due(all, today_ms);
+        let overdue: Vec<TaskRow> = buckets.overdue.into_iter().map(to_row).collect();
+        let today: Vec<TaskRow> = buckets.today.into_iter().map(to_row).collect();
+        popover.set_overdue_tasks(ModelRc::new(VecModel::from(overdue)));
+        popover.set_today_tasks(ModelRc::new(VecModel::from(today)));
+
+        // Daily tab: today's daily-note body.
+        if let Ok(n) = store.daily_note(&abs_date(now), now) {
+            popover.set_daily_body(SharedString::from(n.body));
+        }
+    }
+
+    // Clipboard tab: recent clips (uses the same list paste_and_close indexes into,
+    // so the popover clip index aligns with the paste target). Outside the store lock.
+    let clips: Vec<ClipRow> = current_results(state, now)
+        .iter()
+        .take(12)
+        .map(|e| ClipRow {
+            title: SharedString::from(
+                e.full_text
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(|l| l.chars().take(80).collect::<String>())
+                    .unwrap_or_else(|| e.kind.as_str().to_string()),
+            ),
+            glyph: SharedString::from(type_glyph(&e.kind)),
+            kind: SharedString::from(e.kind.as_str()),
+        })
+        .collect();
+    popover.set_clips(ModelRc::new(VecModel::from(clips)));
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
@@ -1190,6 +1228,30 @@ pub fn start() {
             if let Some(p) = pw.upgrade() {
                 refresh_popover(&p, &s);
             }
+        });
+    }
+    {
+        let s = state.clone();
+        popover.on_edit_daily(move |text| {
+            let store = match s.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            let day = abs_date(now_ms());
+            if let Ok(n) = store.daily_note(&day, now_ms()) {
+                let _ = store.update_note_body(n.id, text.as_str(), now_ms());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        let pw = popover.as_weak();
+        popover.on_paste_clip(move |idx| {
+            if let Some(p) = pw.upgrade() {
+                let _ = p.hide();
+            }
+            paste_and_close(&s, &w, idx.max(0) as usize, false);
         });
     }
     {
