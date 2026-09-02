@@ -1,4 +1,6 @@
-use crate::{ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, SlotItem, TaskRow};
+use crate::{
+    ActionItem, AppItem, Bar, EntryRow, LauncherWindow, NoteRow, Popover, SlotItem, TaskRow,
+};
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
 use magpie_app::config::Config;
@@ -1087,6 +1089,37 @@ pub fn start() {
     let ui = LauncherWindow::new().expect("create window");
     let weak = ui.as_weak();
 
+    // The menubar popover: a second, chromeless, always-on-top window shown from
+    // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
+    // early would tear the window down).
+    let popover = Popover::new().expect("create popover");
+    {
+        let p = popover.as_weak();
+        popover.on_dismiss(move || {
+            if let Some(p) = p.upgrade() {
+                let _ = p.hide();
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        let pw = popover.as_weak();
+        popover.on_open_full(move || {
+            if let Some(p) = pw.upgrade() {
+                let _ = p.hide();
+            }
+            if let Some(ui) = w.upgrade() {
+                show_window(&ui, &s);
+            }
+        });
+    }
+    // Tasks-tab actions are wired in Task 3; register empty handlers now so the
+    // popover compiles and launches clean.
+    popover.on_add_task(|_text| {});
+    popover.on_toggle_ptask(|_note_id, _line_index| {});
+    popover.on_open_task_note(|_note_id| {});
+
     // Callbacks: search updates the UI state and refreshes; activate/copy-only paste.
     {
         let s = state.clone();
@@ -1966,7 +1999,7 @@ pub fn start() {
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run.
-    let _tray = build_tray(weak.clone(), state.clone());
+    let _tray = build_tray(weak.clone(), state.clone(), popover.as_weak());
 
     // The red close button hides the window (Magpie keeps running as a tray daemon);
     // "Quit Magpie" in the tray is the real exit.
@@ -2053,6 +2086,7 @@ fn load_tray_icon() -> Option<tray_icon::Icon> {
 fn build_tray(
     weak: slint::Weak<LauncherWindow>,
     state: Arc<AppState>,
+    popover: slint::Weak<Popover>,
 ) -> Option<tray_icon::TrayIcon> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -2106,24 +2140,38 @@ fn build_tray(
         });
     }
 
-    // Left-click on the icon opens the window (macOS/Windows; Linux no-op).
+    // Left-click on the icon toggles the popover, anchored under the tray icon
+    // (macOS/Windows; Linux emits no click events, so "Show Magpie" is the door).
     {
-        let w = weak.clone();
-        let s = state.clone();
+        let popover = popover.clone();
         std::thread::spawn(move || {
             let rx = TrayIconEvent::receiver();
             while let Ok(ev) = rx.recv() {
                 if let TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
+                    rect,
                     ..
                 } = ev
                 {
-                    let w = w.clone();
-                    let s = s.clone();
+                    let pw = popover.clone();
+                    // Centre the 360px-wide popover under the icon, clamped to the
+                    // left screen edge, and drop it just below the menu bar.
+                    let (px, py) = (
+                        (rect.position.x + rect.size.width as f64 / 2.0 - 180.0).max(0.0) as i32,
+                        (rect.position.y + rect.size.height as f64) as i32,
+                    );
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = w.upgrade() {
-                            show_window(&ui, &s);
+                        if let Some(p) = pw.upgrade() {
+                            if p.window().is_visible() {
+                                let _ = p.hide();
+                            } else {
+                                p.window().set_position(slint::WindowPosition::Physical(
+                                    slint::PhysicalPosition::new(px, py),
+                                ));
+                                let _ = p.show();
+                                magpie_platform::raise_to_front();
+                            }
                         }
                     });
                 }
