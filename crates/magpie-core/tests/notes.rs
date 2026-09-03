@@ -113,3 +113,21 @@ fn reminder_fired_roundtrip() {
     s.mark_reminder("fp1", 456).unwrap();
     assert!(s.reminder_fired("fp1").unwrap());
 }
+
+#[test]
+fn time_tracking_start_stop_total() {
+    let s = store();
+    assert!(s.active_timer().unwrap().is_none());
+    s.start_timer("n1|Ship", "Ship", Some(1), 1_000).unwrap();
+    let a = s.active_timer().unwrap().unwrap();
+    assert_eq!(a.task_key, "n1|Ship");
+    assert_eq!(s.total_ms_for("n1|Ship", 5_000).unwrap(), 4_000);
+    s.start_timer("n1|Review", "Review", Some(1), 5_000)
+        .unwrap();
+    assert_eq!(s.active_timer().unwrap().unwrap().task_key, "n1|Review");
+    assert_eq!(s.total_ms_for("n1|Ship", 9_000).unwrap(), 4_000);
+    assert!(s.stop_active(9_000).unwrap());
+    assert!(s.active_timer().unwrap().is_none());
+    assert_eq!(s.total_ms_for("n1|Review", 20_000).unwrap(), 4_000);
+    assert!(!s.stop_active(9_000).unwrap());
+}

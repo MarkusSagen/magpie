@@ -83,3 +83,13 @@ CREATE TABLE IF NOT EXISTS task_reminders (
   fingerprint TEXT PRIMARY KEY,
   fired_at_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS time_entries (
+  id         INTEGER PRIMARY KEY,
+  task_key   TEXT NOT NULL,
+  task_title TEXT NOT NULL,
+  note_id    INTEGER,
+  start_ms   INTEGER NOT NULL,
+  end_ms     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_time_entries_key ON time_entries(task_key);

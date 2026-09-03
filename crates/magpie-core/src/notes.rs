@@ -169,3 +169,75 @@ impl Store {
         Ok(())
     }
 }
+
+/// A currently-running timer (an entry with no end).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveTimer {
+    pub task_key: String,
+    pub task_title: String,
+    pub start_ms: i64,
+}
+
+impl Store {
+    /// The running timer, if any (there is at most one).
+    pub fn active_timer(&self) -> Result<Option<ActiveTimer>> {
+        use rusqlite::OptionalExtension;
+        self.conn()
+            .query_row(
+                "SELECT task_key, task_title, start_ms FROM time_entries
+                 WHERE end_ms IS NULL ORDER BY start_ms DESC LIMIT 1",
+                [],
+                |r| {
+                    Ok(ActiveTimer {
+                        task_key: r.get(0)?,
+                        task_title: r.get(1)?,
+                        start_ms: r.get(2)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// Stop the running timer (if any). Returns whether one was running.
+    pub fn stop_active(&self, now_ms: i64) -> Result<bool> {
+        let n = self.conn().execute(
+            "UPDATE time_entries SET end_ms = ?1 WHERE end_ms IS NULL",
+            [now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Start a timer on a task, stopping any other running one first.
+    pub fn start_timer(
+        &self,
+        task_key: &str,
+        task_title: &str,
+        note_id: Option<i64>,
+        now_ms: i64,
+    ) -> Result<()> {
+        self.stop_active(now_ms)?;
+        self.conn().execute(
+            "INSERT INTO time_entries (task_key, task_title, note_id, start_ms, end_ms)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+            rusqlite::params![task_key, task_title, note_id, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Total tracked ms for a task: closed entries plus the running one (if it's
+    /// this task), measured to `now_ms`.
+    pub fn total_ms_for(&self, task_key: &str, now_ms: i64) -> Result<i64> {
+        let mut total: i64 = self.conn().query_row(
+            "SELECT COALESCE(SUM(end_ms - start_ms), 0) FROM time_entries
+             WHERE task_key = ?1 AND end_ms IS NOT NULL",
+            [task_key],
+            |r| r.get(0),
+        )?;
+        if let Some(a) = self.active_timer()? {
+            if a.task_key == task_key {
+                total += (now_ms - a.start_ms).max(0);
+            }
+        }
+        Ok(total)
+    }
+}
