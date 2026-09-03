@@ -80,6 +80,8 @@ struct TaskRow {
     recur: string,
     overdue: bool,
     bookmarked: bool,
+    tracking: bool,
+    time_total: string,
 }
 
 struct ClipRow {
@@ -353,9 +355,13 @@ export component LauncherWindow inherits Window {
     // Keyboard-selected task row index (Tasks mode).
     in-out property <int> task-selected: 0;
     in-out property <string> task-filter: "all";
+    // Time tracking: the running task's title ("" if none) + live elapsed seconds.
+    in property <string> active-title;
+    in-out property <int> active-elapsed-sec;
     callback set-mode-tasks(bool);
     callback toggle-task(int, int);
     callback toggle-bookmark(int, int);
+    callback toggle-timer(int, string);
     callback open-task-note(int);
     callback refresh-tasks();
 
@@ -1605,6 +1611,12 @@ export component LauncherWindow inherits Window {
                         }
                         return accept;
                     }
+                    if e.text == "t" {
+                        if root.tasks.length > 0 {
+                            root.toggle-timer(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].title);
+                        }
+                        return accept;
+                    }
                     return reject;
                 }
             }
@@ -1623,6 +1635,26 @@ export component LauncherWindow inherits Window {
                         Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Text { text: "Tasks"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    // Live running-timer indicator (only while a timer runs).
+                    if root.active-title != "": Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: #24352b;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Text { text: "▶"; color: #7ad7a0; font-size: 12px; vertical-alignment: center; }
+                            Text { text: root.active-title; color: #d7e6dd; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            Text {
+                                text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
+                                color: #7ad7a0;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     Rectangle {
                         width: 100px;
@@ -1636,6 +1668,14 @@ export component LauncherWindow inherits Window {
                             }
                         }
                         Text { text: "Show done"; color: root.show-done ? Pal.on-accent : #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // Tick the running-timer display once a second while active.
+                Timer {
+                    interval: 1s;
+                    running: root.active-title != "";
+                    triggered => {
+                        root.active-elapsed-sec += 1;
                     }
                 }
                 HorizontalLayout {
@@ -1753,6 +1793,7 @@ export component LauncherWindow inherits Window {
                                     if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
                                     if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; }
                                     if t.recur != "": Text { text: t.recur; color: #7ad7a0; font-size: 11px; vertical-alignment: center; }
+                                    if t.time_total != "": Text { text: "⏱ " + t.time_total; color: #9a9aa0; font-size: 11px; vertical-alignment: center; }
                                     // (bookmark shown by the trailing ★ toggle, not a badge)
                                     if t.source != "": Text { text: t.source; color: #62626a; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                 }
@@ -1764,6 +1805,17 @@ export component LauncherWindow inherits Window {
                                     text: t.bookmarked ? "★" : "☆";
                                     color: t.bookmarked ? #e0c04a : (bmk.has-hover ? #d0d0d4 : #55555f);
                                     font-size: 16px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: 30px;
+                                tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
+                                Text {
+                                    text: t.tracking ? "⏹" : "▶";
+                                    color: t.tracking ? #7ad7a0 : (tmr.has-hover ? #d0d0d4 : #55555f);
+                                    font-size: 14px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }

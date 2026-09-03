@@ -554,11 +554,14 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
     let filter = ui.get_task_filter();
+    // The running timer (set inside the lock, reused for the header below).
+    let active;
     let rows: Vec<TaskRow> = {
         let store = match state.store.lock() {
             Ok(g) => g,
             Err(e) => e.into_inner(),
         };
+        active = store.active_timer().ok().flatten();
         let tasks = magpie_app::tasks::all_tasks(&store, now);
         magpie_app::tasks::group_sort(tasks)
             .into_iter()
@@ -570,23 +573,30 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 "star" => t.bookmarked,
                 _ => true,
             })
-            .map(|t| TaskRow {
-                note_id: t.note_id as i32,
-                line_index: t.line_index as i32,
-                title: SharedString::from(t.title),
-                done: t.done,
-                priority: match t.priority {
-                    magpie_app::tasks::Priority::High => 0,
-                    magpie_app::tasks::Priority::Medium => 1,
-                    magpie_app::tasks::Priority::Low => 2,
-                    magpie_app::tasks::Priority::None => 3,
-                },
-                due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
-                project: SharedString::from(t.project.unwrap_or_default()),
-                source: SharedString::from(t.note_name),
-                recur: SharedString::from(recur_badge(t.recur)),
-                overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
-                bookmarked: t.bookmarked,
+            .map(|t| {
+                let key = format!("{}|{}", t.note_id, t.title);
+                let tracking = active.as_ref().map(|a| a.task_key == key).unwrap_or(false);
+                let total_ms = store.total_ms_for(&key, now).unwrap_or(0);
+                TaskRow {
+                    note_id: t.note_id as i32,
+                    line_index: t.line_index as i32,
+                    title: SharedString::from(t.title),
+                    done: t.done,
+                    priority: match t.priority {
+                        magpie_app::tasks::Priority::High => 0,
+                        magpie_app::tasks::Priority::Medium => 1,
+                        magpie_app::tasks::Priority::Low => 2,
+                        magpie_app::tasks::Priority::None => 3,
+                    },
+                    due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+                    project: SharedString::from(t.project.unwrap_or_default()),
+                    source: SharedString::from(t.note_name),
+                    recur: SharedString::from(recur_badge(t.recur)),
+                    overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+                    bookmarked: t.bookmarked,
+                    tracking,
+                    time_total: SharedString::from(magpie_app::format_time::fmt_duration(total_ms)),
+                }
             })
             .collect()
     };
@@ -597,6 +607,17 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
         ui.set_task_selected((len - 1).max(0));
     }
     ui.set_tasks(ModelRc::new(VecModel::from(rows)));
+    // Running-timer header indicator (live-ticked in Slint from these seeds).
+    match &active {
+        Some(a) => {
+            ui.set_active_title(SharedString::from(a.task_title.clone()));
+            ui.set_active_elapsed_sec(((now - a.start_ms).max(0) / 1000) as i32);
+        }
+        None => {
+            ui.set_active_title(SharedString::from(""));
+            ui.set_active_elapsed_sec(0);
+        }
+    }
 }
 
 /// Rebuild the popover's Tasks tab: every **open** (`!done`) task across all
@@ -627,6 +648,9 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             recur: SharedString::from(recur_badge(t.recur)),
             overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
             bookmarked: t.bookmarked,
+            // Time tracking is surfaced in the full Tasks view, not the popover.
+            tracking: false,
+            time_total: SharedString::from(""),
         };
 
         let all = magpie_app::tasks::all_tasks(&store, now);
@@ -2320,6 +2344,35 @@ pub fn start() {
                     line_index as usize,
                     now_ms(),
                 );
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        // Start/stop a task's timer. Toggling the already-running task stops it;
+        // otherwise start it (which stops any other running timer).
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_timer(move |note_id, title| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let key = format!("{}|{}", note_id, title);
+                let running_this = store
+                    .active_timer()
+                    .ok()
+                    .flatten()
+                    .map(|a| a.task_key == key)
+                    .unwrap_or(false);
+                if running_this {
+                    let _ = store.stop_active(now_ms());
+                } else {
+                    let _ = store.start_timer(&key, title.as_str(), Some(note_id as i64), now_ms());
+                }
             }
             if let Some(ui) = w.upgrade() {
                 refresh_tasks(&ui, &s);
