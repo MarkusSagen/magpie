@@ -1,7 +1,7 @@
 //! Tasks: `- [ ]` / `- [x]` lines inside notes, with inline `!priority @due #project`.
 //! Pure parsing + line edits; notes stay the source of truth.
 
-use crate::format_time::parse_due;
+use crate::format_time::{abs_date, civil_from_days, days_from_civil, parse_due, parse_time};
 use magpie_core::Note;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -10,6 +10,20 @@ pub enum Priority {
     Medium,
     Low,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecurUnit {
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recur {
+    pub n: i64,
+    pub unit: RecurUnit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +36,7 @@ pub struct Task {
     pub priority: Priority,
     pub due_ms: Option<i64>,
     pub due_time_min: Option<i64>,
+    pub recur: Option<Recur>,
     pub project: Option<String>,
     pub source_app_id: Option<i64>,
     pub source_entry_id: Option<i64>,
@@ -70,6 +85,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
         let mut project = None;
         let mut title_toks: Vec<&str> = Vec::new();
         let mut due_time_min: Option<i64> = None;
+        let mut recur: Option<Recur> = None;
         let mut toks = rest.split_whitespace().peekable();
         while let Some(tok) = toks.next() {
             if priority == Priority::None {
@@ -83,7 +99,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
                     if let Some(d) = parse_due(s, now_ms) {
                         due_ms = Some(d);
                         if let Some(next) = toks.peek() {
-                            if let Some(tm) = crate::format_time::parse_time(next) {
+                            if let Some(tm) = parse_time(next) {
                                 due_time_min = Some(tm);
                                 toks.next();
                             }
@@ -100,6 +116,12 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
                     }
                 }
             }
+            if recur.is_none() {
+                if let Some(r) = parse_recur(tok) {
+                    recur = Some(r);
+                    continue;
+                }
+            }
             title_toks.push(tok);
         }
         out.push(Task {
@@ -111,6 +133,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
             priority,
             due_ms,
             due_time_min,
+            recur,
             project,
             source_app_id: note.source_app_id,
             source_entry_id: note.source_entry_id,
@@ -164,7 +187,20 @@ pub fn toggle_task(store: &Store, note_id: i64, line_index: usize, now_ms: i64) 
         Ok(Some(n)) => n.body,
         _ => return false,
     };
-    let new = toggle_line(&body, line_index);
+    let new = {
+        let lines: Vec<&str> = body.split('\n').collect();
+        match lines
+            .get(line_index)
+            .and_then(|l| reschedule_line(l, now_ms))
+        {
+            Some(resched) => {
+                let mut v: Vec<String> = body.split('\n').map(str::to_string).collect();
+                v[line_index] = resched;
+                v.join("\n")
+            }
+            None => toggle_line(&body, line_index),
+        }
+    };
     new != body
         && store
             .update_note_body(note_id, &new, now_ms)
@@ -274,6 +310,121 @@ pub fn partition_due(tasks: Vec<Task>, today_ms: i64) -> DueBuckets {
     DueBuckets { overdue, today }
 }
 
+/// Parse a `+<n><unit>` recurrence token (unit d|w|mo|y). `None` if not a valid rule
+/// (a bare `+1`, `+0d`, or non-numeric stays in the task title).
+pub fn parse_recur(tok: &str) -> Option<Recur> {
+    let s = tok.strip_prefix('+')?;
+    let (num, unit) = if let Some(n) = s.strip_suffix("mo") {
+        (n, RecurUnit::Month)
+    } else if let Some(n) = s.strip_suffix('d') {
+        (n, RecurUnit::Day)
+    } else if let Some(n) = s.strip_suffix('w') {
+        (n, RecurUnit::Week)
+    } else if let Some(n) = s.strip_suffix('y') {
+        (n, RecurUnit::Year)
+    } else {
+        return None;
+    };
+    let n: i64 = num.parse().ok()?;
+    if n <= 0 {
+        return None;
+    }
+    Some(Recur { n, unit })
+}
+
+fn is_leap(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap(y) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// One recurrence step forward from a day-epoch (days since 1970-01-01). Month/year
+/// clamp the day to the target month length (Jan 31 +1mo → Feb 28/29).
+pub fn add_recur(day_epoch: i64, r: Recur) -> i64 {
+    match r.unit {
+        RecurUnit::Day => day_epoch + r.n,
+        RecurUnit::Week => day_epoch + r.n * 7,
+        RecurUnit::Month => {
+            let (y, m, d) = civil_from_days(day_epoch);
+            let total = (m as i64 - 1) + r.n;
+            let ny = y + total.div_euclid(12);
+            let nm = total.rem_euclid(12) + 1;
+            let nd = (d as i64).min(days_in_month(ny, nm));
+            days_from_civil(ny, nm, nd)
+        }
+        RecurUnit::Year => {
+            let (y, m, d) = civil_from_days(day_epoch);
+            let ny = y + r.n;
+            let nd = (d as i64).min(days_in_month(ny, m as i64));
+            days_from_civil(ny, m as i64, nd)
+        }
+    }
+}
+
+/// Next occurrence strictly after `today_days`, stepping by the rule from `due_days`.
+pub fn next_occurrence(due_days: i64, r: Recur, today_days: i64) -> i64 {
+    let mut next = add_recur(due_days, r);
+    while next <= today_days {
+        next = add_recur(next, r);
+    }
+    next
+}
+
+/// If `line` is an OPEN recurring task with a due date, return it rescheduled to the
+/// next future occurrence (still `- [ ]`, `@due` rewritten as absolute YYYY-MM-DD).
+/// `None` otherwise (not a task, already done, no due, or no recurrence rule).
+pub fn reschedule_line(line: &str, now_ms: i64) -> Option<String> {
+    let (done, rest) = task_marker(line.trim_start())?;
+    if done {
+        return None;
+    }
+    let mut due_ms: Option<i64> = None;
+    let mut due_token: Option<String> = None;
+    let mut recur: Option<Recur> = None;
+    let mut toks = rest.split_whitespace().peekable();
+    while let Some(t) = toks.next() {
+        if due_ms.is_none() {
+            if let Some(s) = t.strip_prefix('@') {
+                if let Some(d) = parse_due(s, now_ms) {
+                    due_ms = Some(d);
+                    due_token = Some(s.to_string());
+                    if let Some(nx) = toks.peek() {
+                        if parse_time(nx).is_some() {
+                            toks.next();
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+        if recur.is_none() {
+            if let Some(r) = parse_recur(t) {
+                recur = Some(r);
+                continue;
+            }
+        }
+    }
+    let (due_ms, due_token, recur) = (due_ms?, due_token?, recur?);
+    const DAY_MS: i64 = 86_400_000;
+    let today = now_ms.div_euclid(DAY_MS);
+    let next_days = next_occurrence(due_ms.div_euclid(DAY_MS), recur, today);
+    let new = format!("@{}", abs_date(next_days * DAY_MS));
+    Some(line.replacen(&format!("@{due_token}"), &new, 1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +496,7 @@ mod tests {
                 priority: p,
                 due_ms: due,
                 due_time_min: None,
+                recur: None,
                 project: proj.map(|s| s.into()),
                 source_app_id: None,
                 source_entry_id: None,
@@ -377,6 +529,7 @@ mod tests {
             priority: pri,
             due_ms: due,
             due_time_min: None,
+            recur: None,
             project: None,
             source_app_id: None,
             source_entry_id: None,
@@ -413,5 +566,129 @@ mod tests {
         assert!(ts[0].due_ms.is_some());
         assert_eq!(ts[1].title, "count to 5");
         assert_eq!(ts[1].due_time_min, None);
+    }
+
+    #[test]
+    fn parse_recur_units_and_rejects() {
+        assert_eq!(
+            parse_recur("+1d"),
+            Some(Recur {
+                n: 1,
+                unit: RecurUnit::Day
+            })
+        );
+        assert_eq!(
+            parse_recur("+2w"),
+            Some(Recur {
+                n: 2,
+                unit: RecurUnit::Week
+            })
+        );
+        assert_eq!(
+            parse_recur("+1mo"),
+            Some(Recur {
+                n: 1,
+                unit: RecurUnit::Month
+            })
+        );
+        assert_eq!(
+            parse_recur("+3y"),
+            Some(Recur {
+                n: 3,
+                unit: RecurUnit::Year
+            })
+        );
+        assert_eq!(parse_recur("+1"), None);
+        assert_eq!(parse_recur("+0d"), None);
+        assert_eq!(parse_recur("+xw"), None);
+        assert_eq!(parse_recur("1w"), None);
+    }
+
+    #[test]
+    fn add_recur_clamps_month_and_year() {
+        let jan31 = super::days_from_civil(2026, 1, 31);
+        assert_eq!(
+            add_recur(
+                jan31,
+                Recur {
+                    n: 1,
+                    unit: RecurUnit::Month
+                }
+            ),
+            super::days_from_civil(2026, 2, 28)
+        );
+        let feb29 = super::days_from_civil(2024, 2, 29);
+        assert_eq!(
+            add_recur(
+                feb29,
+                Recur {
+                    n: 1,
+                    unit: RecurUnit::Year
+                }
+            ),
+            super::days_from_civil(2025, 2, 28)
+        );
+        let d = super::days_from_civil(2026, 3, 1);
+        assert_eq!(
+            add_recur(
+                d,
+                Recur {
+                    n: 2,
+                    unit: RecurUnit::Week
+                }
+            ),
+            d + 14
+        );
+    }
+
+    #[test]
+    fn next_occurrence_skips_past_today() {
+        let due = super::days_from_civil(2026, 1, 1);
+        let today = super::days_from_civil(2026, 1, 20);
+        assert_eq!(
+            next_occurrence(
+                due,
+                Recur {
+                    n: 1,
+                    unit: RecurUnit::Week
+                },
+                today
+            ),
+            super::days_from_civil(2026, 1, 22)
+        );
+    }
+
+    #[test]
+    fn parse_tasks_in_reads_recur_and_cleans_title() {
+        let n = Note {
+            id: 1,
+            name: "n".into(),
+            is_daily: false,
+            body: "- [ ] water plants @today +1w".into(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            source_app_id: None,
+            source_entry_id: None,
+        };
+        let t = &parse_tasks_in(&n, 0)[0];
+        assert_eq!(t.title, "water plants");
+        assert_eq!(
+            t.recur,
+            Some(Recur {
+                n: 1,
+                unit: RecurUnit::Week
+            })
+        );
+    }
+
+    #[test]
+    fn reschedule_bumps_due_and_keeps_open() {
+        const DAY_MS: i64 = 86_400_000;
+        let now = super::days_from_civil(2026, 1, 20) * DAY_MS;
+        let out = reschedule_line("- [ ] water plants @2026-01-01 +1w", now).unwrap();
+        assert_eq!(out, "- [ ] water plants @2026-01-22 +1w");
+        assert!(reschedule_line("- [ ] plain @2026-01-01", now).is_none());
+        assert!(reschedule_line("- [x] done @2026-01-01 +1w", now).is_none());
+        assert!(reschedule_line("- [ ] no due +1w", now).is_none());
     }
 }

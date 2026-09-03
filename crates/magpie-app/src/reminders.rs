@@ -78,6 +78,7 @@ mod tests {
             priority: Priority::None,
             due_ms: due,
             due_time_min: time,
+            recur: None,
             project: None,
             source_app_id: None,
             source_entry_id: None,
