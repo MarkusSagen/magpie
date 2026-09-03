@@ -1157,6 +1157,7 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         }
                         "mask" => ui.invoke_toggle_screenshare(),
                         "notes" => ui.invoke_set_mode_notes(true),
+                        "tasks" => ui.invoke_set_mode_tasks(true),
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
