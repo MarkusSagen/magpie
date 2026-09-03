@@ -524,6 +524,22 @@ fn note_provenance(n: &magpie_core::Note) -> String {
     }
 }
 
+/// Compact recurrence badge, e.g. "↻1w" (empty when the task doesn't recur).
+fn recur_badge(recur: Option<magpie_app::tasks::Recur>) -> String {
+    match recur {
+        Some(r) => {
+            let u = match r.unit {
+                magpie_app::tasks::RecurUnit::Day => "d",
+                magpie_app::tasks::RecurUnit::Week => "w",
+                magpie_app::tasks::RecurUnit::Month => "mo",
+                magpie_app::tasks::RecurUnit::Year => "y",
+            };
+            format!("↻{}{}", r.n, u)
+        }
+        None => String::new(),
+    }
+}
+
 /// Rebuild the Tasks-mode list: every task across all notes, grouped/sorted, then
 /// flattened into a flat model. Done tasks are skipped unless "Show done" is on;
 /// `due_ms` is formatted as an absolute date and `Priority` mapped to 0..3
@@ -555,6 +571,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
                 project: SharedString::from(t.project.unwrap_or_default()),
                 source: SharedString::from(t.note_name),
+                recur: SharedString::from(recur_badge(t.recur)),
             })
             .collect()
     };
@@ -591,6 +608,7 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
             project: SharedString::from(t.project.unwrap_or_default()),
             source: SharedString::from(t.note_name),
+            recur: SharedString::from(recur_badge(t.recur)),
         };
 
         let all = magpie_app::tasks::all_tasks(&store, now);
