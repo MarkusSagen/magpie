@@ -14,12 +14,29 @@ strip = true
 codegen-units = 1
 panic = "abort"
 
-# Dev builds: keep them small + fast to link. The default (full debuginfo for the
-# whole dep tree — Slint/skia/femtovg/winit) balloons the debug binary to ~125 MB
-# and slows every link.
+# Dev builds — keep `target/` small. The big cost is debuginfo emitted for the WHOLE
+# dependency tree (objc2, resvg/usvg, image, Slint's winit/femtovg, …), duplicated
+# into every one of the many integration-test binaries. That's what took target/debug
+# to tens of GB. Fix: OUR crates keep line-table debuginfo (so panic backtraces have
+# file:line); EVERY dependency and build script gets NO debuginfo — we never step into
+# them. This cuts target/debug/deps dramatically with no loss to our own diagnostics.
 [profile.dev]
-# Trim debug info a bit (125 MB -> ~110 MB, faster links) while keeping symbolic
-# backtraces for the panic hook. The debug binary is large mainly because Slint
-# generates a lot of unoptimized Rust from the .slint markup — not from debuginfo,
-# so this is only a mild win. `cargo clean` reclaims target/debug when it balloons.
+debug = "line-tables-only"
+
+# Dependencies: strip debuginfo entirely (the main disk win).
+[profile.dev.package."*"]
+debug = false
+
+# Build scripts / proc-macros (slint-build, etc.): no debuginfo either.
+[profile.dev.build-override]
+debug = false
+
+# Re-assert line tables on our own crates, in case the `*` override above also
+# matched workspace members (Cargo precedence is version-dependent) — this guarantees
+# our backtraces keep file:line regardless.
+[profile.dev.package.magpie-core]
+debug = "line-tables-only"
+[profile.dev.package.magpie-platform]
+debug = "line-tables-only"
+[profile.dev.package.magpie-app]
 debug = "line-tables-only"

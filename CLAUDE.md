@@ -189,9 +189,24 @@ check timestamps and don't assume "no new report" = "not crashing."
   on every rebuild (TCC keys on the code hash) — use the bundle for a stable grant.
 - **The global summon hotkey needs no Accessibility** and works identically from
   `just run` or an installed `.app` (Carbon `RegisterEventHotKey`, system-wide).
-- **`target/debug` can balloon to tens of GB** (Slint generates one enormous Rust
-  file × incremental artifacts). On `ENOSPC`: `rm -rf target/debug/incremental` or
-  `cargo clean`. **Symptom of a disk-full release build:** `rust-objcopy`
+- **`target/debug` size is controlled by the dev profile.** It once ballooned to
+  ~40 GB — the cause was **debuginfo emitted for the whole dependency tree**
+  (objc2/resvg/image/Slint's winit·femtovg…) duplicated into every integration-test
+  binary. Fixed in `Cargo.toml`: `[profile.dev.package."*"] debug = false` (deps get
+  no debuginfo) while OUR crates keep `debug = "line-tables-only"` (panic backtraces
+  still have file:line). A full debug **+ all tests + clippy** build is now ~4–5 GB.
+  Keep it that way — don't remove those profile overrides. Check with `just size`;
+  `just slim` drops only the incremental cache; `just clean` / `cargo clean` reset all.
+- **Toolchain has three cargo sources on this Mac** — Nix (`/run/current-system/sw/bin`,
+  ~1.93), mise (`~/.local/share/mise/shims`, but mise.toml deliberately does NOT manage
+  rust), and rustup (`~/.cargo/bin` → `rust-toolchain.toml` = 1.97.1). The repo needs
+  **1.97.1**; older toolchains fail to compile some deps (e.g. `zerocopy`). Canonical
+  invocation stays `env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo …` (or plain `cargo` /
+  `just`, since `~/.cargo/bin` precedes the Nix path in PATH). If `~/.cargo/bin/cargo`
+  goes missing, restore it: `ln -sf ~/.rustup/toolchains/1.97.1-*/bin/{cargo,rustc,rustdoc,cargo-clippy,clippy-driver,cargo-fmt,rustfmt} ~/.cargo/bin/`.
+- **`target/debug` can still balloon if a build churns the toolchain path** (cargo
+  re-fingerprints and keeps stale + new artifacts). Use ONE consistent `cargo`. On
+  `ENOSPC`: `rm -rf target/debug/incremental` or `cargo clean`. **Symptom of a disk-full release build:** `rust-objcopy`
   (`strip = true`) dies mid-write — `LLVM ERROR: IO failure on output stream: No
   space left on device` — leaving a **truncated ~2 KB `data` binary**, which macOS
   then rejects with *"the application cannot be opened because it has an incorrect

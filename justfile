@@ -44,8 +44,21 @@ fmt:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Reclaim disk: target/debug balloons with Slint's generated code + incremental
-# artifacts (many GB). Removes build output; next build is a full recompile.
+# Show what target/ is using (debug builds are the disk hog — Slint's generated
+# code + per-crate artifacts + incremental cache across many test binaries).
+size:
+    @du -sh target 2>/dev/null || echo "no target/"
+    @du -sh target/debug/deps target/debug/incremental target/debug/build 2>/dev/null || true
+
+# Reclaim disk WITHOUT a full recompile: drop only the incremental cache (the
+# biggest churn) — the next build reuses compiled deps and just re-links.
+slim:
+    rm -rf target/debug/incremental target/release/incremental
+    @just size
+
+# Reclaim all disk: removes every build artifact; next build is a full recompile.
+# With the dev profile stripping dependency debuginfo, a full debug+test build is
+# now ~4-5 GB (was ~40 GB before that profile change).
 clean:
     cargo clean
 
