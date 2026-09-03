@@ -37,6 +37,7 @@ pub struct Task {
     pub due_ms: Option<i64>,
     pub due_time_min: Option<i64>,
     pub recur: Option<Recur>,
+    pub bookmarked: bool,
     pub project: Option<String>,
     pub source_app_id: Option<i64>,
     pub source_entry_id: Option<i64>,
@@ -86,6 +87,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
         let mut title_toks: Vec<&str> = Vec::new();
         let mut due_time_min: Option<i64> = None;
         let mut recur: Option<Recur> = None;
+        let mut bookmarked = false;
         let mut toks = rest.split_whitespace().peekable();
         while let Some(tok) = toks.next() {
             if priority == Priority::None {
@@ -122,6 +124,10 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
                     continue;
                 }
             }
+            if !bookmarked && tok == "*" {
+                bookmarked = true;
+                continue;
+            }
             title_toks.push(tok);
         }
         out.push(Task {
@@ -134,6 +140,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
             due_ms,
             due_time_min,
             recur,
+            bookmarked,
             project,
             source_app_id: note.source_app_id,
             source_entry_id: note.source_entry_id,
@@ -425,6 +432,40 @@ pub fn reschedule_line(line: &str, now_ms: i64) -> Option<String> {
     Some(line.replacen(&format!("@{due_token}"), &new, 1))
 }
 
+/// Add or remove a standalone `*` bookmark marker on the task line at `line_index`.
+/// No-op if the line isn't a task line.
+pub fn toggle_bookmark_line(body: &str, line_index: usize) -> String {
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    let Some(line) = lines.get(line_index) else {
+        return body.to_string();
+    };
+    if task_marker(line.trim_start()).is_none() {
+        return body.to_string();
+    }
+    let has = line.split_whitespace().any(|t| t == "*");
+    let new = if has {
+        let kept: Vec<&str> = line.split(' ').filter(|t| *t != "*").collect();
+        kept.join(" ").trim_end().to_string()
+    } else {
+        format!("{} *", line.trim_end())
+    };
+    lines[line_index] = new;
+    lines.join("\n")
+}
+
+/// Toggle a task's bookmark and persist it to its note. Returns whether it changed.
+pub fn set_bookmark(store: &Store, note_id: i64, line_index: usize, now_ms: i64) -> bool {
+    let body = match store.get_note(note_id) {
+        Ok(Some(n)) => n.body,
+        _ => return false,
+    };
+    let new = toggle_bookmark_line(&body, line_index);
+    new != body
+        && store
+            .update_note_body(note_id, &new, now_ms)
+            .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +538,7 @@ mod tests {
                 due_ms: due,
                 due_time_min: None,
                 recur: None,
+                bookmarked: false,
                 project: proj.map(|s| s.into()),
                 source_app_id: None,
                 source_entry_id: None,
@@ -530,6 +572,7 @@ mod tests {
             due_ms: due,
             due_time_min: None,
             recur: None,
+            bookmarked: false,
             project: None,
             source_app_id: None,
             source_entry_id: None,
@@ -690,5 +733,28 @@ mod tests {
         assert!(reschedule_line("- [ ] plain @2026-01-01", now).is_none());
         assert!(reschedule_line("- [x] done @2026-01-01 +1w", now).is_none());
         assert!(reschedule_line("- [ ] no due +1w", now).is_none());
+    }
+
+    #[test]
+    fn parses_and_toggles_bookmark() {
+        let n = Note {
+            id: 1,
+            name: "n".into(),
+            is_daily: false,
+            body: "- [ ] buy milk *\n- [ ] plain".into(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            source_app_id: None,
+            source_entry_id: None,
+        };
+        let ts = parse_tasks_in(&n, 0);
+        assert!(ts[0].bookmarked);
+        assert_eq!(ts[0].title, "buy milk");
+        assert!(!ts[1].bookmarked);
+        let off = toggle_bookmark_line(&n.body, 0);
+        assert_eq!(off.lines().next().unwrap(), "- [ ] buy milk");
+        let on = toggle_bookmark_line(&off, 0);
+        assert_eq!(on.lines().next().unwrap(), "- [ ] buy milk *");
+        assert_eq!(toggle_bookmark_line("hello", 0), "hello");
     }
 }
