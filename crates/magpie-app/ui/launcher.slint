@@ -78,6 +78,7 @@ struct TaskRow {
     project: string,
     source: string,
     recur: string,
+    overdue: bool,
 }
 
 struct ClipRow {
@@ -1625,10 +1626,31 @@ export component LauncherWindow inherits Window {
                 // The list. `group_sort` already clusters by project + orders within,
                 // so a flat list reads correctly top-to-bottom.
                 ListView {
-                    for t[i] in root.tasks: Rectangle {
+                    for t[i] in root.tasks: VerticalLayout {
+                        spacing: 0px;
+                        // Project group header — shown once per project cluster so the
+                        // grouping is legible.
+                        if i == 0 || root.tasks[i - 1].project != t.project: Text {
+                            text: t.project == "" ? "No project" : "#" + t.project;
+                            color: #8a8a90;
+                            font-size: 11px;
+                            font-weight: 700;
+                            height: 26px;
+                            vertical-alignment: bottom;
+                        }
+                        Rectangle {
                         height: 48px;
-                        background: i == root.task-selected ? #2f2f37 : (trow.has-hover ? #26262c : transparent);
+                        background: i == root.task-selected ? #262b3d : (trow.has-hover ? #26262c : transparent);
                         border-radius: 6px;
+                        // Accent bar marks the keyboard-selected row.
+                        if i == root.task-selected: Rectangle {
+                            x: 0;
+                            y: 8px;
+                            width: 3px;
+                            height: 32px;
+                            border-radius: 1.5px;
+                            background: Pal.accent;
+                        }
                         // Row click jumps to the note that owns this task. The checkbox
                         // has its own TouchArea (declared later → higher z-order) so it
                         // toggles instead of opening the note.
@@ -1687,12 +1709,13 @@ export component LauncherWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     alignment: start;
-                                    if t.due != "": Text { text: t.due; color: #9a9aa0; font-size: 11px; vertical-alignment: center; }
+                                    if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
                                     if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; }
                                     if t.recur != "": Text { text: t.recur; color: #7ad7a0; font-size: 11px; vertical-alignment: center; }
                                     if t.source != "": Text { text: "in " + t.source; color: #7a7a80; font-size: 11px; vertical-alignment: center; overflow: elide; }
                                 }
                             }
+                        }
                         }
                     }
                 }
@@ -2251,7 +2274,7 @@ component PopoverTaskRow inherits Rectangle {
             HorizontalLayout {
                 spacing: 8px;
                 alignment: start;
-                if root.t.due != "": Text { text: root.t.due; color: #9a9aa0; font-size: 10px; vertical-alignment: center; }
+                if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? #e06a6a : #9a9aa0; font-size: 10px; vertical-alignment: center; }
                 if root.t.project != "": Text { text: "#" + root.t.project; color: #9ab0ff; font-size: 10px; vertical-alignment: center; }
                 if root.t.recur != "": Text { text: root.t.recur; color: #7ad7a0; font-size: 10px; vertical-alignment: center; }
             }

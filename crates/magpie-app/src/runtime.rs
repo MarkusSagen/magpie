@@ -464,12 +464,17 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
                 is_daily: n.is_daily,
             })
             .collect();
-        // Which note is open? Keep the current one if still present, else the daily note.
+        // Which note is open? Keep the current one if still present, else the most
+        // recently edited note (falling back to today's daily note).
         let cur = ui.get_note_id();
         let open = if cur >= 0 && recent.iter().any(|n| n.id as i32 == cur) {
             cur
         } else {
-            daily.as_ref().map(|d| d.id as i32).unwrap_or(-1)
+            recent
+                .first()
+                .map(|n| n.id as i32)
+                .or_else(|| daily.as_ref().map(|d| d.id as i32))
+                .unwrap_or(-1)
         };
         let opened = recent.iter().find(|n| n.id as i32 == open);
         let (body, prov, links) = match opened {
@@ -546,6 +551,7 @@ fn recur_badge(recur: Option<magpie_app::tasks::Recur>) -> String {
 /// (High=0, Medium=1, Low=2, None=3). `source` is the owning note's name.
 fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
+    let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
     let rows: Vec<TaskRow> = {
         let store = match state.store.lock() {
@@ -572,6 +578,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 project: SharedString::from(t.project.unwrap_or_default()),
                 source: SharedString::from(t.note_name),
                 recur: SharedString::from(recur_badge(t.recur)),
+                overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
             })
             .collect()
     };
@@ -594,6 +601,7 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             Ok(g) => g,
             Err(e) => e.into_inner(),
         };
+        let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
         let to_row = |t: magpie_app::tasks::Task| TaskRow {
             note_id: t.note_id as i32,
             line_index: t.line_index as i32,
@@ -609,6 +617,7 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             project: SharedString::from(t.project.unwrap_or_default()),
             source: SharedString::from(t.note_name),
             recur: SharedString::from(recur_badge(t.recur)),
+            overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
         };
 
         let all = magpie_app::tasks::all_tasks(&store, now);
@@ -623,7 +632,6 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
         popover.set_ptasks(ModelRc::new(VecModel::from(open_rows)));
 
         // Today tab: overdue + due-today.
-        let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
         let buckets = magpie_app::tasks::partition_due(all, today_ms);
         let overdue: Vec<TaskRow> = buckets.overdue.into_iter().map(to_row).collect();
         let today: Vec<TaskRow> = buckets.today.into_iter().map(to_row).collect();
