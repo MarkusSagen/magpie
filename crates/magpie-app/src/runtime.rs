@@ -553,6 +553,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
+    let filter = ui.get_task_filter();
     let rows: Vec<TaskRow> = {
         let store = match state.store.lock() {
             Ok(g) => g,
@@ -563,6 +564,12 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
             .into_iter()
             .flat_map(|g| g.tasks)
             .filter(|t| show_done || !t.done)
+            .filter(|t| match filter.as_str() {
+                "today" => t.due_ms.map(|d| d <= today_ms).unwrap_or(false),
+                "recurring" => t.recur.is_some(),
+                "star" => t.bookmarked,
+                _ => true,
+            })
             .map(|t| TaskRow {
                 note_id: t.note_id as i32,
                 line_index: t.line_index as i32,
@@ -579,6 +586,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 source: SharedString::from(t.note_name),
                 recur: SharedString::from(recur_badge(t.recur)),
                 overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+                bookmarked: t.bookmarked,
             })
             .collect()
     };
@@ -618,6 +626,7 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             source: SharedString::from(t.note_name),
             recur: SharedString::from(recur_badge(t.recur)),
             overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+            bookmarked: t.bookmarked,
         };
 
         let all = magpie_app::tasks::all_tasks(&store, now);
@@ -2285,6 +2294,27 @@ pub fn start() {
                     Err(e) => e.into_inner(),
                 };
                 magpie_app::tasks::toggle_task(
+                    &store,
+                    note_id as i64,
+                    line_index as usize,
+                    now_ms(),
+                );
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_bookmark(move |note_id, line_index| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = magpie_app::tasks::set_bookmark(
                     &store,
                     note_id as i64,
                     line_index as usize,

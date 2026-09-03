@@ -79,6 +79,7 @@ struct TaskRow {
     source: string,
     recur: string,
     overdue: bool,
+    bookmarked: bool,
 }
 
 struct ClipRow {
@@ -351,8 +352,10 @@ export component LauncherWindow inherits Window {
     in-out property <bool> show-done: false;
     // Keyboard-selected task row index (Tasks mode).
     in-out property <int> task-selected: 0;
+    in-out property <string> task-filter: "all";
     callback set-mode-tasks(bool);
     callback toggle-task(int, int);
+    callback toggle-bookmark(int, int);
     callback open-task-note(int);
     callback refresh-tasks();
 
@@ -1590,6 +1593,12 @@ export component LauncherWindow inherits Window {
                         }
                         return accept;
                     }
+                    if e.text == "b" {
+                        if root.tasks.length > 0 {
+                            root.toggle-bookmark(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].line_index);
+                        }
+                        return accept;
+                    }
                     return reject;
                 }
             }
@@ -1621,6 +1630,23 @@ export component LauncherWindow inherits Window {
                             }
                         }
                         Text { text: "Show done"; color: root.show-done ? Pal.on-accent : #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for f in [
+                        { id: "all", label: "All" },
+                        { id: "today", label: "Today" },
+                        { id: "recurring", label: "Recurring" },
+                        { id: "star", label: "★" },
+                    ]: Rectangle {
+                        height: 26px;
+                        width: f.id == "star" ? 34px : (f.id == "recurring" ? 96px : 60px);
+                        border-radius: 6px;
+                        background: root.task-filter == f.id ? Pal.accent : (chf.has-hover ? #34343c : #2a2a30);
+                        chf := TouchArea { clicked => { root.task-filter = f.id; root.refresh-tasks(); } }
+                        Text { text: f.label; color: root.task-filter == f.id ? Pal.on-accent : #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 // The list. `group_sort` already clusters by project + orders within,
@@ -1712,7 +1738,19 @@ export component LauncherWindow inherits Window {
                                     if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
                                     if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; }
                                     if t.recur != "": Text { text: t.recur; color: #7ad7a0; font-size: 11px; vertical-alignment: center; }
+                                    if t.bookmarked: Text { text: "★"; color: #e0c04a; font-size: 11px; vertical-alignment: center; }
                                     if t.source != "": Text { text: "in " + t.source; color: #7a7a80; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                            Rectangle {
+                                width: 30px;
+                                bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
+                                Text {
+                                    text: t.bookmarked ? "★" : "☆";
+                                    color: t.bookmarked ? #e0c04a : (bmk.has-hover ? #d0d0d4 : #55555f);
+                                    font-size: 16px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
                                 }
                             }
                         }
