@@ -340,11 +340,15 @@ export component LauncherWindow inherits Window {
     callback note-from-entry(int);
     // Promote the note line containing the given byte offset to a `- [ ]` task.
     callback promote-line(int);
+    // Keyboard nav: move to the previous (-1) / next (+1) note and open it.
+    callback nav-note(int);
 
     // ---- Tasks mode ----
     in property <[TaskRow]> tasks;
     in-out property <bool> tasks-mode: false;
     in-out property <bool> show-done: false;
+    // Keyboard-selected task row index (Tasks mode).
+    in-out property <int> task-selected: 0;
     callback set-mode-tasks(bool);
     callback toggle-task(int, int);
     callback open-task-note(int);
@@ -1295,6 +1299,34 @@ export component LauncherWindow inherits Window {
         // ---- Notes mode (opaque overlay covering the clipboard body) ----
         if root.notes-mode: Rectangle {
             background: #1e1e21;
+            // Keyboard nav: the list is focused on entry; ↑/↓ switch notes (opening
+            // each), ⏎ dives into the editor, Esc exits. Empty FocusScope → no layout
+            // impact; mouse still works on the panes below.
+            nlistfs := FocusScope {
+                init => {
+                    self.focus();
+                }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        root.set-mode-notes(false);
+                        searchinput.focus();
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        root.nav-note(1);
+                        return accept;
+                    }
+                    if e.text == Key.UpArrow {
+                        root.nav-note(-1);
+                        return accept;
+                    }
+                    if e.text == Key.Return {
+                        ned.focus();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
             HorizontalLayout {
                 padding: 8px;
                 spacing: 8px;
@@ -1401,10 +1433,23 @@ export component LauncherWindow inherits Window {
                                 wrap: word-wrap;
                                 edited => { root.edit-note-body(self.text); }
                                 key-pressed(event) => {
-                                    // ⌘⏎ promotes the current line to a task; every
-                                    // other key falls through to normal editing.
+                                    // ⌘⏎ promotes the current line to a task; ⌘↑/⌘↓
+                                    // switch notes while editing; Esc returns focus to
+                                    // the note list. Everything else edits normally.
                                     if event.modifiers.control && event.text == Key.Return {
                                         root.promote-line(self.cursor-position-byte-offset);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.UpArrow {
+                                        root.nav-note(-1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.DownArrow {
+                                        root.nav-note(1);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Escape {
+                                        nlistfs.focus();
                                         return accept;
                                     }
                                     return reject;
@@ -1506,6 +1551,46 @@ export component LauncherWindow inherits Window {
         // ---- Tasks mode (opaque overlay: flat, grouped/sorted task list) ----
         if root.tasks-mode: Rectangle {
             background: #1e1e21;
+            // Keyboard nav: ↑/↓ select, Space toggles, ⏎ opens the note, Esc exits.
+            // An empty FocusScope holds focus without affecting layout or mouse.
+            tfs := FocusScope {
+                init => {
+                    self.focus();
+                    root.task-selected = 0;
+                }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        root.set-mode-tasks(false);
+                        searchinput.focus();
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        if root.task-selected < root.tasks.length - 1 {
+                            root.task-selected += 1;
+                        }
+                        return accept;
+                    }
+                    if e.text == Key.UpArrow {
+                        if root.task-selected > 0 {
+                            root.task-selected -= 1;
+                        }
+                        return accept;
+                    }
+                    if e.text == " " {
+                        if root.tasks.length > 0 {
+                            root.toggle-task(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].line_index);
+                        }
+                        return accept;
+                    }
+                    if e.text == Key.Return {
+                        if root.tasks.length > 0 {
+                            root.open-task-note(root.tasks[root.task-selected].note_id);
+                        }
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
             VerticalLayout {
                 padding: 8px;
                 spacing: 8px;
@@ -1539,9 +1624,9 @@ export component LauncherWindow inherits Window {
                 // The list. `group_sort` already clusters by project + orders within,
                 // so a flat list reads correctly top-to-bottom.
                 ListView {
-                    for t in root.tasks: Rectangle {
+                    for t[i] in root.tasks: Rectangle {
                         height: 48px;
-                        background: trow.has-hover ? #26262c : transparent;
+                        background: i == root.task-selected ? #2f2f37 : (trow.has-hover ? #26262c : transparent);
                         border-radius: 6px;
                         // Row click jumps to the note that owns this task. The checkbox
                         // has its own TouchArea (declared later → higher z-order) so it
@@ -2212,10 +2297,23 @@ export component Popover inherits Window {
         fs := FocusScope {
             width: 100%;
             height: 100%;
-            // Esc closes the popover; everything else falls through to the field.
+            // Esc closes the popover; ←/→ switch tabs; everything else falls through
+            // to the quick-add field.
             key-pressed(e) => {
                 if e.text == Key.Escape {
                     root.dismiss();
+                    return accept;
+                }
+                if e.text == Key.RightArrow {
+                    if root.tab < 3 {
+                        root.tab += 1;
+                    }
+                    return accept;
+                }
+                if e.text == Key.LeftArrow {
+                    if root.tab > 0 {
+                        root.tab -= 1;
+                    }
                     return accept;
                 }
                 return reject;

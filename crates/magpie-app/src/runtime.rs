@@ -558,6 +558,12 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
             })
             .collect()
     };
+    // Keep the keyboard selection in range after the list changes (e.g. a task
+    // was completed and filtered out).
+    let len = rows.len() as i32;
+    if ui.get_task_selected() >= len {
+        ui.set_task_selected((len - 1).max(0));
+    }
     ui.set_tasks(ModelRc::new(VecModel::from(rows)));
 }
 
@@ -2040,6 +2046,31 @@ pub fn start() {
         ui.on_open_note(move |id| {
             if let Some(ui) = w.upgrade() {
                 ui.set_note_id(id);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
+    {
+        // Keyboard note switching: move to the adjacent note in the displayed list
+        // (recent_notes order) and open it.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_nav_note(move |delta| {
+            if let Some(ui) = w.upgrade() {
+                let cur = ui.get_note_id();
+                let notes = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store.recent_notes(200).unwrap_or_default()
+                };
+                if notes.is_empty() {
+                    return;
+                }
+                let idx = notes.iter().position(|n| n.id as i32 == cur).unwrap_or(0) as i64;
+                let new = (idx + delta as i64).clamp(0, notes.len() as i64 - 1) as usize;
+                ui.set_note_id(notes[new].id as i32);
                 refresh_notes(&ui, &s);
             }
         });
