@@ -148,6 +148,24 @@ pub fn parse_time(token: &str) -> Option<i64> {
     Some(h * 60 + m)
 }
 
+/// Human duration for tracked time: "2h 5m", "45m", "30s"; "" for under a second.
+pub fn fmt_duration(ms: i64) -> String {
+    if ms < 1000 {
+        return String::new();
+    }
+    let secs = ms / 1000;
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else if m > 0 {
+        format!("{m}m")
+    } else {
+        format!("{s}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::relative_time;
@@ -221,5 +239,15 @@ mod tests {
         assert_eq!(parse_time("5"), None);
         assert_eq!(parse_time("24:00"), None);
         assert_eq!(parse_time("banana"), None);
+    }
+
+    #[test]
+    fn fmt_duration_units() {
+        use super::fmt_duration;
+        assert_eq!(fmt_duration(0), "");
+        assert_eq!(fmt_duration(500), "");
+        assert_eq!(fmt_duration(30_000), "30s");
+        assert_eq!(fmt_duration(90_000), "1m");
+        assert_eq!(fmt_duration(3_600_000 + 300_000), "1h 5m");
     }
 }
