@@ -321,17 +321,16 @@ pub fn partition_due(tasks: Vec<Task>, today_ms: i64) -> DueBuckets {
 /// (a bare `+1`, `+0d`, or non-numeric stays in the task title).
 pub fn parse_recur(tok: &str) -> Option<Recur> {
     let s = tok.strip_prefix('+')?;
-    let (num, unit) = if let Some(n) = s.strip_suffix("mo") {
-        (n, RecurUnit::Month)
-    } else if let Some(n) = s.strip_suffix('d') {
-        (n, RecurUnit::Day)
-    } else if let Some(n) = s.strip_suffix('w') {
-        (n, RecurUnit::Week)
-    } else if let Some(n) = s.strip_suffix('y') {
-        (n, RecurUnit::Year)
-    } else {
-        return None;
-    };
+    // Try the two-char unit ("mo") before the single-char ones so "1mo" isn't read
+    // as "1m" + leftover.
+    let (num, unit) = [
+        ("mo", RecurUnit::Month),
+        ("d", RecurUnit::Day),
+        ("w", RecurUnit::Week),
+        ("y", RecurUnit::Year),
+    ]
+    .into_iter()
+    .find_map(|(suffix, unit)| s.strip_suffix(suffix).map(|n| (n, unit)))?;
     let n: i64 = num.parse().ok()?;
     if n <= 0 {
         return None;

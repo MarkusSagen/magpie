@@ -555,7 +555,7 @@ export component LauncherWindow inherits Window {
             if root.view == "list": VerticalLayout {
                 spacing: 8px;
 
-                // Type filter + sort + stats.
+                // Row 1 — filter + sort the clipboard list.
                 HorizontalLayout {
                     spacing: 6px;
                     // Order must match `viewmodel::type_filter_from_index` /
@@ -577,8 +577,14 @@ export component LauncherWindow inherits Window {
                         sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
                         Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
-                    // Divider: filters/sort to the left, view + utility controls to the right.
-                    Rectangle { width: 1px; height: 18px; y: 4px; background: #33333c; }
+                }
+
+                // Row 2 — mode switch + utilities, right-aligned (secondary to the
+                // list filters above). Separating the two rows keeps either from
+                // crowding the other on narrow windows.
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle { horizontal-stretch: 1; }
                     Rectangle {
                         width: 84px;
                         height: 26px;
@@ -1708,17 +1714,26 @@ export component LauncherWindow inherits Window {
                                 }
                                 cbta := TouchArea { clicked => { root.toggle-task(t.note_id, t.line_index); } }
                             }
-                            // Priority dot (0 red / 1 amber / 2 blue / else none).
+                            // Priority pill in the gutter: labeled H/M/L (0 red /
+                            // 1 amber / 2 blue) so the colour isn't a mystery; blank
+                            // for None.
                             Rectangle {
-                                width: 12px;
-                                Rectangle {
-                                    y: 19px;
-                                    width: 10px;
-                                    height: 10px;
+                                width: 20px;
+                                if t.priority <= 2: Rectangle {
+                                    y: 15px;
+                                    width: 18px;
+                                    height: 18px;
                                     border-radius: 5px;
                                     background: t.priority == 0 ? #e05a5a
-                                        : (t.priority == 1 ? #e0a44a
-                                        : (t.priority == 2 ? #6a8cff : transparent));
+                                        : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                    Text {
+                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                        color: #16161a;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                             VerticalLayout {
@@ -1738,8 +1753,8 @@ export component LauncherWindow inherits Window {
                                     if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
                                     if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; }
                                     if t.recur != "": Text { text: t.recur; color: #7ad7a0; font-size: 11px; vertical-alignment: center; }
-                                    if t.bookmarked: Text { text: "★"; color: #e0c04a; font-size: 11px; vertical-alignment: center; }
-                                    if t.source != "": Text { text: "in " + t.source; color: #7a7a80; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                                    // (bookmark shown by the trailing ★ toggle, not a badge)
+                                    if t.source != "": Text { text: t.source; color: #62626a; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                             Rectangle {
