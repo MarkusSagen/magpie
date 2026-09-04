@@ -1,19 +1,42 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Run,
     InstallAutostart,
     UninstallAutostart,
     Help,
+    Export(std::path::PathBuf),
+    Backup(std::path::PathBuf),
+    Restore(std::path::PathBuf),
 }
 
 pub fn parse_args(args: &[String]) -> Command {
-    for a in args {
-        match a.as_str() {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--install-autostart" => return Command::InstallAutostart,
             "--uninstall-autostart" => return Command::UninstallAutostart,
             "--help" | "-h" => return Command::Help,
+            "--export" => {
+                return match args.get(i + 1) {
+                    Some(p) => Command::Export(std::path::PathBuf::from(p)),
+                    None => Command::Run,
+                };
+            }
+            "--backup" => {
+                return match args.get(i + 1) {
+                    Some(p) => Command::Backup(std::path::PathBuf::from(p)),
+                    None => Command::Run,
+                };
+            }
+            "--restore" => {
+                return match args.get(i + 1) {
+                    Some(p) => Command::Restore(std::path::PathBuf::from(p)),
+                    None => Command::Run,
+                };
+            }
             _ => {}
         }
+        i += 1;
     }
     Command::Run
 }
@@ -28,11 +51,14 @@ FLAGS:
     (no flags)              Run the tray app
     --install-autostart     Start Magpie automatically at login
     --uninstall-autostart   Remove login autostart
+    --export <dir>          Export notes (Markdown) + clipboard (JSONL) to <dir>
+    --backup <dir>          Write a full backup (DB snapshot + assets) to <dir>
+    --restore <dir>         Restore from a backup dir (quit Magpie first)
     -h, --help              Show this help
 ";
 
 /// Returns a process exit code, or -1 to signal `main` to launch the GUI.
-pub fn run_command(cmd: Command) -> i32 {
+pub fn run_command(cmd: Command, data_dir: &std::path::Path) -> i32 {
     match cmd {
         Command::Help => {
             println!("{USAGE}");
@@ -41,7 +67,130 @@ pub fn run_command(cmd: Command) -> i32 {
         Command::InstallAutostart => set_autostart(true),
         Command::UninstallAutostart => set_autostart(false),
         Command::Run => -1,
+        Command::Export(out) => export_data(data_dir, &out),
+        Command::Backup(dest) => backup_data(data_dir, &dest),
+        Command::Restore(src) => restore_data(data_dir, &src),
     }
+}
+
+fn open_store(data_dir: &std::path::Path) -> Result<magpie_core::Store, String> {
+    magpie_core::open(&data_dir.join("magpie.sqlite3")).map_err(|e| e.to_string())
+}
+
+fn export_data(data_dir: &std::path::Path, out: &std::path::Path) -> i32 {
+    let store = match open_store(data_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("export: {e}");
+            return 1;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(out) {
+        eprintln!("export: {e}");
+        return 1;
+    }
+    let notes = match magpie_core::export_markdown(&store, out) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("export: {e}");
+            return 1;
+        }
+    };
+    let clips = match magpie_core::export_clipboard_jsonl(&store, &out.join("clipboard.jsonl")) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("export: {e}");
+            return 1;
+        }
+    };
+    println!(
+        "Exported {notes} notes (Markdown) and {clips} clipboard entries to {}",
+        out.display()
+    );
+    0
+}
+
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if !src.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let p = entry.path();
+        let d = dst.join(entry.file_name());
+        if p.is_dir() {
+            copy_dir_all(&p, &d)?;
+        } else {
+            std::fs::copy(&p, &d)?;
+        }
+    }
+    Ok(())
+}
+
+fn backup_data(data_dir: &std::path::Path, dest: &std::path::Path) -> i32 {
+    let store = match open_store(data_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("backup: {e}");
+            return 1;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(dest) {
+        eprintln!("backup: {e}");
+        return 1;
+    }
+    if let Err(e) = magpie_core::backup_db(&store, &dest.join("magpie.sqlite3")) {
+        eprintln!("backup: {e}");
+        return 1;
+    }
+    for dir in ["favicons", "app_icons"] {
+        if let Err(e) = copy_dir_all(&data_dir.join(dir), &dest.join(dir)) {
+            eprintln!("backup ({dir}): {e}");
+            return 1;
+        }
+    }
+    let cfg = data_dir.join("config.toml");
+    if cfg.exists() {
+        if let Err(e) = std::fs::copy(&cfg, dest.join("config.toml")) {
+            eprintln!("backup (config): {e}");
+            return 1;
+        }
+    }
+    println!("Backed up to {}", dest.display());
+    0
+}
+
+fn restore_data(data_dir: &std::path::Path, src: &std::path::Path) -> i32 {
+    eprintln!("Restore: quit Magpie first if it is running, or the database may be corrupted.");
+    let db = src.join("magpie.sqlite3");
+    if !db.exists() {
+        eprintln!("restore: no magpie.sqlite3 in {}", src.display());
+        return 1;
+    }
+    if let Err(e) = std::fs::create_dir_all(data_dir) {
+        eprintln!("restore: {e}");
+        return 1;
+    }
+    if let Err(e) = std::fs::copy(&db, data_dir.join("magpie.sqlite3")) {
+        eprintln!("restore: {e}");
+        return 1;
+    }
+    // Drop stale WAL/SHM so the restored DB isn't shadowed.
+    let _ = std::fs::remove_file(data_dir.join("magpie.sqlite3-wal"));
+    let _ = std::fs::remove_file(data_dir.join("magpie.sqlite3-shm"));
+    for dir in ["favicons", "app_icons"] {
+        if let Err(e) = copy_dir_all(&src.join(dir), &data_dir.join(dir)) {
+            eprintln!("restore ({dir}): {e}");
+            return 1;
+        }
+    }
+    let cfg = src.join("config.toml");
+    if cfg.exists() {
+        let _ = std::fs::copy(&cfg, data_dir.join("config.toml"));
+    }
+    println!("Restored from {} — restart Magpie.", src.display());
+    0
 }
 
 fn set_autostart(on: bool) -> i32 {
@@ -97,6 +246,27 @@ mod tests {
 
     #[test]
     fn help_command_returns_zero() {
-        assert_eq!(run_command(Command::Help), 0);
+        assert_eq!(
+            run_command(Command::Help, &std::path::PathBuf::from("/tmp")),
+            0
+        );
+    }
+
+    #[test]
+    fn parses_export_backup_restore() {
+        assert!(matches!(
+            parse_args(&v(&["--export", "/tmp/x"])),
+            Command::Export(p) if p.as_path() == std::path::Path::new("/tmp/x")
+        ));
+        assert!(matches!(
+            parse_args(&v(&["--backup", "/tmp/b"])),
+            Command::Backup(_)
+        ));
+        assert!(matches!(
+            parse_args(&v(&["--restore", "/tmp/r"])),
+            Command::Restore(_)
+        ));
+        // missing path → Run
+        assert!(matches!(parse_args(&v(&["--export"])), Command::Run));
     }
 }
