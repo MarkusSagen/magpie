@@ -714,6 +714,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("merge", "➕", "Add to merge", "⌘G"),
     ("note", "🗒", "New note from this entry", "⌘J"),
     ("delete", "🗑", "Delete", "⌘⌫"),
+    ("export", "📤", "Export data…", ""),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -2376,6 +2377,31 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 refresh_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        // ⌘K "Export data…": write a Markdown vault + clipboard JSONL to a dated
+        // folder in Downloads and reveal it in Finder.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_export_data(move || {
+            let out = dirs::home_dir()
+                .map(|h| h.join("Downloads"))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(format!("Magpie Export {}", abs_date(now_ms())));
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = std::fs::create_dir_all(&out);
+                let _ = magpie_core::export_markdown(&store, &out);
+                let _ = magpie_core::export_clipboard_jsonl(&store, &out.join("clipboard.jsonl"));
+            }
+            magpie_app::diagnostics::reveal(&out);
+            if let Some(ui) = w.upgrade() {
+                hide_launcher(&ui);
             }
         });
     }

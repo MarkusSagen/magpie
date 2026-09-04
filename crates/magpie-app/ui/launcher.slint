@@ -120,6 +120,7 @@ global Icons {
     out property <image> act-merge: @image-url("../../../assets/icons/act-merge.svg");
     out property <image> act-note: @image-url("../../../assets/icons/act-note.svg");
     out property <image> act-delete: @image-url("../../../assets/icons/act-delete.svg");
+    out property <image> act-export: @image-url("../../../assets/icons/act-export.svg");
 }
 
 // A type-kind glyph: picks the icon by `Kind::as_str()` value (rtf/html/text → text).
@@ -151,6 +152,7 @@ component ActionIcon inherits Image {
         : root.id == "merge" ? Icons.act-merge
         : root.id == "note" ? Icons.act-note
         : root.id == "delete" ? Icons.act-delete
+        : root.id == "export" ? Icons.act-export
         : Icons.act-paste;
 }
 
@@ -282,7 +284,9 @@ export component LauncherWindow inherits Window {
         else if id == "merge" { root.toggle-merge(root.selected); }
         else if id == "note" { root.note-from-entry(root.selected); }
         else if id == "delete" { root.delete-entry(root.selected); }
+        else if id == "export" { root.export-data(); }
     }
+    callback export-data();
 
     // "none" | "entry" | "snippet" — also drives the edit modal.
     in-out property <string> edit-mode: "none";
