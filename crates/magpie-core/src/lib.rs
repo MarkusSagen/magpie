@@ -16,6 +16,7 @@
 pub mod delete;
 pub mod detect;
 pub mod edit;
+pub mod export;
 pub mod mask_support;
 pub mod merge;
 pub mod metrics;
@@ -29,6 +30,7 @@ pub mod store;
 pub mod tags;
 
 pub use detect::Kind;
+pub use export::{backup_db, export_clipboard_jsonl, export_markdown};
 pub use model::{AppInfo, CaptureEvent, Content, Entry};
 pub use notes::Note;
 pub use retention::{Removed, RetentionPolicy};
