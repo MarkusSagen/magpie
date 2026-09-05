@@ -93,3 +93,13 @@ CREATE TABLE IF NOT EXISTS time_entries (
   end_ms     INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_time_entries_key ON time_entries(task_key);
+
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id       INTEGER PRIMARY KEY,
+  url      TEXT NOT NULL,
+  title    TEXT NOT NULL DEFAULT '',
+  domain   TEXT NOT NULL DEFAULT '',
+  added_ms INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_url ON bookmarks(url);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_added ON bookmarks(added_ms);

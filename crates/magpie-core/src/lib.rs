@@ -13,6 +13,7 @@
 //! assert_eq!(s.search(&default_query()).unwrap().len(), 1);
 //! ```
 
+pub mod bookmarks;
 pub mod delete;
 pub mod detect;
 pub mod edit;
@@ -29,6 +30,7 @@ pub mod stats;
 pub mod store;
 pub mod tags;
 
+pub use bookmarks::Bookmark;
 pub use detect::Kind;
 pub use export::{backup_db, export_clipboard_jsonl, export_markdown};
 pub use model::{AppInfo, CaptureEvent, Content, Entry};

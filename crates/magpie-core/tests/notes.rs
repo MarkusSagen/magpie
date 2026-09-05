@@ -131,3 +131,21 @@ fn time_tracking_start_stop_total() {
     assert_eq!(s.total_ms_for("n1|Review", 20_000).unwrap(), 4_000);
     assert!(!s.stop_active(9_000).unwrap());
 }
+
+#[test]
+fn bookmarks_crud() {
+    let s = store();
+    let id = s.add_bookmark("https://a.com/x", "A", "a.com", 10).unwrap();
+    assert!(id > 0);
+    s.add_bookmark("https://a.com/x", "A better", "a.com", 20)
+        .unwrap();
+    s.add_bookmark("https://b.com", "B", "b.com", 30).unwrap();
+    let all = s.list_bookmarks("", 50).unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].url, "https://b.com");
+    let hit = s.list_bookmarks("better", 50).unwrap();
+    assert_eq!(hit.len(), 1);
+    assert_eq!(hit[0].title, "A better");
+    assert!(s.delete_bookmark(hit[0].id).unwrap());
+    assert_eq!(s.list_bookmarks("", 50).unwrap().len(), 1);
+}
