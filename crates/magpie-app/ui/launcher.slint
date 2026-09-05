@@ -58,6 +58,13 @@ struct NoteRow {
     is_daily: bool,
 }
 
+struct BookmarkRow {
+    id: int,
+    title: string,
+    domain: string,
+    url: string,
+}
+
 struct RefRow {
     note_id: int,
     line_index: int,
@@ -285,6 +292,7 @@ export component LauncherWindow inherits Window {
         else if id == "note" { root.note-from-entry(root.selected); }
         else if id == "delete" { root.delete-entry(root.selected); }
         else if id == "export" { root.export-data(); }
+        else if id == "bookmark" { root.bookmark-selected(); }
     }
     callback export-data();
 
@@ -368,6 +376,18 @@ export component LauncherWindow inherits Window {
     callback toggle-timer(int, string);
     callback open-task-note(int);
     callback refresh-tasks();
+
+    // ---- Bookmarks mode ----
+    in-out property <bool> bookmarks-mode: false;
+    in property <[BookmarkRow]> bookmarks;
+    in-out property <string> bookmark-query;
+    in-out property <string> bookmark-add-url;
+    callback set-mode-bookmarks(bool);
+    callback bookmark-search(string);
+    callback add-bookmark(string);
+    callback open-bookmark(string);
+    callback delete-bookmark(int);
+    callback bookmark-selected();
 
     // Re-focus the search field whenever we return to list mode.
     changed mode => {
@@ -618,6 +638,14 @@ export component LauncherWindow inherits Window {
                         border-radius: 6px;
                         tasksta := TouchArea { clicked => { root.set-mode-tasks(!root.tasks-mode); } }
                         Text { text: "Tasks"; color: root.tasks-mode ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 84px;
+                        height: 26px;
+                        background: root.bookmarks-mode ? Pal.accent : (bmksta.has-hover ? #2c2c33 : #202024);
+                        border-radius: 6px;
+                        bmksta := TouchArea { clicked => { root.set-mode-bookmarks(!root.bookmarks-mode); } }
+                        Text { text: "Bookmarks"; color: root.bookmarks-mode ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 58px;
@@ -1837,6 +1865,82 @@ export component LauncherWindow inherits Window {
                         font-size: 13px;
                         vertical-alignment: center;
                     }
+                }
+            }
+        }
+
+        if root.bookmarks-mode: Rectangle {
+            background: #1e1e21;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        width: 92px; height: 30px; border-radius: 6px;
+                        background: bkback.has-hover ? #34343c : #2a2a30;
+                        bkback := TouchArea { clicked => { root.set-mode-bookmarks(false); } }
+                        Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Text { text: "Bookmarks"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                // Search + add-url row.
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        horizontal-stretch: 1; height: 30px; background: #2a2a30; border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            if root.bookmark-query == "": Text { text: "Search bookmarks…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                            bkq := TextInput {
+                                text <=> root.bookmark-query;
+                                color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
+                                edited => { root.bookmark-search(self.text); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1; height: 30px; background: #2a2a30; border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            if root.bookmark-add-url == "": Text { text: "Add URL (Enter)…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                            bkadd := TextInput {
+                                text <=> root.bookmark-add-url;
+                                color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
+                                key-pressed(e) => {
+                                    if e.text == Key.Return { root.add-bookmark(self.text); self.text = ""; return accept; }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+                }
+                ListView {
+                    for b in root.bookmarks: Rectangle {
+                        height: 46px;
+                        background: bkrow.has-hover ? #26262c : transparent;
+                        border-radius: 6px;
+                        bkrow := TouchArea { clicked => { root.open-bookmark(b.url); } }
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px; spacing: 8px;
+                            Text { text: "🔖"; font-size: 15px; vertical-alignment: center; }
+                            VerticalLayout {
+                                horizontal-stretch: 1; padding-top: 5px; padding-bottom: 5px;
+                                Text { text: b.title == "" ? b.url : b.title; color: white; font-size: 13px; overflow: elide; }
+                                Text { text: b.domain; color: #8a8a90; font-size: 11px; overflow: elide; }
+                            }
+                            Rectangle {
+                                width: 28px;
+                                bkdel := TouchArea { clicked => { root.delete-bookmark(b.id); } }
+                                Text { text: "✕"; color: bkdel.has-hover ? #ff9a9a : #55555f; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+                if root.bookmarks.length == 0: HorizontalLayout {
+                    alignment: center;
+                    Text { text: "No bookmarks yet. Add a URL above, or ⌘K → Bookmark a copied link."; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
                 }
             }
         }

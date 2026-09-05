@@ -1,6 +1,6 @@
 use crate::{
-    ActionItem, AppItem, Bar, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover, RefRow,
-    SlotItem, TaskRow,
+    ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover,
+    RefRow, SlotItem, TaskRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -517,6 +517,29 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     )));
 }
 
+/// Rebuild the bookmarks list from the store, filtered by the current search query.
+fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
+    let q = ui.get_bookmark_query();
+    let rows: Vec<BookmarkRow> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store
+            .list_bookmarks(q.as_str(), 500)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| BookmarkRow {
+                id: b.id as i32,
+                title: SharedString::from(b.title),
+                domain: SharedString::from(b.domain),
+                url: SharedString::from(b.url),
+            })
+            .collect()
+    };
+    ui.set_bookmarks(ModelRc::new(VecModel::from(rows)));
+}
+
 /// Provenance line. Phase 1 keeps it simple: whether the note was captured from a
 /// clip or authored in Magpie, plus the creation date. (Enriching "captured" with
 /// the exact source app name — via an app-id→name lookup — is a later refinement.)
@@ -715,6 +738,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("note", "🗒", "New note from this entry", "⌘J"),
     ("delete", "🗑", "Delete", "⌘⌫"),
     ("export", "📤", "Export data…", ""),
+    ("bookmark", "🔖", "Bookmark this link", ""),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -2096,6 +2120,7 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 ui.set_notes_mode(on);
                 if on {
+                    ui.set_bookmarks_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2304,6 +2329,7 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 ui.set_tasks_mode(on);
                 if on {
+                    ui.set_bookmarks_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -2423,6 +2449,118 @@ pub fn start() {
         ui.on_refresh_tasks(move || {
             if let Some(ui) = w.upgrade() {
                 refresh_tasks(&ui, &s);
+            }
+        });
+    }
+    // ---- Bookmarks mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_bookmarks(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_bookmarks_mode(on);
+                if on {
+                    ui.set_notes_mode(false);
+                    ui.set_tasks_mode(false);
+                    refresh_bookmarks(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_bookmark_search(move |_q| {
+            if let Some(ui) = w.upgrade() {
+                refresh_bookmarks(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_add_bookmark(move |url| {
+            let url = url.trim().to_string();
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return;
+            }
+            let domain = magpie_app::favicon::domain_of(&url).unwrap_or_default();
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = store.add_bookmark(&url, "", &domain, now_ms());
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_bookmarks(&ui, &s);
+            }
+            // Background: fetch the real title, then upsert + refresh.
+            let s2 = s.clone();
+            let w2 = w.clone();
+            std::thread::spawn(move || {
+                let meta = magpie_app::link_meta::fetch_link_meta(&url);
+                if let Some(title) = meta.title {
+                    {
+                        let store = match s2.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        let _ = store.add_bookmark(&url, &title, &domain, now_ms());
+                    }
+                    let s3 = s2.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w2.upgrade() {
+                            refresh_bookmarks(&ui, &s3);
+                        }
+                    });
+                }
+            });
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_open_bookmark(move |url| {
+            let _ = std::process::Command::new("open").arg(url.as_str()).spawn();
+            if let Some(ui) = w.upgrade() {
+                hide_launcher(&ui);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_delete_bookmark(move |id| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = store.delete_bookmark(id as i64);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_bookmarks(&ui, &s);
+            }
+        });
+    }
+    {
+        // ⌘K "Bookmark this link": save the selected clipboard entry if it's a URL.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_bookmark_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let url = e.full_text.trim().to_string();
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        ui.invoke_add_bookmark(SharedString::from(url));
+                        ui.set_bookmarks_mode(true);
+                        ui.set_notes_mode(false);
+                        ui.set_tasks_mode(false);
+                        refresh_bookmarks(&ui, &s);
+                    }
+                }
             }
         });
     }
