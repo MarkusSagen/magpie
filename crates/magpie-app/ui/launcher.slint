@@ -1933,7 +1933,7 @@ export component LauncherWindow inherits Window {
                             Rectangle {
                                 width: 28px;
                                 bkdel := TouchArea { clicked => { root.delete-bookmark(b.id); } }
-                                Text { text: "✕"; color: bkdel.has-hover ? #ff9a9a : #55555f; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                                Text { text: "×"; color: bkdel.has-hover ? #ff9a9a : #55555f; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
                             }
                         }
                     }
