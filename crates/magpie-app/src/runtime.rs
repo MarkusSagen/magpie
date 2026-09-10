@@ -568,6 +568,42 @@ fn recur_badge(recur: Option<magpie_app::tasks::Recur>) -> String {
     }
 }
 
+/// Map a task to a `TaskRow`, including time-tracking fields (whether its timer
+/// is the currently-running one, plus its accumulated duration). Shared by
+/// `refresh_tasks` and `refresh_today` — the two views that surface tracking;
+/// `refresh_popover` uses a lighter mapping since the popover doesn't show it.
+fn task_row_with_tracking(
+    t: magpie_app::tasks::Task,
+    today_ms: i64,
+    active: &Option<magpie_core::notes::ActiveTimer>,
+    store: &magpie_core::Store,
+    now: i64,
+) -> TaskRow {
+    let key = format!("{}|{}", t.note_id, t.title);
+    let tracking = active.as_ref().map(|a| a.task_key == key).unwrap_or(false);
+    let total_ms = store.total_ms_for(&key, now).unwrap_or(0);
+    TaskRow {
+        note_id: t.note_id as i32,
+        line_index: t.line_index as i32,
+        title: SharedString::from(t.title),
+        done: t.done,
+        priority: match t.priority {
+            magpie_app::tasks::Priority::High => 0,
+            magpie_app::tasks::Priority::Medium => 1,
+            magpie_app::tasks::Priority::Low => 2,
+            magpie_app::tasks::Priority::None => 3,
+        },
+        due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+        project: SharedString::from(t.project.unwrap_or_default()),
+        source: SharedString::from(t.note_name),
+        recur: SharedString::from(recur_badge(t.recur)),
+        overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+        bookmarked: t.bookmarked,
+        tracking,
+        time_total: SharedString::from(magpie_app::format_time::fmt_duration(total_ms)),
+    }
+}
+
 /// Rebuild the Tasks-mode list: every task across all notes, grouped/sorted, then
 /// flattened into a flat model. Done tasks are skipped unless "Show done" is on;
 /// `due_ms` is formatted as an absolute date and `Priority` mapped to 0..3
@@ -596,31 +632,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 "star" => t.bookmarked,
                 _ => true,
             })
-            .map(|t| {
-                let key = format!("{}|{}", t.note_id, t.title);
-                let tracking = active.as_ref().map(|a| a.task_key == key).unwrap_or(false);
-                let total_ms = store.total_ms_for(&key, now).unwrap_or(0);
-                TaskRow {
-                    note_id: t.note_id as i32,
-                    line_index: t.line_index as i32,
-                    title: SharedString::from(t.title),
-                    done: t.done,
-                    priority: match t.priority {
-                        magpie_app::tasks::Priority::High => 0,
-                        magpie_app::tasks::Priority::Medium => 1,
-                        magpie_app::tasks::Priority::Low => 2,
-                        magpie_app::tasks::Priority::None => 3,
-                    },
-                    due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
-                    project: SharedString::from(t.project.unwrap_or_default()),
-                    source: SharedString::from(t.note_name),
-                    recur: SharedString::from(recur_badge(t.recur)),
-                    overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
-                    bookmarked: t.bookmarked,
-                    tracking,
-                    time_total: SharedString::from(magpie_app::format_time::fmt_duration(total_ms)),
-                }
-            })
+            .map(|t| task_row_with_tracking(t, today_ms, &active, &store, now))
             .collect()
     };
     // Keep the keyboard selection in range after the list changes (e.g. a task
@@ -719,6 +731,69 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
         })
         .collect();
     popover.set_clips(ModelRc::new(VecModel::from(clips)));
+}
+
+/// Rebuild the launcher's Today dashboard: the popover's Today + Daily +
+/// Clipboard tabs merged into one full-window overlay. Overdue + due-today
+/// tasks (via `partition_due`, mapped with tracking like `refresh_tasks`), the
+/// running-timer header seed, today's daily-note body, and the most recent
+/// clips (mirrors `refresh_popover`'s clip mapping).
+fn refresh_today(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
+    let active;
+    {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        active = store.active_timer().ok().flatten();
+        let all = magpie_app::tasks::all_tasks(&store, now);
+        let buckets = magpie_app::tasks::partition_due(all, today_ms);
+        let due: Vec<TaskRow> = buckets
+            .overdue
+            .into_iter()
+            .chain(buckets.today)
+            .map(|t| task_row_with_tracking(t, today_ms, &active, &store, now))
+            .collect();
+        ui.set_today_due(ModelRc::new(VecModel::from(due)));
+
+        if let Ok(n) = store.daily_note(&abs_date(now), now) {
+            ui.set_today_journal(SharedString::from(n.body));
+        }
+    }
+
+    match &active {
+        Some(a) => {
+            ui.set_active_title(SharedString::from(a.task_title.clone()));
+            ui.set_active_elapsed_sec(((now - a.start_ms).max(0) / 1000) as i32);
+        }
+        None => {
+            ui.set_active_title(SharedString::from(""));
+            ui.set_active_elapsed_sec(0);
+        }
+    }
+
+    // Clipboard: recent clips, outside the store lock (same source list
+    // `paste_and_close` indexes into, so the clip index aligns with the paste
+    // target).
+    let clips: Vec<ClipRow> = current_results(state, now)
+        .iter()
+        .take(8)
+        .map(|e| ClipRow {
+            title: SharedString::from(
+                e.full_text
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(|l| l.chars().take(80).collect::<String>())
+                    .unwrap_or_else(|| e.kind.as_str().to_string()),
+            ),
+            glyph: SharedString::from(type_glyph(&e.kind)),
+            kind: SharedString::from(e.kind.as_str()),
+        })
+        .collect();
+    ui.set_today_clips(ModelRc::new(VecModel::from(clips)));
 }
 
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
@@ -1225,6 +1300,7 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "notes" => ui.invoke_set_mode_notes(true),
                         "tasks" => ui.invoke_set_mode_tasks(true),
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
+                        "today" => ui.invoke_set_mode_today(true),
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
@@ -2122,6 +2198,7 @@ pub fn start() {
                 ui.set_notes_mode(on);
                 if on {
                     ui.set_bookmarks_mode(false);
+                    ui.set_today_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2331,6 +2408,7 @@ pub fn start() {
                 ui.set_tasks_mode(on);
                 if on {
                     ui.set_bookmarks_mode(false);
+                    ui.set_today_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -2463,6 +2541,7 @@ pub fn start() {
                 if on {
                     ui.set_notes_mode(false);
                     ui.set_tasks_mode(false);
+                    ui.set_today_mode(false);
                     refresh_bookmarks(&ui, &s);
                 }
             }
@@ -2563,6 +2642,46 @@ pub fn start() {
                     }
                 }
             }
+        });
+    }
+
+    // ---- Today mode ----
+    // A full-window dashboard merging the popover's Today + Daily + Clipboard
+    // tabs: due/overdue tasks, the running timer, today's journal, and recent
+    // clips.
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_today(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_today_mode(on);
+                if on {
+                    ui.set_notes_mode(false);
+                    ui.set_tasks_mode(false);
+                    ui.set_bookmarks_mode(false);
+                    refresh_today(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.on_edit_today_journal(move |text| {
+            let store = match s.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            let day = abs_date(now_ms());
+            if let Ok(n) = store.daily_note(&day, now_ms()) {
+                let _ = store.update_note_body(n.id, text.as_str(), now_ms());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_today_paste_clip(move |idx| {
+            paste_and_close(&s, &w, idx.max(0) as usize, false);
         });
     }
 
