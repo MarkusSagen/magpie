@@ -17,6 +17,8 @@ pub struct AppState {
     pub mask_apps: Vec<String>,
     pub mask_patterns: Vec<String>,
     pub mask_visible_chars: i64,
+    /// Open the Today dashboard on each summon (from `Config`, session-immutable).
+    pub open_to_today: bool,
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {

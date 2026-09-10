@@ -54,6 +54,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         mask_apps: cfg.mask_apps.clone(),
         mask_patterns: cfg.mask_patterns.clone(),
         mask_visible_chars: cfg.mask_visible_chars.max(0),
+        open_to_today: cfg.open_to_today,
     })
 }
 
@@ -430,6 +431,15 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
             ui.set_target_app(SharedString::from(""));
             ui.set_target_has_icon(false);
         }
+    }
+    // Optional "open to Today" setting: land on the Today dashboard each summon.
+    if state.open_to_today {
+        ui.set_notes_mode(false);
+        ui.set_tasks_mode(false);
+        ui.set_bookmarks_mode(false);
+        ui.set_journal_mode(false);
+        ui.set_today_mode(true);
+        refresh_today(ui, state);
     }
     let _ = ui.show();
     // Background/agent apps don't steal focus just by showing a window — activate

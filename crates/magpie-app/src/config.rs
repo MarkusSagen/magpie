@@ -26,6 +26,10 @@ pub struct Config {
     /// Fetch a link's site favicon (from the site's own /favicon.ico) for display.
     #[serde(default = "default_true")]
     pub fetch_link_favicons: bool,
+    /// Open the Today dashboard (instead of the clipboard list) each time the
+    /// launcher is summoned.
+    #[serde(default)]
+    pub open_to_today: bool,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -50,6 +54,7 @@ impl Default for Config {
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,
             fetch_link_favicons: true,
+            open_to_today: false,
         }
     }
 }
