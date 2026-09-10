@@ -1,6 +1,6 @@
 use crate::{
-    ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, LauncherWindow, NoteRow, Popover,
-    RefRow, SlotItem, TaskRow,
+    ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, JournalRow, LauncherWindow, NoteRow,
+    Popover, RefRow, SlotItem, TaskRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -538,6 +538,30 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
             .collect()
     };
     ui.set_bookmarks(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Chronological timeline over the daily notes (newest first), each rendered
+/// as an editable card in Journal mode.
+fn refresh_journal(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let rows: Vec<JournalRow> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let _ = store.daily_note(&abs_date(now), now); // ensure today's entry exists
+        store
+            .daily_notes(200)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|n| JournalRow {
+                note_id: n.id as i32,
+                date: SharedString::from(n.name),
+                body: SharedString::from(n.body),
+            })
+            .collect()
+    };
+    ui.set_journal(ModelRc::new(VecModel::from(rows)));
 }
 
 /// Provenance line. Phase 1 keeps it simple: whether the note was captured from a
@@ -1301,6 +1325,7 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "tasks" => ui.invoke_set_mode_tasks(true),
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
                         "today" => ui.invoke_set_mode_today(true),
+                        "journal" => ui.invoke_set_mode_journal(true),
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
@@ -2208,6 +2233,7 @@ pub fn start() {
                 if on {
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
+                    ui.set_journal_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2418,6 +2444,7 @@ pub fn start() {
                 if on {
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
+                    ui.set_journal_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -2551,6 +2578,7 @@ pub fn start() {
                     ui.set_notes_mode(false);
                     ui.set_tasks_mode(false);
                     ui.set_today_mode(false);
+                    ui.set_journal_mode(false);
                     refresh_bookmarks(&ui, &s);
                 }
             }
@@ -2668,6 +2696,7 @@ pub fn start() {
                     ui.set_notes_mode(false);
                     ui.set_tasks_mode(false);
                     ui.set_bookmarks_mode(false);
+                    ui.set_journal_mode(false);
                     refresh_today(&ui, &s);
                 }
             }
@@ -2684,6 +2713,32 @@ pub fn start() {
             if let Ok(n) = store.daily_note(&day, now_ms()) {
                 let _ = store.update_note_body(n.id, text.as_str(), now_ms());
             }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_journal(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_journal_mode(on);
+                if on {
+                    ui.set_notes_mode(false);
+                    ui.set_tasks_mode(false);
+                    ui.set_bookmarks_mode(false);
+                    ui.set_today_mode(false);
+                    refresh_journal(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.on_edit_journal_entry(move |note_id, text| {
+            let store = match s.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            let _ = store.update_note_body(note_id as i64, text.as_str(), now_ms());
         });
     }
     {
