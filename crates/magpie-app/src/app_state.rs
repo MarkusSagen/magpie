@@ -58,6 +58,7 @@ mod tests {
             mask_apps: Vec::new(),
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,
+            open_to_today: false,
         }
     }
 
