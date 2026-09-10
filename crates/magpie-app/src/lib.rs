@@ -4,6 +4,7 @@
 
 pub mod app_state;
 pub mod backlinks;
+pub mod bookmark_import;
 pub mod cli;
 pub mod color_view;
 pub mod config;

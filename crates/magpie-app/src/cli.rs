@@ -7,6 +7,7 @@ pub enum Command {
     Export(std::path::PathBuf),
     Backup(std::path::PathBuf),
     Restore(std::path::PathBuf),
+    ImportBookmarks(String),
 }
 
 pub fn parse_args(args: &[String]) -> Command {
@@ -34,6 +35,12 @@ pub fn parse_args(args: &[String]) -> Command {
                     None => Command::Run,
                 };
             }
+            "--import-bookmarks" => {
+                return match args.get(i + 1) {
+                    Some(w) => Command::ImportBookmarks(w.clone()),
+                    None => Command::Run,
+                };
+            }
             _ => {}
         }
         i += 1;
@@ -54,6 +61,7 @@ FLAGS:
     --export <dir>          Export notes (Markdown) + clipboard (JSONL) to <dir>
     --backup <dir>          Write a full backup (DB snapshot + assets) to <dir>
     --restore <dir>         Restore from a backup dir (quit Magpie first)
+    --import-bookmarks <chrome|firefox|path>   Import bookmarks into Magpie
     -h, --help              Show this help
 ";
 
@@ -70,6 +78,7 @@ pub fn run_command(cmd: Command, data_dir: &std::path::Path) -> i32 {
         Command::Export(out) => export_data(data_dir, &out),
         Command::Backup(dest) => backup_data(data_dir, &dest),
         Command::Restore(src) => restore_data(data_dir, &src),
+        Command::ImportBookmarks(which) => import_bookmarks(data_dir, &which),
     }
 }
 
@@ -193,6 +202,36 @@ fn restore_data(data_dir: &std::path::Path, src: &std::path::Path) -> i32 {
     0
 }
 
+fn import_bookmarks(data_dir: &std::path::Path, which: &str) -> i32 {
+    let pairs = match crate::bookmark_import::resolve_import(which) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("import: {e}");
+            return 1;
+        }
+    };
+    let store = match magpie_core::open(&data_dir.join("magpie.sqlite3")) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("import: {e}");
+            return 1;
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let mut n = 0;
+    for (title, url) in &pairs {
+        let domain = crate::favicon::domain_of(url).unwrap_or_default();
+        if store.add_bookmark(url, title, &domain, now).is_ok() {
+            n += 1;
+        }
+    }
+    println!("Imported {n} bookmarks from {which}");
+    0
+}
+
 fn set_autostart(on: bool) -> i32 {
     let exe = match std::env::current_exe() {
         Ok(p) => p.to_string_lossy().into_owned(),
@@ -268,5 +307,17 @@ mod tests {
         ));
         // missing path → Run
         assert!(matches!(parse_args(&v(&["--export"])), Command::Run));
+    }
+
+    #[test]
+    fn parses_import_bookmarks() {
+        assert!(matches!(
+            parse_args(&v(&["--import-bookmarks", "chrome"])),
+            Command::ImportBookmarks(w) if w == "chrome"
+        ));
+        assert!(matches!(
+            parse_args(&v(&["--import-bookmarks"])),
+            Command::Run
+        ));
     }
 }
