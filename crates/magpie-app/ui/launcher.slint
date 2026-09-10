@@ -487,6 +487,11 @@ export component LauncherWindow inherits Window {
         searchinput.focus();
     }
 
+    // First-run welcome overlay: a one-time introduction shown by Rust on the
+    // very first launch (see `runtime::start`'s `.onboarded` marker).
+    in-out property <bool> show-welcome: false;
+    callback dismiss-welcome();
+
     Rectangle {
 
         VerticalLayout {
@@ -2611,6 +2616,48 @@ export component LauncherWindow inherits Window {
                             saveta := TouchArea { clicked => { root.save-edit(root.edit-text); } }
                             Text { text: "Save"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- First-run welcome overlay ----
+    // The VERY LAST child of the root Window, so it draws on top of every other
+    // overlay (help, accessibility, edit) above.
+    if root.show-welcome: Rectangle {
+        background: #000000cc;
+        TouchArea { clicked => { root.dismiss-welcome(); } } // click backdrop to dismiss
+        Rectangle {
+            width: 460px;
+            height: 340px;
+            background: #1e1e21;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: #3a3a40;
+            // Swallow clicks on the card so they don't dismiss.
+            TouchArea {}
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text { text: "Welcome to Magpie 🐦"; color: white; font-size: 20px; font-weight: 700; }
+                Text {
+                    text: "Your clipboard, notes, tasks, bookmarks and time — in one local-first place.";
+                    color: #b0b0b8; font-size: 13px; wrap: word-wrap;
+                }
+                Text { text: "Keys that matter"; color: #8a8a92; font-size: 11px; font-weight: 700; }
+                Text { text: "⌘⇧Space — summon Magpie anywhere"; color: #d0d0d4; font-size: 13px; }
+                Text { text: "⌘K — actions on any clipboard entry"; color: #d0d0d4; font-size: 13px; }
+                Text { text: "Menu-bar icon — a quick popover"; color: #d0d0d4; font-size: 13px; }
+                Text { text: "Today · Notes · Tasks · Bookmarks — the top bar"; color: #d0d0d4; font-size: 13px; }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 130px; height: 34px; border-radius: 8px;
+                        background: gsb.has-hover ? #7a97ff : Pal.accent;
+                        gsb := TouchArea { clicked => { root.dismiss-welcome(); } }
+                        Text { text: "Get started"; color: Pal.on-accent; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
             }

@@ -1426,6 +1426,15 @@ pub fn start() {
     let ui = LauncherWindow::new().expect("create window");
     let weak = ui.as_weak();
 
+    {
+        let w = weak.clone();
+        ui.on_dismiss_welcome(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_show_welcome(false);
+            }
+        });
+    }
+
     // The menubar popover: a second, chromeless, always-on-top window shown from
     // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
     // early would tear the window down).
@@ -2760,6 +2769,39 @@ pub fn start() {
             &log_path,
             "previous run ended abnormally (dev — not surfaced)",
         );
+    }
+
+    // First-run welcome overlay + sample data: seed a small starter note the very
+    // first time Magpie ever launches (detected via a `.onboarded` marker file),
+    // then show the launcher with the welcome card on top shortly after boot.
+    let onboarded_marker = data_dir().join(".onboarded");
+    let first_run = !onboarded_marker.exists();
+    if first_run {
+        // Seed a small sample so the Notes/Tasks/Today views aren't empty.
+        {
+            let store = match state.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            if let Ok(n) = store.upsert_note_by_name("Welcome to Magpie", now_ms()) {
+                let body = "# Welcome to Magpie\n\nYour clipboard, notes, tasks, bookmarks and time — all local.\n\n- [ ] Try me: press Space to check me off !high @today\n- [ ] A recurring chore @mon +1w\n- [ ] A someday idea #ideas *\n\nLink things with [[wiki links]]. Press ⌘K on any clipboard entry for actions.";
+                let _ = store.update_note_body(n.id, body, now_ms());
+            }
+            let _ = store.daily_note(&abs_date(now_ms()), now_ms());
+        }
+        let _ = std::fs::write(&onboarded_marker, b"1");
+        // Show the launcher + the welcome overlay shortly after the loop starts.
+        let w = weak.clone();
+        let s = state.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(700));
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    show_window(&ui, &s);
+                    ui.set_show_welcome(true);
+                }
+            });
+        });
     }
 
     // Opt-in dev hooks (MAGPIE_SHOW_ON_LAUNCH / MAGPIE_UI_TOUR); no-op otherwise.
