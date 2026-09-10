@@ -178,6 +178,35 @@ fn bookmarks_crud() {
 }
 
 #[test]
+fn reads_firefox_bookmarks() {
+    // Build a minimal Firefox places.sqlite in a temp file.
+    let dir = std::env::temp_dir().join(format!("magpie-fftest-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let places = dir.join("places.sqlite");
+    {
+        let c = rusqlite::Connection::open(&places).unwrap();
+        c.execute_batch(
+            "CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT);
+             CREATE TABLE moz_bookmarks(id INTEGER PRIMARY KEY, type INTEGER, fk INTEGER, title TEXT);
+             INSERT INTO moz_places(id,url) VALUES (1,'https://rust-lang.org'),(2,'https://example.com'),(3,'ftp://skip');
+             INSERT INTO moz_bookmarks(id,type,fk,title) VALUES
+               (10,1,1,'Rust'),(11,2,NULL,'A folder'),(12,1,2,'Example'),(13,1,3,'FTP skip');",
+        )
+        .unwrap();
+    }
+    let got = magpie_core::read_firefox_bookmarks(&places).unwrap();
+    // only type=1 http(s) rows, in id order
+    assert_eq!(
+        got,
+        vec![
+            ("Rust".to_string(), "https://rust-lang.org".to_string()),
+            ("Example".to_string(), "https://example.com".to_string()),
+        ]
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn daily_notes_newest_first() {
     let s = store();
     s.daily_note("2026-09-08", 10).unwrap();

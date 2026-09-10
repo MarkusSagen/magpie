@@ -30,7 +30,7 @@ pub mod stats;
 pub mod store;
 pub mod tags;
 
-pub use bookmarks::Bookmark;
+pub use bookmarks::{read_firefox_bookmarks, Bookmark};
 pub use detect::Kind;
 pub use export::{backup_db, export_clipboard_jsonl, export_markdown};
 pub use model::{AppInfo, CaptureEvent, Content, Entry};

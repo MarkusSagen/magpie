@@ -1,5 +1,6 @@
 //! Saved bookmarks — a curated, local, cross-browser link store.
 use crate::store::{Result, Store};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bookmark {
@@ -57,4 +58,29 @@ impl Store {
             .execute("DELETE FROM bookmarks WHERE id = ?1", [id])?
             > 0)
     }
+}
+
+/// Read bookmarks from a Firefox `places.sqlite` (title, url). Copies the file to a
+/// temp path first (Firefox may hold a lock), opens it read-only, and reads
+/// http(s) bookmark rows. Returns (title, url) pairs.
+pub fn read_firefox_bookmarks(places_path: &Path) -> Result<Vec<(String, String)>> {
+    let tmp = std::env::temp_dir().join(format!("magpie-ff-import-{}.sqlite", std::process::id()));
+    std::fs::copy(places_path, &tmp)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let result = (|| {
+        let conn = rusqlite::Connection::open_with_flags(
+            &tmp,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(b.title, ''), p.url
+             FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id
+             WHERE b.type = 1 AND p.url LIKE 'http%'
+             ORDER BY b.id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<Result<Vec<_>>>()
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    result
 }
