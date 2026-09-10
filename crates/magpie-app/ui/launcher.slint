@@ -294,6 +294,9 @@ export component LauncherWindow inherits Window {
     in property <[Bar]> most-copied-bars;
     in property <[Bar]> per-app-bars;
     in property <[Bar]> by-type-bars;
+    in property <string> time-week-total;
+    in property <[Bar]> time-by-day-bars;
+    in property <[Bar]> time-by-project-bars;
     in property <string> totals-line;
     // "2026-08-04 → 2026-09-02 · peak 21 copies in a day" under the bar chart.
     in property <string> over-time-caption;
@@ -1439,6 +1442,19 @@ export component LauncherWindow inherits Window {
 
                         Text { text: "By type"; color: #9a9aa0; font-size: 11px; }
                         for bar in root.by-type-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "Time tracked · last 7 days: " + root.time-week-total; color: #8a8a92; font-size: 12px; }
+                        for bar in root.time-by-day-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+                        if root.time-by-project-bars.length > 0: Text { text: "By project (30 days)"; color: #8a8a92; font-size: 12px; }
+                        for bar in root.time-by-project-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;

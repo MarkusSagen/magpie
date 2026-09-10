@@ -1024,10 +1024,57 @@ fn empty_stats() -> Stats {
 /// Query stats for the selected range and push all series into the window.
 fn refresh_stats(ui: &LauncherWindow, state: &AppState, range_index: i32) {
     let range: StatsRange = range_from_index(range_index, now_ms());
+    let now = now_ms();
     let stats: Stats = match state.store.lock() {
         Ok(store) => store.stats(&range, 10).unwrap_or_else(|_| empty_stats()),
         Err(_) => empty_stats(),
     };
+
+    if let Ok(store) = state.store.lock() {
+        let week_ago = now - 7 * 86_400_000;
+        let month_ago = now - 30 * 86_400_000;
+
+        // This-week total.
+        let week_ms = store.time_total_since(week_ago, now).unwrap_or(0);
+        ui.set_time_week_total(SharedString::from(magpie_app::format_time::fmt_duration(
+            week_ms,
+        )));
+
+        // Per-day (last 7 days).
+        let day_items: Vec<(String, String, i64)> = store
+            .time_by_day(week_ago, now)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(d, ms)| (d.clone(), magpie_app::format_time::fmt_duration(ms), ms))
+            .collect();
+        ui.set_time_by_day_bars(to_slint_bars(&day_items));
+
+        // Per-project (last 30 days), mapping task_key -> project via current tasks.
+        let proj_of: HashMap<String, String> = magpie_app::tasks::all_tasks(&store, now)
+            .into_iter()
+            .map(|t| {
+                (
+                    format!("{}|{}", t.note_id, t.title),
+                    t.project.unwrap_or_else(|| "No project".into()),
+                )
+            })
+            .collect();
+        let mut proj_totals: HashMap<String, i64> = HashMap::new();
+        for (key, _title, ms) in store.time_by_task(month_ago, now).unwrap_or_default() {
+            let p = proj_of
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| "No project".into());
+            *proj_totals.entry(p).or_insert(0) += ms;
+        }
+        let mut proj_items: Vec<(String, String, i64)> = proj_totals
+            .into_iter()
+            .map(|(p, ms)| (p, magpie_app::format_time::fmt_duration(ms), ms))
+            .collect();
+        proj_items.sort_by_key(|b| std::cmp::Reverse(b.2));
+        proj_items.truncate(8);
+        ui.set_time_by_project_bars(to_slint_bars(&proj_items));
+    }
 
     let ot: Vec<(String, String, i64)> = stats
         .over_time
