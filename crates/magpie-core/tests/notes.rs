@@ -149,3 +149,15 @@ fn bookmarks_crud() {
     assert!(s.delete_bookmark(hit[0].id).unwrap());
     assert_eq!(s.list_bookmarks("", 50).unwrap().len(), 1);
 }
+
+#[test]
+fn daily_notes_newest_first() {
+    let s = store();
+    s.daily_note("2026-09-08", 10).unwrap();
+    s.daily_note("2026-09-10", 20).unwrap();
+    s.daily_note("2026-09-09", 30).unwrap();
+    s.upsert_note_by_name("Not a daily", 40).unwrap(); // excluded
+    let days = s.daily_notes(50).unwrap();
+    let names: Vec<&str> = days.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, vec!["2026-09-10", "2026-09-09", "2026-09-08"]);
+}

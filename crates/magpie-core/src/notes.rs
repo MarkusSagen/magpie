@@ -102,6 +102,16 @@ impl Store {
         rows.collect()
     }
 
+    /// Daily journal notes (is_daily = 1), newest date first (names are YYYY-MM-DD,
+    /// so lexical DESC = chronological DESC).
+    pub fn daily_notes(&self, limit: i64) -> Result<Vec<Note>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {NOTE_COLS} FROM notes WHERE is_daily = 1 ORDER BY name DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map([limit], row_to_note)?;
+        rows.collect()
+    }
+
     pub fn all_note_names(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn()
