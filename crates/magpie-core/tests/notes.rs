@@ -133,6 +133,33 @@ fn time_tracking_start_stop_total() {
 }
 
 #[test]
+fn time_aggregates() {
+    let s = store();
+    // two closed entries same task, one other task
+    s.start_timer("k1|A", "A", Some(1), 1_000).unwrap();
+    s.stop_active(4_000).unwrap(); // 3s on A
+    s.start_timer("k2|B", "B", Some(1), 10_000).unwrap();
+    s.stop_active(15_000).unwrap(); // 5s on B
+                                    // by task: B (5s) before A (3s)
+    let by_task = s.time_by_task(0, 20_000).unwrap();
+    assert_eq!(by_task.len(), 2);
+    assert_eq!(by_task[0].0, "k2|B");
+    assert_eq!(by_task[0].2, 5_000);
+    assert_eq!(by_task[1].2, 3_000);
+    // total since 0
+    assert_eq!(s.time_total_since(0, 20_000).unwrap(), 8_000);
+    // since filter excludes the early A entry
+    assert_eq!(s.time_total_since(5_000, 20_000).unwrap(), 5_000);
+    // by day returns at least one bucket summing to 8s (all same epoch day)
+    let by_day = s.time_by_day(0, 20_000).unwrap();
+    let day_total: i64 = by_day.iter().map(|(_, ms)| ms).sum();
+    assert_eq!(day_total, 8_000);
+    // a running entry counts up to now
+    s.start_timer("k3|C", "C", Some(1), 30_000).unwrap();
+    assert_eq!(s.time_total_since(30_000, 32_000).unwrap(), 2_000);
+}
+
+#[test]
 fn bookmarks_crud() {
     let s = store();
     let id = s.add_bookmark("https://a.com/x", "A", "a.com", 10).unwrap();

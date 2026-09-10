@@ -250,4 +250,47 @@ impl Store {
         }
         Ok(total)
     }
+
+    /// Total tracked ms grouped by LOCAL day ("YYYY-MM-DD"), for entries starting at
+    /// or after `since_ms`. The running entry counts to `now_ms`. Newest day first.
+    pub fn time_by_day(&self, since_ms: i64, now_ms: i64) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT date(start_ms / 1000, 'unixepoch', 'localtime') AS d,
+                    SUM(COALESCE(end_ms, ?2) - start_ms)
+             FROM time_entries WHERE start_ms >= ?1
+             GROUP BY d ORDER BY d DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![since_ms, now_ms], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect()
+    }
+
+    /// Total tracked ms grouped by task (key + a representative title), since
+    /// `since_ms`, largest first.
+    pub fn time_by_task(&self, since_ms: i64, now_ms: i64) -> Result<Vec<(String, String, i64)>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT task_key, MAX(task_title), SUM(COALESCE(end_ms, ?2) - start_ms) AS total
+             FROM time_entries WHERE start_ms >= ?1
+             GROUP BY task_key ORDER BY total DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![since_ms, now_ms], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Total tracked ms for all entries starting at or after `since_ms` (running to now).
+    pub fn time_total_since(&self, since_ms: i64, now_ms: i64) -> Result<i64> {
+        self.conn().query_row(
+            "SELECT COALESCE(SUM(COALESCE(end_ms, ?2) - start_ms), 0)
+             FROM time_entries WHERE start_ms >= ?1",
+            rusqlite::params![since_ms, now_ms],
+            |r| r.get(0),
+        )
+    }
 }
