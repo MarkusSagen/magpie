@@ -1,6 +1,6 @@
 use crate::{
     ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, JournalRow, LauncherWindow, NoteRow,
-    Popover, RefRow, SlotItem, TaskRow,
+    Popover, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -550,6 +550,50 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
     ui.set_bookmarks(ModelRc::new(VecModel::from(rows)));
 }
 
+/// Rebuild the "Find everywhere" palette's three result lists from the store
+/// for the given query. Empty/whitespace query yields empty lists (mirrors
+/// `unified_search`'s own behavior, so opening the palette with "" just clears it).
+fn refresh_unified_search(ui: &LauncherWindow, state: &AppState, query: &str) {
+    let now = now_ms();
+    let results = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        magpie_app::unified_search::unified_search(&store, query, now, 12)
+    };
+    ui.set_search_notes(ModelRc::new(VecModel::from(
+        results
+            .notes
+            .into_iter()
+            .map(|(id, title)| SearchNoteRow {
+                id: id as i32,
+                title: SharedString::from(title),
+            })
+            .collect::<Vec<_>>(),
+    )));
+    ui.set_search_tasks(ModelRc::new(VecModel::from(
+        results
+            .tasks
+            .into_iter()
+            .map(|(id, title)| SearchTaskRow {
+                id: id as i32,
+                title: SharedString::from(title),
+            })
+            .collect::<Vec<_>>(),
+    )));
+    ui.set_search_bookmarks(ModelRc::new(VecModel::from(
+        results
+            .bookmarks
+            .into_iter()
+            .map(|(url, title)| SearchBookmarkRow {
+                url: SharedString::from(url),
+                title: SharedString::from(title),
+            })
+            .collect::<Vec<_>>(),
+    )));
+}
+
 /// Chronological timeline over the daily notes (newest first), each rendered
 /// as an editable card in Journal mode.
 fn refresh_journal(ui: &LauncherWindow, state: &AppState) {
@@ -940,6 +984,24 @@ fn hide_launcher(ui: &LauncherWindow) {
     {
         let _ = ui.hide();
     }
+}
+
+/// Open note `id` into Notes mode, exiting whatever other full-screen mode is
+/// currently showing. Shared by "jump to the owning note" from Tasks-mode rows
+/// and from the "Find everywhere" palette (⌘⇧F), so both paths behave identically.
+fn open_note_into_notes_mode(ui: &LauncherWindow, state: &AppState, note_id: i32) {
+    ui.set_note_id(note_id);
+    ui.set_tasks_mode(false);
+    ui.set_search_mode(false);
+    ui.set_notes_mode(true);
+    refresh_notes(ui, state);
+}
+
+/// Open `url` in the default browser and hide the launcher. Shared by the
+/// Bookmarks-mode row click and the "Find everywhere" palette's bookmark rows.
+fn open_url_and_hide(ui: &LauncherWindow, url: &str) {
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    hide_launcher(ui);
 }
 
 /// The Enter / ⌘Enter flow: copy the entry at `idx`, hide Magpie so the previous
@@ -2291,6 +2353,7 @@ pub fn start() {
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2502,6 +2565,7 @@ pub fn start() {
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -2608,10 +2672,7 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_open_task_note(move |note_id| {
             if let Some(ui) = w.upgrade() {
-                ui.set_note_id(note_id);
-                ui.set_tasks_mode(false);
-                ui.set_notes_mode(true);
-                refresh_notes(&ui, &s);
+                open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
     }
@@ -2636,6 +2697,7 @@ pub fn start() {
                     ui.set_tasks_mode(false);
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
                     refresh_bookmarks(&ui, &s);
                 }
             }
@@ -2695,9 +2757,8 @@ pub fn start() {
     {
         let w = ui.as_weak();
         ui.on_open_bookmark(move |url| {
-            let _ = std::process::Command::new("open").arg(url.as_str()).spawn();
             if let Some(ui) = w.upgrade() {
-                hide_launcher(&ui);
+                open_url_and_hide(&ui, url.as_str());
             }
         });
     }
@@ -2754,6 +2815,7 @@ pub fn start() {
                     ui.set_tasks_mode(false);
                     ui.set_bookmarks_mode(false);
                     ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
                     refresh_today(&ui, &s);
                 }
             }
@@ -2783,6 +2845,7 @@ pub fn start() {
                     ui.set_tasks_mode(false);
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
+                    ui.set_search_mode(false);
                     refresh_journal(&ui, &s);
                 }
             }
@@ -2803,6 +2866,51 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_today_paste_clip(move |idx| {
             paste_and_close(&s, &w, idx.max(0) as usize, false);
+        });
+    }
+
+    // ---- Find everywhere (⌘⇧F): unified search over notes/tasks/bookmarks ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_run_unified_search(move |q| {
+            if let Some(ui) = w.upgrade() {
+                refresh_unified_search(&ui, &s, q.as_str());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_search_note(move |note_id| {
+            if let Some(ui) = w.upgrade() {
+                open_note_into_notes_mode(&ui, &s, note_id);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_search_task(move |note_id| {
+            if let Some(ui) = w.upgrade() {
+                open_note_into_notes_mode(&ui, &s, note_id);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_open_search_bookmark(move |url| {
+            if let Some(ui) = w.upgrade() {
+                open_url_and_hide(&ui, url.as_str());
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_close_search(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_search_mode(false);
+            }
         });
     }
 
