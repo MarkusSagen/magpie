@@ -8,6 +8,7 @@ pub enum Command {
     Backup(std::path::PathBuf),
     Restore(std::path::PathBuf),
     ImportBookmarks(String),
+    SyncVault(Option<std::path::PathBuf>),
 }
 
 pub fn parse_args(args: &[String]) -> Command {
@@ -41,6 +42,13 @@ pub fn parse_args(args: &[String]) -> Command {
                     None => Command::Run,
                 };
             }
+            "--sync-vault" => {
+                let path = match args.get(i + 1) {
+                    Some(p) if !p.starts_with("--") => Some(std::path::PathBuf::from(p)),
+                    _ => None,
+                };
+                return Command::SyncVault(path);
+            }
             _ => {}
         }
         i += 1;
@@ -62,6 +70,7 @@ FLAGS:
     --backup <dir>          Write a full backup (DB snapshot + assets) to <dir>
     --restore <dir>         Restore from a backup dir (quit Magpie first)
     --import-bookmarks <chrome|firefox|path>   Import bookmarks into Magpie
+    --sync-vault <dir>      Sync notes with a folder of Markdown files (newest wins)
     -h, --help              Show this help
 ";
 
@@ -79,6 +88,7 @@ pub fn run_command(cmd: Command, data_dir: &std::path::Path) -> i32 {
         Command::Backup(dest) => backup_data(data_dir, &dest),
         Command::Restore(src) => restore_data(data_dir, &src),
         Command::ImportBookmarks(which) => import_bookmarks(data_dir, &which),
+        Command::SyncVault(p) => sync_vault_cmd(data_dir, p),
     }
 }
 
@@ -232,6 +242,50 @@ fn import_bookmarks(data_dir: &std::path::Path, which: &str) -> i32 {
     0
 }
 
+fn sync_vault_cmd(data_dir: &std::path::Path, path: Option<std::path::PathBuf>) -> i32 {
+    let dir = match path.or_else(|| {
+        crate::config::load_or_default(&data_dir.join("config.toml"))
+            .vault_path
+            .map(std::path::PathBuf::from)
+    }) {
+        Some(d) => d,
+        None => {
+            eprintln!(
+                "sync-vault: no vault path given and none configured (set vault_path in config.toml)"
+            );
+            return 1;
+        }
+    };
+    let store = match open_store(data_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("sync-vault: {e}");
+            return 1;
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    match magpie_core::sync_vault(&store, &dir, now) {
+        Ok(r) => {
+            println!(
+                "Vault sync: {} imported, {} updated, {} exported, {} unchanged ({})",
+                r.imported,
+                r.updated,
+                r.exported,
+                r.skipped,
+                dir.display()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("sync-vault: {e}");
+            1
+        }
+    }
+}
+
 fn set_autostart(on: bool) -> i32 {
     let exe = match std::env::current_exe() {
         Ok(p) => p.to_string_lossy().into_owned(),
@@ -318,6 +372,18 @@ mod tests {
         assert!(matches!(
             parse_args(&v(&["--import-bookmarks"])),
             Command::Run
+        ));
+    }
+
+    #[test]
+    fn parses_sync_vault() {
+        assert!(matches!(
+            parse_args(&v(&["--sync-vault", "/tmp/v"])),
+            Command::SyncVault(Some(p)) if p.as_path() == std::path::Path::new("/tmp/v")
+        ));
+        assert!(matches!(
+            parse_args(&v(&["--sync-vault"])),
+            Command::SyncVault(None)
         ));
     }
 }

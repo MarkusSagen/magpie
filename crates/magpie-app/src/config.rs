@@ -30,6 +30,9 @@ pub struct Config {
     /// launcher is summoned.
     #[serde(default)]
     pub open_to_today: bool,
+    /// Folder synced with notes via `--sync-vault` (Markdown files, one per note).
+    #[serde(default)]
+    pub vault_path: Option<String>,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -55,6 +58,7 @@ impl Default for Config {
             mask_visible_chars: 3,
             fetch_link_favicons: true,
             open_to_today: false,
+            vault_path: None,
         }
     }
 }
@@ -123,5 +127,6 @@ mod tests {
         assert!(c.mask_apps.is_empty());
         assert_eq!(c.mask_visible_chars, 3);
         assert!(c.fetch_link_favicons); // defaults on
+        assert!(c.vault_path.is_none());
     }
 }
