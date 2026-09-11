@@ -36,6 +36,33 @@ pub fn request_notification_authorization() {
     }
 }
 
+/// Schedule a notification to fire in `fire_in_secs` from now, even if the app is
+/// later quit. Stable `identifier` — re-scheduling with the same id replaces the
+/// pending request. macOS bundle only; no-op otherwise or if `fire_in_secs <= 0`.
+pub fn schedule_notification(identifier: &str, title: &str, body: &str, fire_in_secs: f64) {
+    #[cfg(target_os = "macos")]
+    {
+        if is_bundled() && fire_in_secs > 0.0 {
+            macos_un::schedule(identifier, title, body, fire_in_secs);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (identifier, title, body, fire_in_secs);
+    }
+}
+
+/// Remove all pending (scheduled-but-undelivered) notification requests. Immediate
+/// notifications already delivered are unaffected. macOS bundle only; no-op otherwise.
+pub fn cancel_scheduled_reminders() {
+    #[cfg(target_os = "macos")]
+    {
+        if is_bundled() {
+            macos_un::cancel_all();
+        }
+    }
+}
+
 /// True when running as a real macOS `.app` bundle (`…/Contents/MacOS/…`) rather than
 /// a bare `cargo run` binary. `UNUserNotificationCenter` requires the bundle.
 #[cfg(target_os = "macos")]
@@ -68,7 +95,7 @@ mod macos_un {
     use objc2_foundation::{NSError, NSString};
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
-        UNUserNotificationCenter,
+        UNTimeIntervalNotificationTrigger, UNUserNotificationCenter,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -96,5 +123,32 @@ mod macos_un {
         let request =
             UNNotificationRequest::requestWithIdentifier_content_trigger(&ident, &content, None);
         center.addNotificationRequest_withCompletionHandler(&request, None);
+    }
+
+    /// Schedule a notification to fire `fire_in_secs` from now via
+    /// `UNTimeIntervalNotificationTrigger`. `identifier` is stable so re-scheduling
+    /// the same task replaces its pending request rather than duplicating it.
+    /// Guards `fire_in_secs` to at least 1.0 (the API's minimum interval).
+    pub fn schedule(identifier: &str, title: &str, body: &str, fire_in_secs: f64) {
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(title));
+        content.setBody(&NSString::from_str(body));
+        let interval = fire_in_secs.max(1.0);
+        let trigger =
+            UNTimeIntervalNotificationTrigger::triggerWithTimeInterval_repeats(interval, false);
+        let ident = NSString::from_str(identifier);
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &ident,
+            &content,
+            Some(&trigger),
+        );
+        center.addNotificationRequest_withCompletionHandler(&request, None);
+    }
+
+    /// Remove all pending (undelivered) notification requests.
+    pub fn cancel_all() {
+        UNUserNotificationCenter::currentNotificationCenter()
+            .removeAllPendingNotificationRequests();
     }
 }

@@ -32,6 +32,28 @@ pub fn due_before(tasks: Vec<Task>, now_ms: i64, offset_secs: i64, default_min: 
     out
 }
 
+/// Open tasks whose reminder instant is strictly AFTER `now_ms`, paired with that
+/// instant, earliest first. Used to pre-schedule OS notifications that fire while
+/// the app is closed. (Tasks already ripe are handled live by `due_before`.)
+pub fn future_reminders(
+    tasks: Vec<Task>,
+    now_ms: i64,
+    offset_secs: i64,
+    default_min: i64,
+) -> Vec<(Task, i64)> {
+    let mut out: Vec<(Task, i64)> = tasks
+        .into_iter()
+        .filter(|t| !t.done && t.due_ms.is_some())
+        .filter_map(|t| {
+            let inst =
+                reminder_instant_ms(t.due_ms.unwrap(), t.due_time_min, offset_secs, default_min);
+            (inst > now_ms).then_some((t, inst))
+        })
+        .collect();
+    out.sort_by_key(|(_, inst)| *inst);
+    out
+}
+
 /// A stable dedup key: note + title + due date + due time. Survives line moves;
 /// changes (re-arms) when the due date or time changes.
 pub fn fingerprint(t: &Task) -> String {
@@ -114,6 +136,30 @@ mod tests {
         );
         let titles: Vec<&str> = ripe.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, vec!["nine", "ten"]);
+    }
+
+    #[test]
+    fn future_reminders_filters_and_sorts() {
+        let day = 20_000 * DAY;
+        let now = day + 12 * 3_600_000;
+        let future = future_reminders(
+            vec![
+                task(Some(day + DAY), Some(600), false, "later"),
+                task(Some(day + DAY), Some(540), false, "earlier"),
+                task(Some(day), Some(600), false, "ripe"),
+                task(Some(day + DAY), Some(600), true, "done"),
+                task(None, None, false, "nodate"),
+            ],
+            now,
+            0,
+            540,
+        );
+        let titles: Vec<&str> = future.iter().map(|(t, _)| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["earlier", "later"]);
+        assert_eq!(
+            future[0].1,
+            reminder_instant_ms(day + DAY, Some(540), 0, 540)
+        );
     }
 
     #[test]

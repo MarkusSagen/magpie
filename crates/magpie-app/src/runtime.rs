@@ -1332,27 +1332,48 @@ fn reminder_tick(state: &AppState, first: bool, default_min: i64) {
             }
         }
     }
-    if to_fire.is_empty() {
-        return;
-    }
-    if first && to_fire.len() > 1 {
-        magpie_app::diagnostics::notify("Magpie", &format!("{} tasks due", to_fire.len()));
-    } else {
-        for (t, _) in &to_fire {
-            let msg = if t.note_name.is_empty() {
-                t.title.clone()
-            } else {
-                format!("{} · {}", t.title, t.note_name)
-            };
-            magpie_app::diagnostics::notify("Task due", &msg);
+    if !to_fire.is_empty() {
+        if first && to_fire.len() > 1 {
+            magpie_app::diagnostics::notify("Magpie", &format!("{} tasks due", to_fire.len()));
+        } else {
+            for (t, _) in &to_fire {
+                let msg = if t.note_name.is_empty() {
+                    t.title.clone()
+                } else {
+                    format!("{} · {}", t.title, t.note_name)
+                };
+                magpie_app::diagnostics::notify("Task due", &msg);
+            }
+        }
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        for (_, fp) in &to_fire {
+            let _ = store.mark_reminder(fp, now);
         }
     }
-    let store = match state.store.lock() {
-        Ok(g) => g,
-        Err(e) => e.into_inner(),
-    };
-    for (_, fp) in &to_fire {
-        let _ = store.mark_reminder(fp, now);
+    reschedule_os_reminders(state, default_min);
+}
+
+/// Re-schedule OS-level notifications for all open, future-dated tasks so they fire
+/// even if Magpie is quit before then. Bundle-only under the hood; cheap no-op in dev.
+fn reschedule_os_reminders(state: &AppState, default_min: i64) {
+    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+    let now = now_ms();
+    let offset = local_offset_seconds();
+    let tasks = magpie_app::tasks::all_tasks(&store, now);
+    drop(store);
+    magpie_platform::cancel_scheduled_reminders();
+    for (t, inst) in magpie_app::reminders::future_reminders(tasks, now, offset, default_min) {
+        let secs = ((inst - now) as f64 / 1000.0).max(1.0);
+        let ident = format!("magpie-task-{}", magpie_app::reminders::fingerprint(&t));
+        let body = if t.note_name.is_empty() {
+            t.title.clone()
+        } else {
+            format!("{}  ·  {}", t.title, t.note_name)
+        };
+        magpie_platform::schedule_notification(&ident, "Task due", &body, secs);
     }
 }
 
