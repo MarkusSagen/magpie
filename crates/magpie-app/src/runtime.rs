@@ -14,7 +14,7 @@ use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
-use magpie_core::{open, Content, Entry, Kind, RetentionPolicy, Stats, StatsRange, Totals};
+use magpie_core::{Content, Entry, Kind, RetentionPolicy, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
 use magpie_platform::os::source_app::ActiveWinSource;
@@ -34,6 +34,11 @@ pub fn now_ms() -> i64 {
 }
 
 pub fn data_dir() -> std::path::PathBuf {
+    if let Ok(d) = std::env::var("MAGPIE_DATA_DIR") {
+        if !d.is_empty() {
+            return std::path::PathBuf::from(d);
+        }
+    }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("magpie")
@@ -42,7 +47,9 @@ pub fn data_dir() -> std::path::PathBuf {
 pub fn build_state(cfg: &Config) -> Arc<AppState> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir).ok();
-    let store = open(&dir.join("magpie.sqlite3")).expect("open db");
+    let db = dir.join("magpie.sqlite3");
+    let key = magpie_platform::db_key(&dir).expect("obtain DB key");
+    let store = magpie_core::open_or_migrate_encrypted(&db, &key).expect("open db");
     Arc::new(AppState {
         store: std::sync::Mutex::new(store),
         images: magpie_app::image_cache::FsImageStore {

@@ -93,7 +93,9 @@ pub fn run_command(cmd: Command, data_dir: &std::path::Path) -> i32 {
 }
 
 fn open_store(data_dir: &std::path::Path) -> Result<magpie_core::Store, String> {
-    magpie_core::open(&data_dir.join("magpie.sqlite3")).map_err(|e| e.to_string())
+    let key = magpie_platform::db_key(data_dir)?;
+    magpie_core::open_or_migrate_encrypted(&data_dir.join("magpie.sqlite3"), &key)
+        .map_err(|e| e.to_string())
 }
 
 fn export_data(data_dir: &std::path::Path, out: &std::path::Path) -> i32 {
@@ -220,7 +222,7 @@ fn import_bookmarks(data_dir: &std::path::Path, which: &str) -> i32 {
             return 1;
         }
     };
-    let store = match magpie_core::open(&data_dir.join("magpie.sqlite3")) {
+    let store = match open_store(data_dir) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("import: {e}");
