@@ -233,11 +233,40 @@ Inspect a crash: `open <data_dir>/logs/magpie.log`.
 `~/Library/Application Support/magpie/`:
 - `config.toml` — only written once settings exist; until then defaults apply
   (so changing a `Config::default()` value takes effect with no migration).
-- `magpie.sqlite3` (+ `-wal`, `-shm`) — history DB. Delete the dir to reset state.
+  Notable keys: `open_to_today`, `vault_path` (folder for `--sync-vault`).
+- `magpie.sqlite3` (+ `-wal`, `-shm`) — history DB, **SQLCipher-encrypted at rest**
+  (see below). Delete the dir to reset state.
+- `magpie.sqlite3.pre-encrypt-backup` — one-time plaintext backup written when a
+  legacy (pre-encryption) DB is migrated on first launch. Kept, not auto-deleted.
 - `app_icons/`, `favicons/` — cached PNGs.
 
-Inspect the DB: `sqlite3 ~/Library/Application\ Support/magpie/magpie.sqlite3
-'select id,kind,substr(full_text,1,40) from entries order by last_copied_at_ms desc limit 10;'`
+**`MAGPIE_DATA_DIR`** overrides this whole directory (honored by `data_dir()`), and
+**`MAGPIE_DB_KEY`** overrides the encryption key. Always set both for dev / tests /
+launch-verify so runs never touch (or migrate) your real DB or Keychain:
+`MAGPIE_DATA_DIR="$(mktemp -d)" MAGPIE_DB_KEY="$(printf '%064d' 1)" cargo run …`.
+
+## Encryption at rest
+
+The DB is **SQLCipher** (rusqlite `bundled-sqlcipher-vendored-openssl`; the build
+vendors OpenSSL, adds ~tens of seconds and a few MB). FTS5 + WAL still work.
+
+- **Key:** 32 bytes → 64 hex chars, in the macOS login **Keychain**
+  (`security … -s io.magpie -a magpie-db`), created once on first launch. Non-macOS
+  falls back to a `0600` `.dbkey` file in the data dir. `MAGPIE_DB_KEY` overrides both.
+- **Open path:** `magpie_core::open_or_migrate_encrypted(path, &key)` — opens keyed,
+  and on a legacy plaintext file backs it up then `sqlcipher_export`s it to an
+  encrypted file in place. `open_in_memory` (tests) stays plaintext.
+- **Inspect the DB** (needs a SQLCipher-capable `sqlite3`, e.g. `brew install sqlcipher`):
+  ```
+  KEY=$(security find-generic-password -s io.magpie -a magpie-db -w)
+  sqlcipher ~/Library/Application\ Support/magpie/magpie.sqlite3 \
+    "PRAGMA key='$KEY'; select id,kind,substr(full_text,1,40) from entries \
+     order by last_copied_at_ms desc limit 10;"
+  ```
+  Plain `sqlite3` reports "file is not a database" — that's expected (encrypted).
+- **Backup caveat:** `--backup` is a `VACUUM INTO` snapshot, so it's **encrypted with
+  this machine's key** — restorable only where that Keychain key exists. For
+  cross-machine portability use `--export` (plaintext Markdown + JSONL).
 
 ## Packaging (see the spec)
 
