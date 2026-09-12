@@ -39,5 +39,7 @@ pub use notes::Note;
 pub use retention::{Removed, RetentionPolicy};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
 pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};
-pub use store::{open, open_in_memory, ImageStore, Ingested, Store};
+pub use store::{
+    open, open_encrypted, open_in_memory, open_or_migrate_encrypted, ImageStore, Ingested, Store,
+};
 pub use vault::{resolve_action, sync_vault, SyncReport, VaultAction};

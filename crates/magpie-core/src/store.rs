@@ -201,6 +201,82 @@ pub fn open_in_memory() -> Result<Store> {
     Store::init(Connection::open_in_memory()?)
 }
 
+/// Apply the SQLCipher key to a freshly-opened connection. MUST run before any
+/// other DB access. Our key is a hex string, so the passphrase form (PBKDF2) is used.
+fn apply_key(conn: &Connection, key: &str) -> Result<()> {
+    // key is 64 hex chars from our own generator — no quotes to escape, but double
+    // any single quote defensively.
+    conn.execute_batch(&format!("PRAGMA key = '{}';", key.replace('\'', "''")))
+}
+
+/// Open an encrypted DB with `key` (creating a fresh encrypted DB if the file is
+/// new). Fails fast (Err) on a wrong key or a non-SQLCipher file.
+pub fn open_encrypted(path: &Path, key: &str) -> Result<Store> {
+    let conn = Connection::open(path)?;
+    apply_key(&conn, key)?;
+    // Probe: right key reads sqlite_master; wrong key / plaintext errors here.
+    conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    })?;
+    Store::init(conn)
+}
+
+/// Open an encrypted DB, migrating a legacy plaintext file in place on first run.
+/// Backs the plaintext file up (kept) before migrating. Returns an encrypted Store.
+pub fn open_or_migrate_encrypted(path: &Path, key: &str) -> Result<Store> {
+    if !path.exists() {
+        return open_encrypted(path, key);
+    }
+    match open_encrypted(path, key) {
+        Ok(s) => Ok(s),
+        Err(_) => {
+            migrate_plaintext_to_encrypted(path, key)?;
+            open_encrypted(path, key)
+        }
+    }
+}
+
+/// `magpie.sqlite3` + `suffix` (operates on the FULL filename, so "-wal" and
+/// ".pre-encrypt-backup" both work).
+fn sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(suffix);
+    std::path::PathBuf::from(s)
+}
+
+/// Convert a plaintext SQLite DB at `path` into a SQLCipher DB encrypted with `key`.
+/// Backs up the original to `<path>.pre-encrypt-backup` (kept). Uses SQLCipher's
+/// `sqlcipher_export`. Folds any WAL into the main file first, and removes stale
+/// WAL/SHM after the swap.
+fn migrate_plaintext_to_encrypted(path: &Path, key: &str) -> Result<()> {
+    let map_io = |e: std::io::Error| rusqlite::Error::ToSqlConversionFailure(Box::new(e));
+    // 1. Safety backup (kept).
+    std::fs::copy(path, sibling(path, ".pre-encrypt-backup")).map_err(map_io)?;
+    // 2. Export plaintext → a new encrypted file.
+    let enc = sibling(path, ".enc-tmp");
+    let _ = std::fs::remove_file(&enc);
+    {
+        let conn = Connection::open(path)?; // no key = plain SQLite under SQLCipher
+        conn.pragma_update(None, "journal_mode", "DELETE")?; // fold WAL into the main file
+        let enc_str = enc.to_str().ok_or_else(|| {
+            map_io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-utf8 path",
+            ))
+        })?;
+        conn.execute_batch(&format!(
+            "ATTACH DATABASE '{}' AS enc KEY '{}'; SELECT sqlcipher_export('enc'); DETACH DATABASE enc;",
+            enc_str.replace('\'', "''"),
+            key.replace('\'', "''"),
+        ))?;
+    } // conn closes here
+      // 3. Swap encrypted file into place; drop stale WAL/SHM of the old plaintext DB.
+    std::fs::rename(&enc, path).map_err(map_io)?;
+    let _ = std::fs::remove_file(sibling(path, "-wal"));
+    let _ = std::fs::remove_file(sibling(path, "-shm"));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

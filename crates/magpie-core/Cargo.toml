@@ -5,7 +5,7 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 blake3 = "1"
 regex = "1"
 fuzzy-matcher = "0.3"
