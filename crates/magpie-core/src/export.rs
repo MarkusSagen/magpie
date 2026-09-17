@@ -139,9 +139,17 @@ pub fn backup_db(store: &Store, dest_db: &Path) -> Result<()> {
     })?;
     // A stale target would make ATTACH open an existing (possibly foreign) file.
     let _ = std::fs::remove_file(dest_db);
+    // sqlcipher_export() copies schema + data but NOT the page-1 `user_version`
+    // header field, so the destination would start at 0 — making run_migrations()
+    // re-run already-applied ALTERs on next open (and fail with "duplicate
+    // column"). Carry the source's user_version across explicitly.
+    let user_version: i64 = store
+        .conn()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))?;
     store.conn().execute_batch(&format!(
         "ATTACH DATABASE '{}' AS plaintext KEY ''; \
          SELECT sqlcipher_export('plaintext'); \
+         PRAGMA plaintext.user_version = {user_version}; \
          DETACH DATABASE plaintext;",
         dest.replace('\'', "''"),
     ))?;

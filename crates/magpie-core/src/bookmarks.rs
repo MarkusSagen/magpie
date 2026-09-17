@@ -9,17 +9,24 @@ pub struct Bookmark {
     pub title: String,
     pub domain: String,
     pub added_ms: i64,
+    pub tags: Vec<String>,
 }
 
-const COLS: &str = "id, url, title, domain, added_ms";
+const COLS: &str = "id, url, title, domain, added_ms, tags";
 
 fn row(r: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
+    let tags: String = r.get(5)?;
     Ok(Bookmark {
         id: r.get(0)?,
         url: r.get(1)?,
         title: r.get(2)?,
         domain: r.get(3)?,
         added_ms: r.get(4)?,
+        tags: tags
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
     })
 }
 
@@ -39,12 +46,12 @@ impl Store {
             })
     }
 
-    /// Bookmarks matching `query` (case-insensitive over title/url/domain), newest first.
+    /// Bookmarks matching `query` (case-insensitive over title/url/domain/tags), newest first.
     pub fn list_bookmarks(&self, query: &str, limit: i64) -> Result<Vec<Bookmark>> {
         let like = format!("%{}%", query.trim());
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {COLS} FROM bookmarks
-             WHERE ?1 = '%%' OR title LIKE ?1 COLLATE NOCASE OR url LIKE ?1 COLLATE NOCASE OR domain LIKE ?1 COLLATE NOCASE
+             WHERE ?1 = '%%' OR title LIKE ?1 COLLATE NOCASE OR url LIKE ?1 COLLATE NOCASE OR domain LIKE ?1 COLLATE NOCASE OR tags LIKE ?1 COLLATE NOCASE
              ORDER BY added_ms DESC LIMIT ?2"
         ))?;
         let rows = stmt.query_map(rusqlite::params![like, limit], row)?;
@@ -57,6 +64,22 @@ impl Store {
             .conn()
             .execute("DELETE FROM bookmarks WHERE id = ?1", [id])?
             > 0)
+    }
+
+    /// Replace a bookmark's tags. Normalizes: trim, lowercase, drop empties, dedupe
+    /// (order preserved), store comma-joined.
+    pub fn set_bookmark_tags(&self, id: i64, tags: &[String]) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
+        let norm: Vec<String> = tags
+            .iter()
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty() && seen.insert(t.clone()))
+            .collect();
+        self.conn().execute(
+            "UPDATE bookmarks SET tags = ?2 WHERE id = ?1",
+            rusqlite::params![id, norm.join(",")],
+        )?;
+        Ok(())
     }
 }
 

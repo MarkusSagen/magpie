@@ -178,6 +178,93 @@ fn bookmarks_crud() {
 }
 
 #[test]
+fn fresh_db_runs_migration_and_bookmarks_start_untagged() {
+    // list_bookmarks selects the `tags` column, which only exists once
+    // run_migrations() has ALTERed the table created by the baseline SCHEMA —
+    // so a working query here already proves the migration ran.
+    let s = store();
+    s.add_bookmark("https://a.com", "A", "a.com", 10).unwrap();
+    let all = s.list_bookmarks("", 10).unwrap();
+    assert_eq!(all.len(), 1);
+    assert!(all[0].tags.is_empty());
+}
+
+#[test]
+fn set_bookmark_tags_normalizes() {
+    let s = store();
+    let id = s.add_bookmark("https://a.com", "A", "a.com", 10).unwrap();
+    s.set_bookmark_tags(
+        id,
+        &[
+            "Work".to_string(),
+            " Reading ".to_string(),
+            "work".to_string(),
+            "".to_string(),
+        ],
+    )
+    .unwrap();
+    let all = s.list_bookmarks("", 10).unwrap();
+    assert_eq!(all[0].tags, vec!["work".to_string(), "reading".to_string()]);
+}
+
+#[test]
+fn list_bookmarks_matches_tags() {
+    let s = store();
+    let id = s.add_bookmark("https://a.com", "A", "a.com", 10).unwrap();
+    s.set_bookmark_tags(id, &["reading".to_string()]).unwrap();
+    let hit = s.list_bookmarks("reading", 10).unwrap();
+    assert_eq!(hit.len(), 1);
+    assert_eq!(hit[0].id, id);
+    let miss = s.list_bookmarks("nope", 10).unwrap();
+    assert!(miss.is_empty());
+}
+
+#[test]
+fn legacy_db_migrates_tags_column_in_place_and_is_idempotent() {
+    let path =
+        std::env::temp_dir().join(format!("magpie-legacy-bmk-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        // Pre-migration schema: the frozen baseline CREATE from schema.sql, minus tags.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE bookmarks (
+               id       INTEGER PRIMARY KEY,
+               url      TEXT NOT NULL,
+               title    TEXT NOT NULL DEFAULT '',
+               domain   TEXT NOT NULL DEFAULT '',
+               added_ms INTEGER NOT NULL
+             );
+             CREATE UNIQUE INDEX idx_bookmarks_url ON bookmarks(url);
+             CREATE INDEX idx_bookmarks_added ON bookmarks(added_ms);
+             INSERT INTO bookmarks (url, title, domain, added_ms)
+               VALUES ('https://legacy.com', 'Legacy', 'legacy.com', 5);
+             PRAGMA user_version = 0;",
+        )
+        .unwrap();
+    }
+
+    // First open: init() runs the baseline SCHEMA (no-op on existing tables via
+    // IF NOT EXISTS) then run_migrations() ALTERs the pre-existing bookmarks table.
+    let s = magpie_core::open(&path).unwrap();
+    let all = s.list_bookmarks("", 10).unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].url, "https://legacy.com");
+    assert!(all[0].tags.is_empty());
+    drop(s);
+
+    // Second open: migration already applied (user_version >= 1) — must not error
+    // trying to ALTER a column that already exists.
+    let s2 = magpie_core::open(&path).unwrap();
+    assert_eq!(s2.list_bookmarks("", 10).unwrap().len(), 1);
+    drop(s2);
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+}
+
+#[test]
 fn reads_firefox_bookmarks() {
     // Build a minimal Firefox places.sqlite in a temp file.
     let dir = std::env::temp_dir().join(format!("magpie-fftest-{}", std::process::id()));

@@ -85,11 +85,34 @@ pub struct Store {
     pub(crate) conn: Connection,
 }
 
+/// Ordered, additive schema migrations applied after the baseline SCHEMA. Each entry
+/// runs once, in order, bumping `PRAGMA user_version`. NEVER edit or reorder an existing
+/// entry (that breaks already-migrated DBs) — only append. The baseline CREATE
+/// statements in schema.sql stay frozen; all later schema changes live here.
+const MIGRATIONS: &[&str] = &[
+    // v1: per-bookmark tags (comma-separated, normalized lowercase) for filtering.
+    "ALTER TABLE bookmarks ADD COLUMN tags TEXT NOT NULL DEFAULT '';",
+];
+
+fn run_migrations(conn: &Connection) -> Result<()> {
+    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    for (i, sql) in MIGRATIONS.iter().enumerate() {
+        let version = (i as i64) + 1;
+        if current < version {
+            conn.execute_batch(sql)?;
+            // pragma_update can't parametrize user_version; format the literal (it's our own i64).
+            conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
+        }
+    }
+    Ok(())
+}
+
 impl Store {
     fn init(conn: Connection) -> Result<Store> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        run_migrations(&conn)?;
         Ok(Store { conn })
     }
 
@@ -264,8 +287,16 @@ fn migrate_plaintext_to_encrypted(path: &Path, key: &str) -> Result<()> {
                 "non-utf8 path",
             ))
         })?;
+        // sqlcipher_export() copies schema + data but NOT the page-1 `user_version`
+        // header field, so the destination would start at 0 — making run_migrations()
+        // re-run already-applied ALTERs on next open (and fail with "duplicate
+        // column"). Carry the source's user_version across explicitly.
+        let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         conn.execute_batch(&format!(
-            "ATTACH DATABASE '{}' AS enc KEY '{}'; SELECT sqlcipher_export('enc'); DETACH DATABASE enc;",
+            "ATTACH DATABASE '{}' AS enc KEY '{}'; \
+             SELECT sqlcipher_export('enc'); \
+             PRAGMA enc.user_version = {user_version}; \
+             DETACH DATABASE enc;",
             enc_str.replace('\'', "''"),
             key.replace('\'', "''"),
         ))?;
@@ -489,6 +520,16 @@ mod tests {
             })
             .unwrap();
         assert_eq!(name, "Ghostty 2");
+    }
+
+    #[test]
+    fn migrations_bump_user_version() {
+        let s = open_in_memory().unwrap();
+        let version: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(version >= 1);
     }
 
     #[test]

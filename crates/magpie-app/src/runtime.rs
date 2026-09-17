@@ -556,6 +556,13 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
                         _ => (slint::Image::default(), false),
                     }
                 };
+                let tags = SharedString::from(
+                    b.tags
+                        .iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
                 BookmarkRow {
                     id: b.id as i32,
                     title: SharedString::from(b.title),
@@ -563,6 +570,7 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
                     url: SharedString::from(b.url),
                     icon,
                     has_icon,
+                    tags,
                 }
             })
             .collect()
@@ -2813,8 +2821,19 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
-        ui.on_add_bookmark(move |url| {
-            let url = url.trim().to_string();
+        ui.on_add_bookmark(move |input| {
+            // The input may carry trailing hashtags, e.g. "https://x.com #work #reading".
+            let mut url = String::new();
+            let mut tags: Vec<String> = Vec::new();
+            for tok in input.split_whitespace() {
+                if url.is_empty() && (tok.starts_with("http://") || tok.starts_with("https://")) {
+                    url = tok.to_string();
+                } else if let Some(t) = tok.strip_prefix('#') {
+                    if !t.is_empty() {
+                        tags.push(t.to_string());
+                    }
+                }
+            }
             if !(url.starts_with("http://") || url.starts_with("https://")) {
                 return;
             }
@@ -2824,7 +2843,11 @@ pub fn start() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
                 };
-                let _ = store.add_bookmark(&url, "", &domain, now_ms());
+                if let Ok(id) = store.add_bookmark(&url, "", &domain, now_ms()) {
+                    if !tags.is_empty() {
+                        let _ = store.set_bookmark_tags(id, &tags);
+                    }
+                }
             }
             if let Some(ui) = w.upgrade() {
                 refresh_bookmarks(&ui, &s);

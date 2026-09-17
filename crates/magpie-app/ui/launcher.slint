@@ -65,6 +65,7 @@ struct BookmarkRow {
     url: string,
     icon: image,
     has_icon: bool,
+    tags: string,
 }
 
 struct JournalRow {
@@ -2068,7 +2069,7 @@ export component LauncherWindow inherits Window {
                         horizontal-stretch: 1; height: 30px; background: #2a2a30; border-radius: 6px;
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px;
-                            if root.bookmark-add-url == "": Text { text: "Add URL (Enter)…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                            if root.bookmark-add-url == "": Text { text: "Add URL  (optionally  #tags)…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
                             bkadd := TextInput {
                                 text <=> root.bookmark-add-url;
                                 color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
@@ -2094,6 +2095,7 @@ export component LauncherWindow inherits Window {
                                 horizontal-stretch: 1; padding-top: 5px; padding-bottom: 5px;
                                 Text { text: b.title == "" ? b.url : b.title; color: white; font-size: 13px; overflow: elide; }
                                 Text { text: b.domain; color: #8a8a90; font-size: 11px; overflow: elide; }
+                                if b.tags != "": Text { text: b.tags; color: #6a6a70; font-size: 10px; overflow: elide; }
                             }
                             Rectangle {
                                 width: 28px;

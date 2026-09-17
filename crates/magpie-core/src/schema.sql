@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_time_entries_key ON time_entries(task_key);
 
+-- tags column added by migration v1 (see run_migrations in store.rs)
 CREATE TABLE IF NOT EXISTS bookmarks (
   id       INTEGER PRIMARY KEY,
   url      TEXT NOT NULL,
