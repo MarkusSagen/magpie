@@ -455,6 +455,16 @@ export component LauncherWindow inherits Window {
     callback promote-line(int);
     // Keyboard nav: move to the previous (-1) / next (+1) note and open it.
     callback nav-note(int);
+    // ---- Notes mode: [[wiki-link]] autocomplete ----
+    // Matching note names for the currently-open `[[…` query (empty = no popup).
+    in property <[string]> note-suggestions;
+    // Caret byte offset in note-body, kept in sync from the editor.
+    in-out property <int> note-caret;
+    // Edited text + caret byte offset together (drives suggestion computation).
+    callback edit-note-body-at(string, int);
+    // Accept a suggestion, closing the `[[…` link with the given note name.
+    callback accept-note-suggestion(string);
+    callback dismiss-note-suggestions();
 
     // ---- Tasks mode ----
     in property <[TaskRow]> tasks;
@@ -1689,7 +1699,10 @@ export component LauncherWindow inherits Window {
                                 font-size: 13px;
                                 single-line: false;
                                 wrap: word-wrap;
-                                edited => { root.edit-note-body(self.text); }
+                                edited => {
+                                    root.note-caret = self.cursor-position-byte-offset;
+                                    root.edit-note-body-at(self.text, self.cursor-position-byte-offset);
+                                }
                                 key-pressed(event) => {
                                     // ⌘⏎ promotes the current line to a task; ⌘↑/⌘↓
                                     // switch notes while editing; Esc returns focus to
@@ -1706,12 +1719,47 @@ export component LauncherWindow inherits Window {
                                         root.nav-note(1);
                                         return accept;
                                     }
+                                    if root.note-suggestions.length > 0 {
+                                        if event.text == Key.Tab {
+                                            root.accept-note-suggestion(root.note-suggestions[0]);
+                                            return accept;
+                                        }
+                                        if event.text == Key.Escape {
+                                            root.dismiss-note-suggestions();
+                                            return accept;
+                                        }
+                                    }
                                     if event.text == Key.Escape {
                                         nlistfs.focus();
                                         return accept;
                                     }
                                     return reject;
                                 }
+                            }
+                        }
+                        // [[wiki-link]] autocomplete popup, shown just below the
+                        // editor while an open `[[…` query has matches.
+                        if root.note-suggestions.length > 0: Rectangle {
+                            max-height: 160px;
+                            background: #26262c;
+                            border-color: #3a3a40;
+                            border-width: 1px;
+                            border-radius: 6px;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 2px;
+                                for name in root.note-suggestions: Rectangle {
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: srow.has-hover ? #34343c : transparent;
+                                    srow := TouchArea { clicked => { root.accept-note-suggestion(name); } }
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        Text { text: name; color: #d0d0d4; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    }
+                                }
+                                Text { text: "Tab to insert"; color: #6a6a70; font-size: 10px; }
                             }
                         }
                         // Links strip: clickable [[page]] chips parsed from the body.

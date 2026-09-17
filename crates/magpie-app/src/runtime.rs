@@ -15,6 +15,7 @@ use magpie_app::merge_view::separator_str;
 use magpie_app::paste_action::{perform_paste, resolve_slot_or_recent, PasteKind};
 use magpie_app::retention::policy_from_config;
 use magpie_app::stats_view::{range_from_index, to_bars};
+use magpie_app::wiki_complete;
 use magpie_core::{Content, Entry, Kind, RetentionPolicy, Stats, StatsRange, Totals};
 use magpie_platform::os::hotkeys::Hotkeys;
 use magpie_platform::os::paste::EnigoPaster;
@@ -513,6 +514,8 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     ui.set_note_id(open_id);
     ui.set_note_body(SharedString::from(body));
     ui.set_note_provenance(SharedString::from(prov));
+    // A stale `[[…` popup from the previously-open note shouldn't linger.
+    ui.set_note_suggestions(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
     ui.set_note_links(ModelRc::new(VecModel::from(
         links
             .into_iter()
@@ -2537,16 +2540,24 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
-        ui.on_edit_note_body(move |body| {
+        ui.on_edit_note_body_at(move |body, caret| {
             if let Some(ui) = w.upgrade() {
                 let id = ui.get_note_id();
-                if id >= 0 {
+                let (names, own_name) = {
                     let store = match s.store.lock() {
                         Ok(g) => g,
                         Err(e) => e.into_inner(),
                     };
-                    let _ = store.update_note_body(id as i64, body.as_str(), now_ms());
-                }
+                    if id >= 0 {
+                        let _ = store.update_note_body(id as i64, body.as_str(), now_ms());
+                    }
+                    let own_name = if id >= 0 {
+                        store.get_note(id as i64).ok().flatten().map(|n| n.name)
+                    } else {
+                        None
+                    };
+                    (store.all_note_names().unwrap_or_default(), own_name)
+                };
                 // Refresh only the links strip (cheap) — don't rebuild the list on
                 // every keystroke.
                 ui.set_note_links(ModelRc::new(VecModel::from(
@@ -2555,6 +2566,63 @@ pub fn start() {
                         .map(SharedString::from)
                         .collect::<Vec<_>>(),
                 )));
+                let suggestions =
+                    match wiki_complete::active_wiki_query(body.as_str(), caret.max(0) as usize) {
+                        Some((_, query)) => {
+                            let names: Vec<String> = names
+                                .into_iter()
+                                .filter(|n| Some(n) != own_name.as_ref())
+                                .collect();
+                            wiki_complete::rank_matches(&names, query, 8)
+                        }
+                        None => Vec::new(),
+                    };
+                ui.set_note_suggestions(ModelRc::new(VecModel::from(
+                    suggestions
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect::<Vec<_>>(),
+                )));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_accept_note_suggestion(move |name| {
+            if let Some(ui) = w.upgrade() {
+                let id = ui.get_note_id();
+                let body = ui.get_note_body().to_string();
+                let caret = ui.get_note_caret();
+                let (new_text, new_caret) = wiki_complete::apply_wiki_completion(
+                    &body,
+                    caret.max(0) as usize,
+                    name.as_str(),
+                );
+                if id >= 0 {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let _ = store.update_note_body(id as i64, &new_text, now_ms());
+                }
+                ui.set_note_body(SharedString::from(new_text.clone()));
+                ui.set_note_caret(new_caret as i32);
+                ui.set_note_links(ModelRc::new(VecModel::from(
+                    magpie_app::notes_view::wiki_links(&new_text)
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect::<Vec<_>>(),
+                )));
+                ui.set_note_suggestions(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_dismiss_note_suggestions(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_suggestions(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
             }
         });
     }
