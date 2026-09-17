@@ -188,6 +188,15 @@ pub struct ActiveTimer {
     pub start_ms: i64,
 }
 
+/// One tracked session for the "recent sessions" UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimeEntry {
+    pub id: i64,
+    pub task_title: String,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>, // None = still running
+}
+
 impl Store {
     /// The running timer, if any (there is at most one).
     pub fn active_timer(&self) -> Result<Option<ActiveTimer>> {
@@ -292,5 +301,30 @@ impl Store {
             rusqlite::params![since_ms, now_ms],
             |r| r.get(0),
         )
+    }
+
+    /// Most-recent tracked sessions first (by start), up to `limit`.
+    pub fn recent_time_entries(&self, limit: i64) -> Result<Vec<TimeEntry>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT id, task_title, start_ms, end_ms FROM time_entries
+             ORDER BY start_ms DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok(TimeEntry {
+                id: r.get(0)?,
+                task_title: r.get(1)?,
+                start_ms: r.get(2)?,
+                end_ms: r.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Delete one tracked session. Returns whether a row was removed.
+    pub fn delete_time_entry(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM time_entries WHERE id = ?1", [id])?
+            > 0)
     }
 }

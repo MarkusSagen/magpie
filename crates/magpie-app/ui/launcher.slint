@@ -106,6 +106,15 @@ struct ClipRow {
     kind: string,
 }
 
+// A single tracked session in the Stats → "Recent sessions" list.
+struct TimeEntryRow {
+    id: int,
+    title: string,
+    when: string,      // e.g. "2h ago" (relative_time)
+    duration: string,  // fmt_duration, or ignored when `running`
+    running: bool,
+}
+
 // ---- "Find everywhere" palette rows (unified search over notes/tasks/bookmarks) ----
 struct SearchNoteRow {
     id: int,
@@ -316,6 +325,8 @@ export component LauncherWindow inherits Window {
     in property <string> time-week-total;
     in property <[Bar]> time-by-day-bars;
     in property <[Bar]> time-by-project-bars;
+    in property <[TimeEntryRow]> time-entries;
+    callback delete-time-entry(int);
     in property <string> totals-line;
     // "2026-08-04 → 2026-09-02 · peak 21 copies in a day" under the bar chart.
     in property <string> over-time-caption;
@@ -1503,6 +1514,39 @@ export component LauncherWindow inherits Window {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
+                        }
+
+                        if root.time-entries.length > 0: Text { text: "Recent sessions"; color: #8a8a92; font-size: 12px; }
+                        for e in root.time-entries: Rectangle {
+                            height: 30px;
+                            background: terow.has-hover ? #26262c : transparent;
+                            border-radius: 6px;
+                            terow := TouchArea {}
+                            HorizontalLayout {
+                                padding-left: 6px; padding-right: 6px; spacing: 8px;
+                                Text {
+                                    text: e.title;
+                                    color: #d0d0d4;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Text { text: e.when; color: #6a6a70; font-size: 11px; vertical-alignment: center; }
+                                if e.running: Rectangle {
+                                    height: 18px;
+                                    width: 52px;
+                                    border-radius: 9px;
+                                    background: #3a3a44;
+                                    Text { text: "running"; color: #9aa8ff; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if !e.running: Text { text: e.duration; color: #9a9aa0; font-size: 11px; vertical-alignment: center; }
+                                Rectangle {
+                                    width: 22px;
+                                    tedel := TouchArea { clicked => { root.delete-time-entry(e.id); } }
+                                    Text { text: "×"; color: tedel.has-hover ? #ff9a9a : #55555f; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
                         }
                     }
                 }

@@ -160,6 +160,36 @@ fn time_aggregates() {
 }
 
 #[test]
+fn recent_time_entries_and_delete() {
+    let s = store();
+    s.start_timer("k1|A", "A", Some(1), 1_000).unwrap();
+    s.stop_active(4_000).unwrap(); // 3s on A
+    s.start_timer("k2|B", "B", Some(1), 10_000).unwrap();
+    s.stop_active(15_000).unwrap(); // 5s on B
+
+    let entries = s.recent_time_entries(10).unwrap();
+    assert_eq!(entries.len(), 2);
+    // newest (by start) first: B before A
+    assert_eq!(entries[0].task_title, "B");
+    assert_eq!(entries[0].start_ms, 10_000);
+    assert_eq!(entries[0].end_ms, Some(15_000));
+    assert_eq!(entries[1].task_title, "A");
+    assert_eq!(entries[1].start_ms, 1_000);
+    assert_eq!(entries[1].end_ms, Some(4_000));
+
+    let before = s.time_total_since(0, 20_000).unwrap();
+    assert!(s.delete_time_entry(entries[0].id).unwrap());
+    let after_entries = s.recent_time_entries(10).unwrap();
+    assert_eq!(after_entries.len(), 1);
+    assert_eq!(after_entries[0].task_title, "A");
+    let after = s.time_total_since(0, 20_000).unwrap();
+    assert_eq!(before - after, 5_000); // B's duration removed
+
+    // deleting a bogus id is a no-op
+    assert!(!s.delete_time_entry(999_999).unwrap());
+}
+
+#[test]
 fn bookmarks_crud() {
     let s = store();
     let id = s.add_bookmark("https://a.com/x", "A", "a.com", 10).unwrap();

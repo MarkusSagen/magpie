@@ -1,6 +1,7 @@
 use crate::{
     ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, JournalRow, LauncherWindow, NoteRow,
     Popover, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
+    TimeEntryRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -1220,6 +1221,27 @@ fn refresh_stats(ui: &LauncherWindow, state: &AppState, range_index: i32) {
         proj_items.sort_by_key(|b| std::cmp::Reverse(b.2));
         proj_items.truncate(8);
         ui.set_time_by_project_bars(to_slint_bars(&proj_items));
+
+        // Recent sessions (most-recent-first), for the per-row delete list.
+        let entries: Vec<TimeEntryRow> = store
+            .recent_time_entries(15)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| {
+                let dur = match e.end_ms {
+                    Some(end) => (end - e.start_ms).max(0),
+                    None => (now - e.start_ms).max(0),
+                };
+                TimeEntryRow {
+                    id: e.id as i32,
+                    title: SharedString::from(e.task_title),
+                    when: SharedString::from(relative_time(e.start_ms, now)),
+                    duration: SharedString::from(magpie_app::format_time::fmt_duration(dur)),
+                    running: e.end_ms.is_none(),
+                }
+            })
+            .collect();
+        ui.set_time_entries(ModelRc::new(VecModel::from(entries)));
     }
 
     let ot: Vec<(String, String, i64)> = stats
@@ -2444,6 +2466,19 @@ pub fn start() {
         ui.on_stats_range_changed(move |idx| {
             if let Some(ui) = w.upgrade() {
                 refresh_stats(&ui, &s, idx);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_delete_time_entry(move |id| {
+            {
+                let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = store.delete_time_entry(id as i64);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_stats(&ui, &s, ui.get_range_index());
             }
         });
     }
