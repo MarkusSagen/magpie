@@ -3088,8 +3088,44 @@ pub fn start() {
     spawn_reminders(state.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
-    // Keep the tray icon alive for the whole run.
-    let _tray = build_tray(weak.clone(), state.clone(), popover.as_weak());
+    // Keep the tray icon alive for the whole run. It lives in a thread-local
+    // (not a local binding) so the ticker below can reach it from the event
+    // loop; see the `TRAY` thread_local for why (`TrayIcon` isn't `Send`).
+    TRAY.with(|t| *t.borrow_mut() = build_tray(weak.clone(), state.clone(), popover.as_weak()));
+
+    // Live menu-bar timer: while a task timer is running, show its elapsed
+    // time as the tray title ("▶ 12:34"); clear it when nothing is running.
+    // A background thread (not a Slint `Timer`) because a plain Slint timer
+    // may not tick while the app is hidden via `NSApp.hide`.
+    {
+        let state = state.clone();
+        std::thread::spawn(move || {
+            let mut last: Option<String> = None;
+            loop {
+                let title: Option<String> = {
+                    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                    match store.active_timer() {
+                        Ok(Some(t)) => {
+                            let secs = ((now_ms() - t.start_ms).max(0) / 1000) as u64;
+                            Some(format!("▶ {}", fmt_ms_clock(secs)))
+                        }
+                        _ => None,
+                    }
+                };
+                if title != last {
+                    last = title.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        TRAY.with(|tray| {
+                            if let Some(tray) = &*tray.borrow() {
+                                tray.set_title(title.as_deref());
+                            }
+                        });
+                    });
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        });
+    }
 
     // The red close button hides the window (Magpie keeps running as a tray daemon);
     // "Quit Magpie" in the tray is the real exit.
@@ -3192,6 +3228,29 @@ pub fn start() {
     // clean so the next launch doesn't report a false crash.
     diag::mark_clean(&session_path);
     diag::log_line(&log_path, "clean shutdown");
+}
+
+// `tray_icon::TrayIcon` wraps an `Rc<RefCell<_>>` internally, so it is not
+// `Send`. It must live on (and only be touched from) the main/event-loop
+// thread. Keeping it in a thread-local lets the background ticker reach it
+// via `slint::invoke_from_event_loop` (whose closure must be `Send`) without
+// ever capturing the `TrayIcon` itself — only a `Send` `Option<String>` title
+// crosses the thread boundary.
+thread_local! {
+    static TRAY: std::cell::RefCell<Option<tray_icon::TrayIcon>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Format elapsed seconds as a menu-bar clock: `mm:ss`, switching to `h:mm:ss`
+/// past one hour.
+fn fmt_ms_clock(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
 }
 
 /// Decode the embedded menu-bar template PNG (black magpie silhouette on
