@@ -264,9 +264,11 @@ vendors OpenSSL, adds ~tens of seconds and a few MB). FTS5 + WAL still work.
      order by last_copied_at_ms desc limit 10;"
   ```
   Plain `sqlite3` reports "file is not a database" — that's expected (encrypted).
-- **Backup caveat:** `--backup` is a `VACUUM INTO` snapshot, so it's **encrypted with
-  this machine's key** — restorable only where that Keychain key exists. For
-  cross-machine portability use `--export` (plaintext Markdown + JSONL).
+- **Backups are portable:** `--backup` writes a **decrypted** plain-SQLite snapshot
+  (via `sqlcipher_export` with `KEY ''`), so it restores on any machine — `restore` drops
+  the plaintext file in place and the next launch re-encrypts it under that machine's key.
+  The backup file itself is unencrypted on disk (in whatever folder you chose), by design.
+  `--export` (Markdown + JSONL) remains the other portable path.
 
 ## Packaging (see the spec)
 
