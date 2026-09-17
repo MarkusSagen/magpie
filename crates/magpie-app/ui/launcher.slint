@@ -63,6 +63,8 @@ struct BookmarkRow {
     title: string,
     domain: string,
     url: string,
+    icon: image,
+    has_icon: bool,
 }
 
 struct JournalRow {
@@ -2086,7 +2088,8 @@ export component LauncherWindow inherits Window {
                         bkrow := TouchArea { clicked => { root.open-bookmark(b.url); } }
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px; spacing: 8px;
-                            Text { text: "🔖"; font-size: 15px; vertical-alignment: center; }
+                            if b.has-icon: Image { source: b.icon; width: 16px; height: 16px; }
+                            if !b.has-icon: Text { text: "🔖"; font-size: 15px; vertical-alignment: center; }
                             VerticalLayout {
                                 horizontal-stretch: 1; padding-top: 5px; padding-bottom: 5px;
                                 Text { text: b.title == "" ? b.url : b.title; color: white; font-size: 13px; overflow: elide; }

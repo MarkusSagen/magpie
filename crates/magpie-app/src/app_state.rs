@@ -19,6 +19,8 @@ pub struct AppState {
     pub mask_visible_chars: i64,
     /// Open the Today dashboard on each summon (from `Config`, session-immutable).
     pub open_to_today: bool,
+    /// Fetch site favicons for links/bookmarks (from `Config::fetch_link_favicons`).
+    pub fetch_link_favicons: bool,
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
@@ -59,6 +61,7 @@ mod tests {
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,
             open_to_today: false,
+            fetch_link_favicons: true,
         }
     }
 

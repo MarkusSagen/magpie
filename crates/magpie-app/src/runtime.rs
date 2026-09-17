@@ -62,6 +62,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         mask_patterns: cfg.mask_patterns.clone(),
         mask_visible_chars: cfg.mask_visible_chars.max(0),
         open_to_today: cfg.open_to_today,
+        fetch_link_favicons: cfg.fetch_link_favicons,
     })
 }
 
@@ -537,6 +538,7 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
 /// Rebuild the bookmarks list from the store, filtered by the current search query.
 fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
     let q = ui.get_bookmark_query();
+    let favicon_dir = data_dir().join("favicons");
     let rows: Vec<BookmarkRow> = {
         let store = match state.store.lock() {
             Ok(g) => g,
@@ -546,15 +548,82 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
             .list_bookmarks(q.as_str(), 500)
             .unwrap_or_default()
             .into_iter()
-            .map(|b| BookmarkRow {
-                id: b.id as i32,
-                title: SharedString::from(b.title),
-                domain: SharedString::from(b.domain),
-                url: SharedString::from(b.url),
+            .map(|b| {
+                let (icon, has_icon) = {
+                    let p = favicon::favicon_cache_path(&favicon_dir, &b.domain);
+                    match p.exists().then(|| slint::Image::load_from_path(&p)) {
+                        Some(Ok(img)) => (img, true),
+                        _ => (slint::Image::default(), false),
+                    }
+                };
+                BookmarkRow {
+                    id: b.id as i32,
+                    title: SharedString::from(b.title),
+                    domain: SharedString::from(b.domain),
+                    url: SharedString::from(b.url),
+                    icon,
+                    has_icon,
+                }
             })
             .collect()
     };
     ui.set_bookmarks(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Best-effort background favicon fetch for the domains currently in the
+/// bookmarks list, gated by `state.fetch_link_favicons` (privacy). Fetches at
+/// most once per domain (cache-checked in `favicon::ensure_favicon`), then
+/// refreshes the bookmarks list once at the end so newly-fetched icons appear.
+fn spawn_bookmark_favicons(ui: &LauncherWindow, state: &Arc<AppState>) {
+    if !state.fetch_link_favicons {
+        return;
+    }
+    let domains: Vec<String> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let mut seen = std::collections::HashSet::new();
+        store
+            .list_bookmarks("", 500)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|b| {
+                if b.domain.is_empty() || !seen.insert(b.domain.clone()) {
+                    None
+                } else {
+                    Some(b.domain)
+                }
+            })
+            .collect()
+    };
+    if domains.is_empty() {
+        return;
+    }
+    let weak = ui.as_weak();
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let dir = data_dir().join("favicons");
+        let mut any_fetched = false;
+        for domain in &domains {
+            let path = favicon::favicon_cache_path(&dir, domain);
+            let already_cached = path.exists();
+            if favicon::ensure_favicon(&dir, domain, favicon::fetch_favicon).is_some()
+                && !already_cached
+            {
+                any_fetched = true;
+            }
+        }
+        if any_fetched {
+            let w = weak.clone();
+            let s = state.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    refresh_bookmarks(&ui, &s);
+                }
+            });
+        }
+    });
 }
 
 /// Rebuild the "Find everywhere" palette's three result lists from the store
@@ -2727,6 +2796,7 @@ pub fn start() {
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
                     refresh_bookmarks(&ui, &s);
+                    spawn_bookmark_favicons(&ui, &s);
                 }
             }
         });

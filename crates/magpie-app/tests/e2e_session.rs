@@ -57,6 +57,7 @@ fn state() -> AppState {
         mask_patterns: Vec::new(),
         mask_visible_chars: 3,
         open_to_today: false,
+        fetch_link_favicons: true,
     }
 }
 
