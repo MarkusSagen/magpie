@@ -228,6 +228,19 @@ iteration so a bad event can't silently stop capture. Autostart LaunchAgent uses
 `--install-autostart` runs `launchctl load -w` so it applies without a re-login.
 Inspect a crash: `open <data_dir>/logs/magpie.log`.
 
+## Schema migrations
+
+Schema now evolves through `run_migrations` in `store.rs` (runs in `Store::init` after the
+baseline `schema.sql`), keyed on `PRAGMA user_version`:
+- The `schema.sql` `CREATE` statements are the **frozen v0 baseline** — never edit an existing
+  CREATE to add a column; append an `ALTER TABLE …` to the `MIGRATIONS` array instead.
+- `MIGRATIONS` is **append-only**: never edit or reorder an existing entry (that corrupts
+  already-migrated DBs). Entry index + 1 = the `user_version` it bumps to. v1 = bookmark `tags`.
+- **Gotcha:** `sqlcipher_export()` copies schema+data but NOT the page-1 `user_version` header,
+  so `backup_db` and `migrate_plaintext_to_encrypted` carry it across with an explicit
+  `PRAGMA … user_version = N` — otherwise the destination reopens at 0 and re-runs ALTERs
+  ("duplicate column"). Any future export/copy path must do the same.
+
 ## Data & config locations (macOS)
 
 `~/Library/Application Support/magpie/`:
