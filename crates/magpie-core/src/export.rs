@@ -125,7 +125,11 @@ pub fn export_clipboard_jsonl(store: &Store, path: &Path) -> Result<usize> {
     Ok(count)
 }
 
-/// A clean single-file DB snapshot at `dest_db` (SQLite VACUUM INTO; WAL-safe).
+/// A portable, **decrypted** single-file DB snapshot at `dest_db`. Even when the live
+/// DB is SQLCipher-encrypted, this writes plain SQLite (`KEY ''`) via `sqlcipher_export`,
+/// so the backup restores on any machine — restoring it re-encrypts under that machine's
+/// key on the next launch (the plaintext file is migrated in place). For an unencrypted
+/// (e.g. in-memory) source this is simply a logical copy.
 pub fn backup_db(store: &Store, dest_db: &Path) -> Result<()> {
     let dest = dest_db.to_str().ok_or_else(|| {
         io_err(std::io::Error::new(
@@ -133,9 +137,14 @@ pub fn backup_db(store: &Store, dest_db: &Path) -> Result<()> {
             "non-utf8 path",
         ))
     })?;
-    store
-        .conn()
-        .execute("VACUUM INTO ?1", rusqlite::params![dest])?;
+    // A stale target would make ATTACH open an existing (possibly foreign) file.
+    let _ = std::fs::remove_file(dest_db);
+    store.conn().execute_batch(&format!(
+        "ATTACH DATABASE '{}' AS plaintext KEY ''; \
+         SELECT sqlcipher_export('plaintext'); \
+         DETACH DATABASE plaintext;",
+        dest.replace('\'', "''"),
+    ))?;
     Ok(())
 }
 
@@ -179,5 +188,29 @@ mod tests {
         backup_db(&s, &dest).unwrap();
         assert!(fs::metadata(&dest).unwrap().len() > 0);
         let _ = fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn backup_db_is_decrypted_and_portable() {
+        let dir = std::env::temp_dir().join(format!("magpie-backup-enc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("magpie.sqlite3");
+        let key = "abc123deadbeefabc123deadbeefabc1";
+        {
+            let s = crate::open_encrypted(&src, key).unwrap();
+            s.upsert_note_by_name("Portable", 1).unwrap();
+        }
+        // The encrypted source is unreadable as plain SQLite …
+        assert!(crate::open(&src).is_err());
+        let dest = dir.join("backup.sqlite3");
+        {
+            let s = crate::open_encrypted(&src, key).unwrap();
+            backup_db(&s, &dest).unwrap();
+        }
+        // … but the snapshot opens as PLAIN SQLite (no key) and carries the data.
+        let restored = crate::open(&dest).unwrap();
+        assert!(restored.note_by_name("Portable").unwrap().is_some());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

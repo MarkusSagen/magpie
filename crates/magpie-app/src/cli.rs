@@ -67,7 +67,7 @@ FLAGS:
     --install-autostart     Start Magpie automatically at login
     --uninstall-autostart   Remove login autostart
     --export <dir>          Export notes (Markdown) + clipboard (JSONL) to <dir>
-    --backup <dir>          Write a full backup (DB snapshot + assets) to <dir>
+    --backup <dir>          Write a portable backup (decrypted DB snapshot + assets) to <dir>
     --restore <dir>         Restore from a backup dir (quit Magpie first)
     --import-bookmarks <chrome|firefox|path>   Import bookmarks into Magpie
     --sync-vault <dir>      Sync notes with a folder of Markdown files (newest wins)
@@ -178,7 +178,10 @@ fn backup_data(data_dir: &std::path::Path, dest: &std::path::Path) -> i32 {
             return 1;
         }
     }
-    println!("Backed up to {}", dest.display());
+    println!(
+        "Backed up to {} (portable, decrypted — restores on any machine)",
+        dest.display()
+    );
     0
 }
 
