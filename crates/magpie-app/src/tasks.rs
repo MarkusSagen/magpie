@@ -347,6 +347,174 @@ pub fn group_sort(tasks: Vec<Task>) -> Vec<TaskGroup> {
     groups
 }
 
+/// How to cluster tasks into board columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupBy {
+    Status,
+    Priority,
+    Project,
+}
+
+/// How to order tasks within a board column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortBy {
+    Due,
+    Priority,
+    Title,
+    Status,
+}
+
+/// Filters applied before grouping. `project` matches a task's exact `#project`
+/// (or "No project" for tasks with none); `query` is a case-insensitive
+/// substring match on `title` ("" = no query); `hide_done` drops completed tasks.
+#[derive(Debug, Clone, Default)]
+pub struct BoardFilter {
+    pub project: Option<String>,
+    pub query: String,
+    pub hide_done: bool,
+}
+
+/// One column of the task board: a header title plus its ordered tasks.
+pub struct BoardColumn {
+    pub title: String,
+    pub tasks: Vec<Task>,
+}
+
+/// Todo < Doing < Done, for `SortBy::Status`.
+fn status_rank(s: Status) -> u8 {
+    match s {
+        Status::Todo => 0,
+        Status::Doing => 1,
+        Status::Done => 2,
+    }
+}
+
+fn title_ci(t: &Task) -> String {
+    t.title.to_lowercase()
+}
+
+fn sort_tasks(tasks: &mut [Task], sort_by: SortBy) {
+    match sort_by {
+        SortBy::Due => tasks.sort_by(|a, b| {
+            cmp_due(a.due_ms, b.due_ms)
+                .then_with(|| a.priority.cmp(&b.priority))
+                .then_with(|| title_ci(a).cmp(&title_ci(b)))
+        }),
+        SortBy::Priority => tasks.sort_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| cmp_due(a.due_ms, b.due_ms))
+                .then_with(|| title_ci(a).cmp(&title_ci(b)))
+        }),
+        SortBy::Title => tasks.sort_by(|a, b| {
+            title_ci(a)
+                .cmp(&title_ci(b))
+                .then_with(|| cmp_due(a.due_ms, b.due_ms))
+        }),
+        SortBy::Status => tasks.sort_by(|a, b| {
+            status_rank(a.status)
+                .cmp(&status_rank(b.status))
+                .then_with(|| cmp_due(a.due_ms, b.due_ms))
+                .then_with(|| title_ci(a).cmp(&title_ci(b)))
+        }),
+    }
+}
+
+fn apply_board_filter(tasks: Vec<Task>, filter: &BoardFilter) -> Vec<Task> {
+    let query = filter.query.to_lowercase();
+    tasks
+        .into_iter()
+        .filter(|t| !filter.hide_done || t.status != Status::Done)
+        .filter(|t| match &filter.project {
+            None => true,
+            Some(p) => t.project.as_deref().unwrap_or("No project") == p.as_str(),
+        })
+        .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
+        .collect()
+}
+
+/// Filter → group → sort tasks into ordered board columns. `Status` and
+/// `Priority` groupings always yield their full fixed set of columns (empty
+/// ones included, since Kanban needs somewhere to drop a card); `Project`
+/// yields one column per distinct project actually present, alphabetical,
+/// with "No project" last (mirrors `group_sort`'s project ordering).
+pub fn board_columns(
+    tasks: Vec<Task>,
+    group_by: GroupBy,
+    sort_by: SortBy,
+    filter: &BoardFilter,
+) -> Vec<BoardColumn> {
+    let filtered = apply_board_filter(tasks, filter);
+    let mut columns = match group_by {
+        GroupBy::Status => {
+            let mut cols: Vec<BoardColumn> = ["To do", "Doing", "Done"]
+                .into_iter()
+                .map(|title| BoardColumn {
+                    title: title.to_string(),
+                    tasks: Vec::new(),
+                })
+                .collect();
+            for t in filtered {
+                cols[status_rank(t.status) as usize].tasks.push(t);
+            }
+            cols
+        }
+        GroupBy::Priority => {
+            let mut cols: Vec<BoardColumn> = ["High", "Medium", "Low", "No priority"]
+                .into_iter()
+                .map(|title| BoardColumn {
+                    title: title.to_string(),
+                    tasks: Vec::new(),
+                })
+                .collect();
+            for t in filtered {
+                let idx = match t.priority {
+                    Priority::High => 0,
+                    Priority::Medium => 1,
+                    Priority::Low => 2,
+                    Priority::None => 3,
+                };
+                cols[idx].tasks.push(t);
+            }
+            cols
+        }
+        GroupBy::Project => {
+            use std::collections::BTreeMap;
+            let mut map: BTreeMap<String, Vec<Task>> = BTreeMap::new();
+            for t in filtered {
+                let key = t
+                    .project
+                    .clone()
+                    .unwrap_or_else(|| "No project".to_string());
+                map.entry(key).or_default().push(t);
+            }
+            let mut cols = Vec::new();
+            let mut no_project = None;
+            for (project, ts) in map {
+                if project == "No project" {
+                    no_project = Some(ts);
+                } else {
+                    cols.push(BoardColumn {
+                        title: project,
+                        tasks: ts,
+                    });
+                }
+            }
+            if let Some(ts) = no_project {
+                cols.push(BoardColumn {
+                    title: "No project".to_string(),
+                    tasks: ts,
+                });
+            }
+            cols
+        }
+    };
+    for col in &mut columns {
+        sort_tasks(&mut col.tasks, sort_by);
+    }
+    columns
+}
+
 /// Append a new `- [ ] <text>` task line to `body`. No-op if `text` is blank.
 pub fn append_task_line(body: &str, text: &str) -> String {
     let t = text.trim();
@@ -748,6 +916,156 @@ mod tests {
         // within "a": open before done, due asc
         let titles: Vec<&str> = g[0].tasks.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, vec!["soon", "later", "done"]);
+    }
+
+    /// Full-field `Task` builder for board-column tests (avoids repeating every
+    /// field for scenarios that only care about a couple of them).
+    fn bt(
+        title: &str,
+        status: Status,
+        priority: Priority,
+        due: Option<i64>,
+        project: Option<&str>,
+    ) -> Task {
+        Task {
+            note_id: 1,
+            note_name: "n".into(),
+            line_index: 0,
+            done: status == Status::Done,
+            status,
+            title: title.into(),
+            priority,
+            due_ms: due,
+            due_time_min: None,
+            recur: None,
+            bookmarked: false,
+            project: project.map(String::from),
+            source_app_id: None,
+            source_entry_id: None,
+        }
+    }
+
+    #[test]
+    fn board_columns_group_by_status_three_columns_in_order_incl_empty() {
+        let tasks = vec![
+            bt("a", Status::Todo, Priority::None, None, None),
+            bt("b", Status::Done, Priority::None, None, None),
+        ];
+        let cols = board_columns(tasks, GroupBy::Status, SortBy::Due, &BoardFilter::default());
+        assert_eq!(cols.len(), 3);
+        assert_eq!(cols[0].title, "To do");
+        assert_eq!(cols[1].title, "Doing");
+        assert_eq!(cols[2].title, "Done");
+        assert_eq!(cols[0].tasks.len(), 1);
+        assert!(cols[1].tasks.is_empty()); // empty column retained
+        assert_eq!(cols[2].tasks.len(), 1);
+    }
+
+    #[test]
+    fn board_columns_hide_done_removes_done_tasks() {
+        let tasks = vec![
+            bt("a", Status::Todo, Priority::None, None, None),
+            bt("b", Status::Done, Priority::None, None, None),
+        ];
+        let filter = BoardFilter {
+            hide_done: true,
+            ..Default::default()
+        };
+        let cols = board_columns(tasks, GroupBy::Status, SortBy::Due, &filter);
+        let total: usize = cols.iter().map(|c| c.tasks.len()).sum();
+        assert_eq!(total, 1);
+        assert!(cols[2].tasks.is_empty());
+    }
+
+    #[test]
+    fn board_columns_project_filter_keeps_only_that_project() {
+        let tasks = vec![
+            bt("a", Status::Todo, Priority::None, None, Some("work")),
+            bt("b", Status::Todo, Priority::None, None, Some("home")),
+            bt("c", Status::Todo, Priority::None, None, None),
+        ];
+        let filter = BoardFilter {
+            project: Some("work".to_string()),
+            ..Default::default()
+        };
+        let cols = board_columns(tasks, GroupBy::Project, SortBy::Due, &filter);
+        let titles: Vec<&str> = cols
+            .iter()
+            .flat_map(|c| c.tasks.iter())
+            .map(|t| t.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["a"]);
+    }
+
+    #[test]
+    fn board_columns_project_filter_no_project_matches_projectless_tasks() {
+        let tasks = vec![
+            bt("a", Status::Todo, Priority::None, None, Some("work")),
+            bt("b", Status::Todo, Priority::None, None, None),
+        ];
+        let filter = BoardFilter {
+            project: Some("No project".to_string()),
+            ..Default::default()
+        };
+        let cols = board_columns(tasks, GroupBy::Project, SortBy::Due, &filter);
+        let titles: Vec<&str> = cols
+            .iter()
+            .flat_map(|c| c.tasks.iter())
+            .map(|t| t.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["b"]);
+    }
+
+    #[test]
+    fn board_columns_query_filters_title_case_insensitively() {
+        let tasks = vec![
+            bt("Fix mount", Status::Todo, Priority::None, None, None),
+            bt("Buy milk", Status::Todo, Priority::None, None, None),
+        ];
+        let filter = BoardFilter {
+            query: "FIX".to_string(),
+            ..Default::default()
+        };
+        let cols = board_columns(tasks, GroupBy::Status, SortBy::Due, &filter);
+        let titles: Vec<&str> = cols
+            .iter()
+            .flat_map(|c| c.tasks.iter())
+            .map(|t| t.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["Fix mount"]);
+    }
+
+    #[test]
+    fn board_columns_sort_by_due_orders_scheduled_before_unscheduled() {
+        let tasks = vec![
+            bt("no due", Status::Todo, Priority::None, None, None),
+            bt("due", Status::Todo, Priority::None, Some(100), None),
+        ];
+        let cols = board_columns(tasks, GroupBy::Status, SortBy::Due, &BoardFilter::default());
+        let titles: Vec<&str> = cols[0].tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["due", "no due"]);
+    }
+
+    #[test]
+    fn board_columns_group_by_priority_four_named_columns() {
+        let tasks = vec![
+            bt("h", Status::Todo, Priority::High, None, None),
+            bt("m", Status::Todo, Priority::Medium, None, None),
+            bt("l", Status::Todo, Priority::Low, None, None),
+            bt("n", Status::Todo, Priority::None, None, None),
+        ];
+        let cols = board_columns(
+            tasks,
+            GroupBy::Priority,
+            SortBy::Due,
+            &BoardFilter::default(),
+        );
+        let titles: Vec<&str> = cols.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["High", "Medium", "Low", "No priority"]);
+        assert_eq!(cols[0].tasks[0].title, "h");
+        assert_eq!(cols[1].tasks[0].title, "m");
+        assert_eq!(cols[2].tasks[0].title, "l");
+        assert_eq!(cols[3].tasks[0].title, "n");
     }
 
     #[test]

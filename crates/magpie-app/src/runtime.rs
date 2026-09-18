@@ -1,7 +1,7 @@
 use crate::{
-    ActionItem, AppItem, Bar, BookmarkRow, ClipRow, EntryRow, JournalRow, LauncherWindow, NoteRow,
-    Popover, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
-    TimeEntryRow,
+    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, ClipRow, EntryRow, JournalRow,
+    LauncherWindow, NoteRow, Popover, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow,
+    SlotItem, TaskRow, TimeEntryRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
@@ -449,6 +449,7 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
         ui.set_tasks_mode(false);
         ui.set_bookmarks_mode(false);
         ui.set_journal_mode(false);
+        ui.set_board_mode(false);
         ui.set_today_mode(true);
         refresh_today(ui, state);
     }
@@ -849,6 +850,99 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     }
 }
 
+/// Rebuild the Board-mode task board: read the group/layout/sort/filter
+/// controls off the UI, run every task through the pure `tasks::board_columns`
+/// pipeline, and map each column's tasks to `TaskRow`s with the lighter
+/// (no time-tracking) mapping `refresh_popover` uses — cards don't show live
+/// tracking. Also recomputes the distinct project list for the filter chips.
+/// One store lock for both; models are set after it's dropped.
+fn refresh_board(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
+    let group_by = match ui.get_board_group() {
+        1 => magpie_app::tasks::GroupBy::Priority,
+        2 => magpie_app::tasks::GroupBy::Project,
+        _ => magpie_app::tasks::GroupBy::Status,
+    };
+    let sort_by = match ui.get_board_sort() {
+        1 => magpie_app::tasks::SortBy::Priority,
+        2 => magpie_app::tasks::SortBy::Title,
+        3 => magpie_app::tasks::SortBy::Status,
+        _ => magpie_app::tasks::SortBy::Due,
+    };
+    let project_raw = ui.get_board_project_filter().to_string();
+    let filter = magpie_app::tasks::BoardFilter {
+        project: if project_raw.is_empty() || project_raw == "All" {
+            None
+        } else {
+            Some(project_raw)
+        },
+        query: ui.get_board_query().to_string(),
+        hide_done: ui.get_board_hide_done(),
+    };
+    let to_row = |t: magpie_app::tasks::Task| TaskRow {
+        note_id: t.note_id as i32,
+        line_index: t.line_index as i32,
+        title: SharedString::from(t.title),
+        done: t.done,
+        doing: t.status == magpie_app::tasks::Status::Doing,
+        priority: match t.priority {
+            magpie_app::tasks::Priority::High => 0,
+            magpie_app::tasks::Priority::Medium => 1,
+            magpie_app::tasks::Priority::Low => 2,
+            magpie_app::tasks::Priority::None => 3,
+        },
+        due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+        project: SharedString::from(t.project.unwrap_or_default()),
+        source: SharedString::from(t.note_name),
+        recur: SharedString::from(recur_badge(t.recur)),
+        overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+        bookmarked: t.bookmarked,
+        // Time tracking isn't surfaced on board cards.
+        tracking: false,
+        time_total: SharedString::from(""),
+    };
+    let (columns, projects): (Vec<BoardColumn>, Vec<SharedString>) = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let all = magpie_app::tasks::all_tasks(&store, now);
+        // Distinct projects across ALL tasks (unfiltered), "No project" last.
+        let mut projects: Vec<String> = all
+            .iter()
+            .map(|t| {
+                t.project
+                    .clone()
+                    .unwrap_or_else(|| "No project".to_string())
+            })
+            .collect();
+        projects.sort();
+        projects.dedup();
+        let had_no_project = projects.iter().any(|p| p == "No project");
+        projects.retain(|p| p != "No project");
+        if had_no_project {
+            projects.push("No project".to_string());
+        }
+        let columns = magpie_app::tasks::board_columns(all, group_by, sort_by, &filter)
+            .into_iter()
+            .map(|c| BoardColumn {
+                title: SharedString::from(c.title),
+                count: c.tasks.len() as i32,
+                tasks: ModelRc::new(VecModel::from(
+                    c.tasks.into_iter().map(to_row).collect::<Vec<_>>(),
+                )),
+            })
+            .collect::<Vec<_>>();
+        (
+            columns,
+            projects.into_iter().map(SharedString::from).collect(),
+        )
+    };
+    ui.set_board(ModelRc::new(VecModel::from(columns)));
+    ui.set_board_projects(ModelRc::new(VecModel::from(projects)));
+}
+
 /// Rebuild the popover's Tasks tab: every **open** (`!done`) task across all
 /// notes, grouped/sorted, mapped to `TaskRow`s exactly as `refresh_tasks` does.
 /// Poison-tolerant lock so a panic elsewhere can't take the popover down.
@@ -1110,6 +1204,7 @@ fn open_note_into_notes_mode(ui: &LauncherWindow, state: &AppState, note_id: i32
     ui.set_note_id(note_id);
     ui.set_tasks_mode(false);
     ui.set_search_mode(false);
+    ui.set_board_mode(false);
     ui.set_notes_mode(true);
     refresh_notes(ui, state);
 }
@@ -1842,6 +1937,7 @@ pub fn start() {
                 ui.set_note_id(note_id);
                 ui.set_notes_mode(true);
                 ui.set_tasks_mode(false);
+                ui.set_board_mode(false);
                 show_window(&ui, &s);
                 refresh_notes(&ui, &s);
             }
@@ -2526,6 +2622,7 @@ pub fn start() {
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_board_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2813,6 +2910,7 @@ pub fn start() {
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_board_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -2967,6 +3065,7 @@ pub fn start() {
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_board_mode(false);
                     refresh_bookmarks(&ui, &s);
                     spawn_bookmark_favicons(&ui, &s);
                 }
@@ -3078,6 +3177,7 @@ pub fn start() {
                         ui.set_bookmarks_mode(true);
                         ui.set_notes_mode(false);
                         ui.set_tasks_mode(false);
+                        ui.set_board_mode(false);
                         refresh_bookmarks(&ui, &s);
                     }
                 }
@@ -3101,6 +3201,7 @@ pub fn start() {
                     ui.set_bookmarks_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_board_mode(false);
                     refresh_today(&ui, &s);
                 }
             }
@@ -3131,6 +3232,7 @@ pub fn start() {
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_board_mode(false);
                     refresh_journal(&ui, &s);
                 }
             }
@@ -3151,6 +3253,72 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_today_paste_clip(move |idx| {
             paste_and_close(&s, &w, idx.max(0) as usize, false);
+        });
+    }
+
+    // ---- Board mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_board(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_board_mode(on);
+                if on {
+                    ui.set_notes_mode(false);
+                    ui.set_tasks_mode(false);
+                    ui.set_bookmarks_mode(false);
+                    ui.set_today_mode(false);
+                    ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
+                    refresh_board(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_board_controls_changed(move || {
+            if let Some(ui) = w.upgrade() {
+                refresh_board(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_board_open_task(move |note_id| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_board_mode(false);
+                open_note_into_notes_mode(&ui, &s, note_id);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_board_set_status(move |note_id, line_index, status| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let status = match status {
+                    1 => magpie_app::tasks::Status::Doing,
+                    2 => magpie_app::tasks::Status::Done,
+                    _ => magpie_app::tasks::Status::Todo,
+                };
+                magpie_app::tasks::set_task_status(
+                    &store,
+                    note_id as i64,
+                    line_index as usize,
+                    status,
+                    now_ms(),
+                );
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_board(&ui, &s);
+            }
         });
     }
 
