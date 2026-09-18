@@ -21,6 +21,26 @@ pub fn wiki_links(body: &str) -> Vec<String> {
     out
 }
 
+/// Distinct `#tag` tokens anywhere in `body` (lowercased, first-seen order). A tag is
+/// `#` followed by one or more of [A-Za-z0-9_-]; trailing punctuation is dropped. This
+/// intentionally also picks up a task line's `#project`, unifying projects and tags.
+pub fn note_tags(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tok in body.split_whitespace() {
+        if let Some(after) = tok.strip_prefix('#') {
+            let tag: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .collect::<String>()
+                .to_lowercase();
+            if !tag.is_empty() && !out.iter().any(|t| t == &tag) {
+                out.push(tag);
+            }
+        }
+    }
+    out
+}
+
 /// A human title for the notes list: the page name, unless it's empty or an
 /// auto-generated `Note <n>` capture name — then the first non-empty body line.
 pub fn note_list_title(note_name: &str, body: &str) -> String {
@@ -54,6 +74,22 @@ mod tests {
     fn wiki_links_handles_unclosed() {
         assert_eq!(wiki_links("a [[open only"), Vec::<String>::new());
         assert_eq!(wiki_links("none here"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn note_tags_extracts_distinct_lowercased() {
+        let b = "#Work\n- [ ] ship it #prod !high\n#work";
+        assert_eq!(note_tags(b), vec!["work".to_string(), "prod".to_string()]);
+    }
+
+    #[test]
+    fn note_tags_ignores_bare_hash() {
+        assert_eq!(note_tags("just a # and #! here"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn note_tags_drops_trailing_punctuation() {
+        assert_eq!(note_tags("all #done."), vec!["done".to_string()]);
     }
 
     #[test]

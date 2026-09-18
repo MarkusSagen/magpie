@@ -466,7 +466,7 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
 fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
     let day = abs_date(now); // "YYYY-MM-DD"
-    let (rows, open_id, body, prov, links, refs) = {
+    let (rows, all_tags, open_id, body, prov, links, refs) = {
         let store = match state.store.lock() {
             Ok(s) => s,
             Err(e) => e.into_inner(),
@@ -474,19 +474,39 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         // Ensure today's daily note exists.
         let daily = store.daily_note(&day, now).ok();
         let recent = store.recent_notes(200).unwrap_or_default();
+        // Per-note tags (computed once, reused for the filter and the row display).
+        let tags_by_note: Vec<Vec<String>> = recent
+            .iter()
+            .map(|n| magpie_app::notes_view::note_tags(&n.body))
+            .collect();
+        // Global distinct tag set across ALL notes, sorted for stable chip order.
+        let mut all_tags: Vec<String> = tags_by_note.iter().flatten().cloned().collect();
+        all_tags.sort();
+        all_tags.dedup();
+        let filter = ui.get_note_tag_filter().to_string();
         let rows: Vec<NoteRow> = recent
             .iter()
-            .map(|n| NoteRow {
+            .zip(tags_by_note.iter())
+            .filter(|(_, tags)| filter.is_empty() || tags.iter().any(|t| t == &filter))
+            .map(|(n, tags)| NoteRow {
                 id: n.id as i32,
                 title: SharedString::from(magpie_app::notes_view::note_list_title(
                     &n.name, &n.body,
                 )),
                 when: SharedString::from(relative_time(n.updated_at_ms, now)),
                 is_daily: n.is_daily,
+                tags: SharedString::from(
+                    tags.iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
             })
             .collect();
         // Which note is open? Keep the current one if still present, else the most
-        // recently edited note (falling back to today's daily note).
+        // recently edited note (falling back to today's daily note). This is based
+        // on the FULL `recent` set (not the tag-filtered rows) so applying a tag
+        // filter never closes/replaces the note currently being edited.
         let cur = ui.get_note_id();
         let open = if cur >= 0 && recent.iter().any(|n| n.id as i32 == cur) {
             cur
@@ -509,9 +529,15 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         let open_name = opened.map(|n| n.name.clone()).unwrap_or_default();
         let all = store.all_notes().unwrap_or_default();
         let refs = magpie_app::backlinks::find_references(&open_name, &all);
-        (rows, open, body, prov, links, refs)
+        (rows, all_tags, open, body, prov, links, refs)
     };
     ui.set_notes(ModelRc::new(VecModel::from(rows)));
+    ui.set_note_all_tags(ModelRc::new(VecModel::from(
+        all_tags
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
     ui.set_note_id(open_id);
     ui.set_note_body(SharedString::from(body));
     ui.set_note_provenance(SharedString::from(prov));
@@ -2511,6 +2537,16 @@ pub fn start() {
         ui.on_open_note(move |id| {
             if let Some(ui) = w.upgrade() {
                 ui.set_note_id(id);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_filter_notes_by_tag(move |tag| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_tag_filter(tag);
                 refresh_notes(&ui, &s);
             }
         });

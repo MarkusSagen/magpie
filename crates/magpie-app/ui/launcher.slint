@@ -56,6 +56,7 @@ struct NoteRow {
     title: string,
     when: string,
     is_daily: bool,
+    tags: string,
 }
 
 struct BookmarkRow {
@@ -456,6 +457,11 @@ export component LauncherWindow inherits Window {
     in property <[RefRow]> unlinked;
     callback link-mention(int, int);
     in-out property <string> note-filter;
+    // Distinct `#tag` tokens across all notes, for the tag-filter chip strip.
+    in property <[string]> note-all-tags;
+    // Active tag filter ("" = all notes).
+    in-out property <string> note-tag-filter;
+    callback filter-notes-by-tag(string);
     in-out property <bool> notes-mode: false;
     callback set-mode-notes(bool);
     callback open-note(int);
@@ -1660,6 +1666,41 @@ export component LauncherWindow inherits Window {
                             Text { text: "New"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
+                    // Tag-filter chip strip: "All" + one chip per distinct #tag across
+                    // all notes. Horizontally scrollable so many tags don't overflow
+                    // the narrow left column.
+                    if root.note-all-tags.length > 0: Flickable {
+                        height: 30px;
+                        viewport-width: ntagrow.preferred-width;
+                        viewport-height: self.height;
+                        ntagrow := HorizontalLayout {
+                            height: 30px;
+                            spacing: 6px;
+                            alignment: start;
+                            Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? #34343c : #2a2a30);
+                                ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                                }
+                            }
+                            for tag in root.note-all-tags: Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? #34343c : #2a2a30);
+                                ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
                     ListView {
                         for n in root.notes: Rectangle {
                             height: 44px;
@@ -1673,6 +1714,7 @@ export component LauncherWindow inherits Window {
                                 padding-bottom: 4px;
                                 Text { text: (n.is_daily ? "📌 " : "") + n.title; color: #e6e6ea; font-size: 13px; overflow: elide; }
                                 Text { text: n.when; color: #8a8a90; font-size: 11px; overflow: elide; }
+                                if n.tags != "": Text { text: n.tags; color: #6a6a70; font-size: 10px; overflow: elide; }
                             }
                         }
                     }
