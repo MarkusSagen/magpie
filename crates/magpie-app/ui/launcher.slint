@@ -378,23 +378,22 @@ component BoardCard inherits Rectangle {
             if root.t.project != "": Text { text: "#" + root.t.project; color: #9ab0ff; font-size: 10px; vertical-alignment: center; overflow: elide; }
         }
         // Status targets: click one to move the card straight to that column.
+        // Drawn as small circles (no font glyph dependency — some fonts lack ◐):
+        // a filled dot marks the active status, hollow rings are the other two.
         HorizontalLayout {
-            spacing: 10px;
+            spacing: 9px;
             alignment: start;
-            for glyph[i] in ["○", "◐", "●"]: Rectangle {
-                width: 18px;
-                height: 16px;
+            for i in [0, 1, 2]: Rectangle {
+                width: 13px;
+                height: 13px;
+                border-radius: 7px;
+                border-width: 1.5px;
+                background: (i == 1 && root.t.doing) ? #e0a44a : (i == 2 && root.t.done) ? #7ad7a0 : transparent;
+                border-color: (i == 0 && !root.t.done && !root.t.doing) ? Pal.accent
+                    : (i == 1 && root.t.doing) ? transparent
+                    : (i == 2 && root.t.done) ? transparent
+                    : (sst.has-hover ? #d0d0d4 : #55555f);
                 sst := TouchArea { clicked => { root.set-status(i); } }
-                Text {
-                    text: glyph;
-                    color: (i == 0 && !root.t.done && !root.t.doing) ? Pal.accent
-                        : (i == 1 && root.t.doing) ? #e0a44a
-                        : (i == 2 && root.t.done) ? #7ad7a0
-                        : (sst.has-hover ? #d0d0d4 : #55555f);
-                    font-size: 12px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
             }
         }
     }
@@ -1815,34 +1814,43 @@ export component LauncherWindow inherits Window {
                     // Tag-filter chip strip: "All" + one chip per distinct #tag across
                     // all notes. Horizontally scrollable so many tags don't overflow
                     // the narrow left column.
-                    if root.note-all-tags.length > 0: Flickable {
+                    if root.note-all-tags.length > 0: Rectangle {
+                        // Flickable itself can't take `clip` (Rectangle/Path only) —
+                        // wrap it so an overflowing last tag chip doesn't bleed past
+                        // the narrow left column instead of just being scrollable to.
+                        width: 100%;
                         height: 30px;
-                        viewport-width: ntagrow.preferred-width;
-                        viewport-height: self.height;
-                        ntagrow := HorizontalLayout {
-                            height: 30px;
-                            spacing: 6px;
-                            alignment: start;
-                            Rectangle {
-                                height: 24px;
-                                border-radius: 12px;
-                                background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? #34343c : #2a2a30);
-                                ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
-                                HorizontalLayout {
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                        clip: true;
+                        Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: ntagrow.preferred-width;
+                            viewport-height: self.height;
+                            ntagrow := HorizontalLayout {
+                                height: 30px;
+                                spacing: 6px;
+                                alignment: start;
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? #34343c : #2a2a30);
+                                    ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                                    }
                                 }
-                            }
-                            for tag in root.note-all-tags: Rectangle {
-                                height: 24px;
-                                border-radius: 12px;
-                                background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? #34343c : #2a2a30);
-                                ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
-                                HorizontalLayout {
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                for tag in root.note-all-tags: Rectangle {
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? #34343c : #2a2a30);
+                                    ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                    }
                                 }
                             }
                         }
@@ -2418,30 +2426,38 @@ export component LauncherWindow inherits Window {
                 // Controls row 2: project filter chips + title search.
                 HorizontalLayout {
                     spacing: 10px;
-                    Flickable {
+                    Rectangle {
+                        // Flickable itself can't take `clip` (Rectangle/Path only) —
+                        // wrap it so an overflowing last chip doesn't bleed into the
+                        // search field instead of just being scrollable to.
                         width: 240px;
                         height: 26px;
-                        viewport-width: bprow.preferred-width;
-                        viewport-height: self.height;
-                        bprow := HorizontalLayout {
-                            height: 26px;
-                            spacing: 4px;
-                            alignment: start;
-                            Rectangle {
-                                height: 24px;
-                                width: 40px;
-                                border-radius: 6px;
-                                background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? #34343c : #2a2a30);
-                                bpallta := TouchArea { clicked => { root.board-project-filter = ""; root.board-controls-changed(); } }
-                                Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                            for p in root.board-projects: Rectangle {
-                                height: 24px;
-                                width: 76px;
-                                border-radius: 6px;
-                                background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? #34343c : #2a2a30);
-                                bpta := TouchArea { clicked => { root.board-project-filter = p; root.board-controls-changed(); } }
-                                Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                        clip: true;
+                        Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: bprow.preferred-width;
+                            viewport-height: self.height;
+                            bprow := HorizontalLayout {
+                                height: 26px;
+                                spacing: 4px;
+                                alignment: start;
+                                Rectangle {
+                                    height: 24px;
+                                    width: 40px;
+                                    border-radius: 6px;
+                                    background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? #34343c : #2a2a30);
+                                    bpallta := TouchArea { clicked => { root.board-project-filter = ""; root.board-controls-changed(); } }
+                                    Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                for p in root.board-projects: Rectangle {
+                                    height: 24px;
+                                    width: 76px;
+                                    border-radius: 6px;
+                                    background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? #34343c : #2a2a30);
+                                    bpta := TouchArea { clicked => { root.board-project-filter = p; root.board-controls-changed(); } }
+                                    Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                }
                             }
                         }
                     }
@@ -2499,18 +2515,66 @@ export component LauncherWindow inherits Window {
                 }
                 if root.board-layout == 1: ListView {
                     vertical-stretch: 1;
+                    // Compact single-line rows (density of the classic Tasks view) —
+                    // a full BoardCard per row was far too tall/sparse here.
                     for col in root.board: VerticalLayout {
-                        spacing: 6px;
+                        spacing: 2px;
                         HorizontalLayout {
                             spacing: 6px;
                             height: 24px;
                             Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
                             Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
                         }
-                        for t in col.tasks: BoardCard {
-                            t: t;
-                            open => { root.board-open-task(t.note_id); }
-                            set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                        for t in col.tasks: Rectangle {
+                            height: 40px;
+                            background: lrta.has-hover ? #26262c : transparent;
+                            border-radius: 6px;
+                            lrta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                spacing: 8px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    for i in [0, 1, 2]: Rectangle {
+                                        width: 11px;
+                                        height: 11px;
+                                        border-radius: 6px;
+                                        border-width: 1.5px;
+                                        background: (i == 1 && t.doing) ? #e0a44a : (i == 2 && t.done) ? #7ad7a0 : transparent;
+                                        border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
+                                            : (i == 1 && t.doing) ? transparent
+                                            : (i == 2 && t.done) ? transparent
+                                            : (lsta.has-hover ? #d0d0d4 : #55555f);
+                                        lsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
+                                    }
+                                }
+                                Text {
+                                    text: t.title;
+                                    color: t.done ? #6a6a70 : white;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                if t.priority <= 2: Rectangle {
+                                    width: 16px;
+                                    height: 16px;
+                                    border-radius: 4px;
+                                    background: t.priority == 0 ? #e05a5a : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                    Text {
+                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                        color: #16161a;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
+                                if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; overflow: elide; width: 90px; }
+                            }
                         }
                     }
                 }
@@ -2569,7 +2633,7 @@ export component LauncherWindow inherits Window {
                                 spacing: 8px;
                                 Text { text: "Title"; color: #8a8a90; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
                                 Text { text: "Status"; color: #8a8a90; font-size: 11px; width: 64px; vertical-alignment: center; }
-                                Text { text: "Priority"; color: #8a8a90; font-size: 11px; width: 28px; vertical-alignment: center; }
+                                Text { text: "Prio"; color: #8a8a90; font-size: 11px; width: 28px; vertical-alignment: center; }
                                 Text { text: "Due"; color: #8a8a90; font-size: 11px; width: 90px; vertical-alignment: center; }
                                 Text { text: "#Project"; color: #8a8a90; font-size: 11px; width: 120px; vertical-alignment: center; }
                             }
@@ -2601,22 +2665,19 @@ export component LauncherWindow inherits Window {
                                     }
                                     HorizontalLayout {
                                         width: 64px;
-                                        spacing: 6px;
+                                        spacing: 8px;
                                         alignment: center;
-                                        for glyph[i] in ["○", "◐", "●"]: Rectangle {
-                                            width: 16px;
-                                            height: 16px;
+                                        for i in [0, 1, 2]: Rectangle {
+                                            width: 13px;
+                                            height: 13px;
+                                            border-radius: 7px;
+                                            border-width: 1.5px;
+                                            background: (i == 1 && t.doing) ? #e0a44a : (i == 2 && t.done) ? #7ad7a0 : transparent;
+                                            border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
+                                                : (i == 1 && t.doing) ? transparent
+                                                : (i == 2 && t.done) ? transparent
+                                                : (tsta.has-hover ? #d0d0d4 : #55555f);
                                             tsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
-                                            Text {
-                                                text: glyph;
-                                                color: (i == 0 && !t.done && !t.doing) ? Pal.accent
-                                                    : (i == 1 && t.doing) ? #e0a44a
-                                                    : (i == 2 && t.done) ? #7ad7a0
-                                                    : (tsta.has-hover ? #d0d0d4 : #55555f);
-                                                font-size: 11px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
                                         }
                                     }
                                     Rectangle {
@@ -2712,13 +2773,18 @@ export component LauncherWindow inherits Window {
                         border-radius: 5px;
                         background: Pal.accent;
                         Text {
-                            x: 12px;
-                            y: -3px;
+                            // Nodes near the right edge would otherwise push their
+                            // label off the canvas — flip it to the dot's left there.
+                            // Same idea near the bottom: nudge the label up so its
+                            // line doesn't run past the canvas edge.
+                            x: n.x > 0.75 ? -152px : 12px;
+                            y: n.y > 0.9 ? -16px : -3px;
                             text: n.title;
                             color: #9a9aa0;
                             font-size: 10px;
                             overflow: elide;
                             width: 140px;
+                            horizontal-alignment: n.x > 0.75 ? right : left;
                         }
                         TouchArea { clicked => { root.graph-open(n.id); } }
                     }
@@ -2973,8 +3039,16 @@ export component LauncherWindow inherits Window {
                 }
                 Flickable {
                     vertical-stretch: 1;
-                    VerticalLayout {
-                        spacing: 12px;
+                    // Pin the viewport to the content's own preferred height —
+                    // otherwise Flickable stretches this VerticalLayout to fill
+                    // the whole remaining window height, and every unconstrained
+                    // Text/spacer in it grows to soak up the leftover space,
+                    // scattering the three sections across the whole window.
+                    viewport-width: self.width;
+                    viewport-height: todcol.preferred-height;
+                    todcol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 10px;
 
                         Text { text: "Due & overdue"; color: #8a8a90; font-size: 11px; font-weight: 700; }
                         for t in root.today-due: PopoverTaskRow {
@@ -2986,7 +3060,7 @@ export component LauncherWindow inherits Window {
 
                         Text { text: "Journal"; color: #8a8a90; font-size: 11px; font-weight: 700; }
                         Rectangle {
-                            height: 140px;
+                            height: 100px;
                             background: #2a2a30;
                             border-radius: 8px;
                             Flickable {
