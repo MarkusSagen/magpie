@@ -754,6 +754,7 @@ fn task_row_with_tracking(
         line_index: t.line_index as i32,
         title: SharedString::from(t.title),
         done: t.done,
+        doing: t.status == magpie_app::tasks::Status::Doing,
         priority: match t.priority {
             magpie_app::tasks::Priority::High => 0,
             magpie_app::tasks::Priority::Medium => 1,
@@ -838,6 +839,7 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
             line_index: t.line_index as i32,
             title: SharedString::from(t.title),
             done: t.done,
+            doing: t.status == magpie_app::tasks::Status::Doing,
             priority: match t.priority {
                 magpie_app::tasks::Priority::High => 0,
                 magpie_app::tasks::Priority::Medium => 1,

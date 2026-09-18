@@ -89,6 +89,9 @@ struct TaskRow {
     line_index: int,
     title: string,
     done: bool,
+    // In-progress (`- [/]`), the Obsidian/Logseq convention. Mutually exclusive
+    // with `done`; drives the amber half-filled checkbox glyph.
+    doing: bool,
     priority: int,
     due: string,
     project: string,
@@ -257,12 +260,21 @@ component PopoverTaskRow inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 border-width: 1px;
-                border-color: #6a6a72;
-                background: root.t.done ? Pal.accent : transparent;
+                border-color: root.t.doing && !root.t.done ? #e0a44a : #6a6a72;
+                background: root.t.done ? Pal.accent : (root.t.doing ? #e0a44a33 : transparent);
                 if root.t.done: Text {
                     text: "✓";
                     color: Pal.on-accent;
                     font-size: 11px;
+                    width: 18px;
+                    height: 18px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if !root.t.done && root.t.doing: Text {
+                    text: "◐";
+                    color: #e0a44a;
+                    font-size: 12px;
                     width: 18px;
                     height: 18px;
                     horizontal-alignment: center;
@@ -2029,11 +2041,20 @@ export component LauncherWindow inherits Window {
                                     height: 22px;
                                     border-radius: 5px;
                                     border-width: 1px;
-                                    border-color: #55555f;
-                                    background: t.done ? Pal.accent : transparent;
+                                    border-color: t.doing && !t.done ? #e0a44a : #55555f;
+                                    background: t.done ? Pal.accent : (t.doing ? #e0a44a33 : transparent);
                                     if t.done: Text {
                                         text: "✓";
                                         color: Pal.on-accent;
+                                        font-size: 13px;
+                                        width: 22px;
+                                        height: 22px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    if !t.done && t.doing: Text {
+                                        text: "◐";
+                                        color: #e0a44a;
                                         font-size: 13px;
                                         width: 22px;
                                         height: 22px;

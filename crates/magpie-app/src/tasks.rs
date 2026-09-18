@@ -12,6 +12,17 @@ pub enum Priority {
     None,
 }
 
+/// A task's kanban-style status. `- [ ]` = Todo, `- [/]` = Doing (the
+/// Obsidian/Logseq "in progress" convention), `- [x]`/`- [X]` = Done.
+/// `Task::done` stays derived from this (`status == Done`) so existing
+/// reminders/grouping code keeps working unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Todo,
+    Doing,
+    Done,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecurUnit {
     Day,
@@ -32,6 +43,7 @@ pub struct Task {
     pub note_name: String,
     pub line_index: usize,
     pub done: bool,
+    pub status: Status,
     pub title: String,
     pub priority: Priority,
     pub due_ms: Option<i64>,
@@ -44,22 +56,29 @@ pub struct Task {
 }
 
 /// If `trimmed` (leading whitespace already removed) is a task line, return
-/// (done, rest-after-marker).
-fn task_marker(trimmed: &str) -> Option<(bool, &str)> {
+/// (status, rest-after-marker). Recognizes the Obsidian/Logseq "in progress"
+/// `- [/]` convention alongside the standard `- [ ]`/`- [x]`.
+fn task_marker(trimmed: &str) -> Option<(Status, &str)> {
     if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
-        return Some((false, rest));
+        return Some((Status::Todo, rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix("- [/] ") {
+        return Some((Status::Doing, rest));
     }
     if let Some(rest) = trimmed
         .strip_prefix("- [x] ")
         .or_else(|| trimmed.strip_prefix("- [X] "))
     {
-        return Some((true, rest));
+        return Some((Status::Done, rest));
     }
     if trimmed == "- [ ]" {
-        return Some((false, ""));
+        return Some((Status::Todo, ""));
+    }
+    if trimmed == "- [/]" {
+        return Some((Status::Doing, ""));
     }
     if trimmed.eq_ignore_ascii_case("- [x]") {
-        return Some((true, ""));
+        return Some((Status::Done, ""));
     }
     None
 }
@@ -77,10 +96,11 @@ fn parse_priority(tok: &str) -> Option<Priority> {
 pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
     let mut out = Vec::new();
     for (i, raw) in note.body.lines().enumerate() {
-        let (done, rest) = match task_marker(raw.trim_start()) {
+        let (status, rest) = match task_marker(raw.trim_start()) {
             Some(x) => x,
             None => continue,
         };
+        let done = status == Status::Done;
         let mut priority = Priority::None;
         let mut due_ms = None;
         let mut project = None;
@@ -135,6 +155,7 @@ pub fn parse_tasks_in(note: &Note, now_ms: i64) -> Vec<Task> {
             note_name: note.name.clone(),
             line_index: i,
             done,
+            status,
             title: title_toks.join(" "),
             priority,
             due_ms,
@@ -167,6 +188,8 @@ pub fn promote_line(body: &str, cursor_byte: usize) -> String {
 }
 
 /// Flip the checkbox on line `line_index`. No-op if it's not a task line.
+/// `[ ]`/`[/]` → `[x]` (checking a to-do or in-progress task completes it);
+/// `[x]`/`[X]` → `[ ]`.
 pub fn toggle_line(body: &str, line_index: usize) -> String {
     let mut lines: Vec<String> = body.split('\n').map(|s| s.to_string()).collect();
     if line_index >= lines.len() {
@@ -175,7 +198,10 @@ pub fn toggle_line(body: &str, line_index: usize) -> String {
     let line = &lines[line_index];
     let indent = line.len() - line.trim_start().len();
     let (ind, rest) = line.split_at(indent);
-    let flipped = if let Some(r) = rest.strip_prefix("- [ ]") {
+    let flipped = if let Some(r) = rest
+        .strip_prefix("- [ ]")
+        .or_else(|| rest.strip_prefix("- [/]"))
+    {
         Some(format!("{ind}- [x]{r}"))
     } else {
         rest.strip_prefix("- [x]")
@@ -208,6 +234,52 @@ pub fn toggle_task(store: &Store, note_id: i64, line_index: usize, now_ms: i64) 
             None => toggle_line(&body, line_index),
         }
     };
+    new != body
+        && store
+            .update_note_body(note_id, &new, now_ms)
+            .unwrap_or(false)
+}
+
+/// Rewrite the checkbox marker on `line_index` to `status`. No-op if that line
+/// isn't a task line. Preserves indentation and everything else on the line
+/// (priority/due/#project/title) — only the ` `/`/`/`x` inside `[ ]` changes.
+pub fn set_line_status(body: &str, line_index: usize, status: Status) -> String {
+    let mut lines: Vec<String> = body.split('\n').map(|s| s.to_string()).collect();
+    let Some(line) = lines.get(line_index) else {
+        return body.to_string();
+    };
+    let indent = line.len() - line.trim_start().len();
+    let (ind, rest) = line.split_at(indent);
+    let glyph = match status {
+        Status::Todo => ' ',
+        Status::Doing => '/',
+        Status::Done => 'x',
+    };
+    let new_rest = rest
+        .strip_prefix("- [ ]")
+        .or_else(|| rest.strip_prefix("- [/]"))
+        .or_else(|| rest.strip_prefix("- [x]"))
+        .or_else(|| rest.strip_prefix("- [X]"))
+        .map(|r| format!("- [{glyph}]{r}"));
+    if let Some(r) = new_rest {
+        lines[line_index] = format!("{ind}{r}");
+    }
+    lines.join("\n")
+}
+
+/// Persist a status change on a task line. Returns whether the note changed.
+pub fn set_task_status(
+    store: &Store,
+    note_id: i64,
+    line_index: usize,
+    status: Status,
+    now_ms: i64,
+) -> bool {
+    let body = match store.get_note(note_id) {
+        Ok(Some(n)) => n.body,
+        _ => return false,
+    };
+    let new = set_line_status(&body, line_index, status);
     new != body
         && store
             .update_note_body(note_id, &new, now_ms)
@@ -393,8 +465,8 @@ pub fn next_occurrence(due_days: i64, r: Recur, today_days: i64) -> i64 {
 /// next future occurrence (still `- [ ]`, `@due` rewritten as absolute YYYY-MM-DD).
 /// `None` otherwise (not a task, already done, no due, or no recurrence rule).
 pub fn reschedule_line(line: &str, now_ms: i64) -> Option<String> {
-    let (done, rest) = task_marker(line.trim_start())?;
-    if done {
+    let (status, rest) = task_marker(line.trim_start())?;
+    if status == Status::Done {
         return None;
     }
     let mut due_ms: Option<i64> = None;
@@ -571,6 +643,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_doing_status_alongside_todo_and_done() {
+        let n = note("- [ ] a\n- [/] b\n- [x] c");
+        let ts = parse_tasks_in(&n, 0);
+        assert_eq!(ts.len(), 3);
+        assert_eq!(
+            ts.iter().map(|t| t.status).collect::<Vec<_>>(),
+            vec![Status::Todo, Status::Doing, Status::Done]
+        );
+        assert_eq!(
+            ts.iter().map(|t| t.done).collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+        assert_eq!(ts[1].title, "b");
+    }
+
+    #[test]
+    fn doing_marker_title_strips_priority_and_project() {
+        let n = note("- [/] Fix mount !high #prod");
+        let ts = parse_tasks_in(&n, 0);
+        assert_eq!(ts[0].status, Status::Doing);
+        assert_eq!(ts[0].title, "Fix mount");
+        assert_eq!(ts[0].priority, Priority::High);
+        assert_eq!(ts[0].project.as_deref(), Some("prod"));
+    }
+
+    #[test]
     fn promote_and_toggle_lines() {
         let body = "note title\nfix the bug\ndone already";
         // cursor somewhere in "fix the bug" (line 1)
@@ -583,6 +681,28 @@ mod tests {
         assert!(toggled.contains("- [x] fix the bug"));
         assert!(toggle_line(&toggled, 1).contains("- [ ] fix the bug"));
         assert_eq!(toggle_line(body, 0), body); // non-task line: no-op
+    }
+
+    #[test]
+    fn toggle_line_completes_a_doing_task() {
+        let body = "- [/] in progress";
+        assert_eq!(toggle_line(body, 0), "- [x] in progress");
+    }
+
+    #[test]
+    fn set_line_status_swaps_marker_and_preserves_rest() {
+        assert_eq!(set_line_status("- [ ] a", 0, Status::Doing), "- [/] a");
+        assert_eq!(set_line_status("  - [ ] x", 0, Status::Doing), "  - [/] x");
+        assert_eq!(
+            set_line_status("- [ ] a !high #proj", 0, Status::Doing),
+            "- [/] a !high #proj"
+        );
+        assert_eq!(set_line_status("- [/] a", 0, Status::Done), "- [x] a");
+        assert_eq!(set_line_status("- [x] a", 0, Status::Todo), "- [ ] a");
+        assert_eq!(
+            set_line_status("plain line", 0, Status::Doing),
+            "plain line"
+        );
     }
 
     #[test]
@@ -604,6 +724,7 @@ mod tests {
                 note_name: "n".into(),
                 line_index: 0,
                 done,
+                status: if done { Status::Done } else { Status::Todo },
                 title: title.into(),
                 priority: p,
                 due_ms: due,
@@ -638,6 +759,7 @@ mod tests {
             note_name: "n".into(),
             line_index: 0,
             done,
+            status: if done { Status::Done } else { Status::Todo },
             title: "t".into(),
             priority: pri,
             due_ms: due,

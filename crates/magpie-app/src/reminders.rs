@@ -86,7 +86,7 @@ pub fn parse_offset(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tasks::Priority;
+    use crate::tasks::{Priority, Status};
 
     const DAY: i64 = 86_400_000;
 
@@ -96,6 +96,7 @@ mod tests {
             note_name: "n".into(),
             line_index: 0,
             done,
+            status: if done { Status::Done } else { Status::Todo },
             title: title.into(),
             priority: Priority::None,
             due_ms: due,
