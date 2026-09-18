@@ -70,7 +70,7 @@ FLAGS:
     --backup <dir>          Write a portable backup (decrypted DB snapshot + assets) to <dir>
     --restore <dir>         Restore from a backup dir (quit Magpie first)
     --import-bookmarks <chrome|firefox|path>   Import bookmarks into Magpie
-    --sync-vault <dir>      Sync notes with a folder of Markdown files (newest wins)
+    --sync-vault <dir>      Reconcile notes with a folder of Markdown files (bidirectional; conflicts kept)
     -h, --help              Show this help
 ";
 
