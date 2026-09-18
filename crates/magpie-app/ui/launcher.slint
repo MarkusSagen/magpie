@@ -2422,8 +2422,8 @@ export component LauncherWindow inherits Window {
                         }
                     }
                 }
-                // Body: Kanban scrolls columns horizontally; List (and the Grid/Table
-                // placeholders, for this pass) stack column header + cards vertically.
+                // Body: Kanban scrolls columns horizontally; List/Grid/Table all
+                // stack per-column sections vertically (headers differ per layout).
                 if root.board-layout == 0: Flickable {
                     vertical-stretch: 1;
                     viewport-width: kanbanrow.preferred-width;
@@ -2454,7 +2454,7 @@ export component LauncherWindow inherits Window {
                         }
                     }
                 }
-                if root.board-layout != 0: ListView {
+                if root.board-layout == 1: ListView {
                     vertical-stretch: 1;
                     for col in root.board: VerticalLayout {
                         spacing: 6px;
@@ -2468,6 +2468,129 @@ export component LauncherWindow inherits Window {
                             t: t;
                             open => { root.board-open-task(t.note_id); }
                             set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                        }
+                    }
+                }
+                // Grid: per-column sections of wrapping tiles. Slint has no
+                // flow-wrap layout, so tiles are positioned with absolute x/y
+                // index math inside a full-width Rectangle whose height grows
+                // with however many rows the tile count needs.
+                if root.board-layout == 2: Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: gridcol.preferred-height;
+                    gridcol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        for col in root.board: VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 24px;
+                                Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
+                            }
+                            gridtiles := Rectangle {
+                                width: 100%;
+                                property <length> tile-w: 232px;
+                                property <length> tile-h: 84px;
+                                property <int> cols: max(1, Math.floor(gridtiles.width / gridtiles.tile-w));
+                                height: Math.ceil(col.tasks.length / gridtiles.cols) * gridtiles.tile-h;
+                                for t[i] in col.tasks: BoardCard {
+                                    width: gridtiles.tile-w - 8px;
+                                    height: gridtiles.tile-h - 8px;
+                                    x: Math.mod(i, gridtiles.cols) * gridtiles.tile-w;
+                                    y: Math.floor(i / gridtiles.cols) * gridtiles.tile-h;
+                                    t: t;
+                                    open => { root.board-open-task(t.note_id); }
+                                    set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Table: a compact spreadsheet view — one header row, then a
+                // group separator + fixed-column rows per board column.
+                if root.board-layout == 3: Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: tablecol.preferred-height;
+                    tablecol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 22px;
+                            HorizontalLayout {
+                                padding-left: 4px;
+                                padding-right: 4px;
+                                spacing: 8px;
+                                Text { text: "Title"; color: #8a8a90; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+                                Text { text: "Status"; color: #8a8a90; font-size: 11px; width: 64px; vertical-alignment: center; }
+                                Text { text: "Priority"; color: #8a8a90; font-size: 11px; width: 28px; vertical-alignment: center; }
+                                Text { text: "Due"; color: #8a8a90; font-size: 11px; width: 90px; vertical-alignment: center; }
+                                Text { text: "#Project"; color: #8a8a90; font-size: 11px; width: 120px; vertical-alignment: center; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: #33333c; }
+                        }
+                        for col in root.board: VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 22px;
+                                Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
+                            }
+                            for t in col.tasks: Rectangle {
+                                height: 30px;
+                                background: trta.has-hover ? #26262c : transparent;
+                                trta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
+                                HorizontalLayout {
+                                    padding-left: 4px;
+                                    padding-right: 4px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: t.title;
+                                        color: t.done ? #6a6a70 : white;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        width: 64px;
+                                        spacing: 6px;
+                                        alignment: center;
+                                        for glyph[i] in ["○", "◐", "●"]: Rectangle {
+                                            width: 16px;
+                                            height: 16px;
+                                            tsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
+                                            Text {
+                                                text: glyph;
+                                                color: (i == 0 && !t.done && !t.doing) ? Pal.accent
+                                                    : (i == 1 && t.doing) ? #e0a44a
+                                                    : (i == 2 && t.done) ? #7ad7a0
+                                                    : (tsta.has-hover ? #d0d0d4 : #55555f);
+                                                font-size: 11px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 28px;
+                                        if t.priority <= 2: Text {
+                                            text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                            color: t.priority == 0 ? #e05a5a : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; width: 90px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: t.project != "" ? "#" + t.project : ""; color: #9ab0ff; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
+                                }
+                            }
                         }
                     }
                 }
