@@ -21,6 +21,9 @@ pub struct AppState {
     pub open_to_today: bool,
     /// Fetch site favicons for links/bookmarks (from `Config::fetch_link_favicons`).
     pub fetch_link_favicons: bool,
+    /// Fetch rich OG-image preview thumbnails for bookmarks ON EXPLICIT SAVE only
+    /// (from `Config::fetch_link_previews`).
+    pub fetch_link_previews: bool,
     /// Log a completed task-timer session as an org CLOCK entry in the note's
     /// `:LOGBOOK:` drawer (from `Config::log_clock_entries`).
     pub log_clock_entries: bool,
@@ -65,6 +68,7 @@ mod tests {
             mask_visible_chars: 3,
             open_to_today: false,
             fetch_link_favicons: true,
+            fetch_link_previews: true,
             log_clock_entries: true,
         }
     }

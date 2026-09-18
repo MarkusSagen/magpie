@@ -58,6 +58,7 @@ fn state() -> AppState {
         mask_visible_chars: 3,
         open_to_today: false,
         fetch_link_favicons: true,
+        fetch_link_previews: true,
         log_clock_entries: true,
     }
 }

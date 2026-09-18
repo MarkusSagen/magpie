@@ -26,6 +26,10 @@ pub struct Config {
     /// Fetch a link's site favicon (from the site's own /favicon.ico) for display.
     #[serde(default = "default_true")]
     pub fetch_link_favicons: bool,
+    /// Fetch a rich preview thumbnail (OG image) for a bookmark ON EXPLICIT SAVE
+    /// only — never for merely-copied URLs (privacy).
+    #[serde(default = "default_true")]
+    pub fetch_link_previews: bool,
     /// Open the Today dashboard (instead of the clipboard list) each time the
     /// launcher is summoned.
     #[serde(default)]
@@ -67,6 +71,7 @@ impl Default for Config {
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,
             fetch_link_favicons: true,
+            fetch_link_previews: true,
             open_to_today: false,
             vault_path: None,
             vault_watch: false,
@@ -139,6 +144,7 @@ mod tests {
         assert!(c.mask_apps.is_empty());
         assert_eq!(c.mask_visible_chars, 3);
         assert!(c.fetch_link_favicons); // defaults on
+        assert!(c.fetch_link_previews); // defaults on
         assert!(c.vault_path.is_none());
     }
 }

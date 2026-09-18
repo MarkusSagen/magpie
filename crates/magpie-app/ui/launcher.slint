@@ -66,6 +66,8 @@ struct BookmarkRow {
     url: string,
     icon: image,
     has_icon: bool,
+    thumb: image,
+    has_thumb: bool,
     tags: string,
 }
 
@@ -495,6 +497,7 @@ export component LauncherWindow inherits Window {
         else if id == "delete" { root.delete-entry(root.selected); }
         else if id == "export" { root.export-data(); }
         else if id == "bookmark" { root.bookmark-selected(); }
+        else if id == "task-from-link" { root.task-from-link(); }
     }
     callback export-data();
 
@@ -605,6 +608,9 @@ export component LauncherWindow inherits Window {
     callback open-bookmark(string);
     callback delete-bookmark(int);
     callback bookmark-selected();
+    // ⌘K "Create task from link": add the currently-selected entry as a task on
+    // today's daily note (no URL requirement — any selected entry qualifies).
+    callback task-from-link();
 
     // ---- Find everywhere (⌘⇧F): unified search over notes/tasks/bookmarks ----
     in-out property <bool> search-mode: false;
@@ -2783,7 +2789,7 @@ export component LauncherWindow inherits Window {
                 }
                 ListView {
                     for b in root.bookmarks: Rectangle {
-                        height: 46px;
+                        height: b.has-thumb ? 58px : 46px;
                         background: bkrow.has-hover ? #26262c : transparent;
                         border-radius: 6px;
                         bkrow := TouchArea { clicked => { root.open-bookmark(b.url); } }
@@ -2796,6 +2802,18 @@ export component LauncherWindow inherits Window {
                                 Text { text: b.title == "" ? b.url : b.title; color: white; font-size: 13px; overflow: elide; }
                                 Text { text: b.domain; color: #8a8a90; font-size: 11px; overflow: elide; }
                                 if b.tags != "": Text { text: b.tags; color: #6a6a70; font-size: 10px; overflow: elide; }
+                            }
+                            if b.has-thumb: Rectangle {
+                                width: 64px;
+                                height: 40px;
+                                border-radius: 6px;
+                                clip: true;
+                                Image {
+                                    source: b.thumb;
+                                    width: 64px;
+                                    height: 40px;
+                                    image-fit: cover;
+                                }
                             }
                             Rectangle {
                                 width: 28px;

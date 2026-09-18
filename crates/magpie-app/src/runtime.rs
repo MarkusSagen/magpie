@@ -66,6 +66,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         mask_visible_chars: cfg.mask_visible_chars.max(0),
         open_to_today: cfg.open_to_today,
         fetch_link_favicons: cfg.fetch_link_favicons,
+        fetch_link_previews: cfg.fetch_link_previews,
         log_clock_entries: cfg.log_clock_entries,
     })
 }
@@ -573,6 +574,7 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
 fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
     let q = ui.get_bookmark_query();
     let favicon_dir = data_dir().join("favicons");
+    let preview_dir = data_dir().join("previews");
     let rows: Vec<BookmarkRow> = {
         let store = match state.store.lock() {
             Ok(g) => g,
@@ -585,6 +587,15 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
             .map(|b| {
                 let (icon, has_icon) = {
                     let p = favicon::favicon_cache_path(&favicon_dir, &b.domain);
+                    match p.exists().then(|| slint::Image::load_from_path(&p)) {
+                        Some(Ok(img)) => (img, true),
+                        _ => (slint::Image::default(), false),
+                    }
+                };
+                // Only LOAD an already-cached preview here — never fetch (privacy:
+                // previews are fetched exclusively on explicit bookmark save).
+                let (thumb, has_thumb) = {
+                    let p = magpie_app::link_meta::preview_cache_path(&preview_dir, &b.url);
                     match p.exists().then(|| slint::Image::load_from_path(&p)) {
                         Some(Ok(img)) => (img, true),
                         _ => (slint::Image::default(), false),
@@ -604,12 +615,39 @@ fn refresh_bookmarks(ui: &LauncherWindow, state: &AppState) {
                     url: SharedString::from(b.url),
                     icon,
                     has_icon,
+                    thumb,
+                    has_thumb,
                     tags,
                 }
             })
             .collect()
     };
     ui.set_bookmarks(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Best-effort background preview-thumbnail fetch for one bookmark URL, gated by
+/// `state.fetch_link_previews` (privacy — called ONLY from the two explicit-save
+/// paths: `on_add_bookmark` and `on_bookmark_selected`, never from
+/// `refresh_bookmarks` or for merely-copied URLs). Refreshes the bookmarks list
+/// once done so the thumbnail appears.
+fn enrich_bookmark_preview(state: &Arc<AppState>, weak: slint::Weak<LauncherWindow>, url: String) {
+    if !state.fetch_link_previews {
+        return;
+    }
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let dir = data_dir().join("previews");
+        magpie_app::link_meta::ensure_preview(
+            &dir,
+            &url,
+            magpie_app::link_meta::fetch_preview_image,
+        );
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                refresh_bookmarks(&ui, &state);
+            }
+        });
+    });
 }
 
 /// Best-effort background favicon fetch for the domains currently in the
@@ -1151,6 +1189,7 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("delete", "🗑", "Delete", "⌘⌫"),
     ("export", "📤", "Export data…", ""),
     ("bookmark", "🔖", "Bookmark this link", ""),
+    ("task-from-link", "✅", "Create task from link", ""),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -3227,6 +3266,7 @@ pub fn start() {
             // Background: fetch the real title, then upsert + refresh.
             let s2 = s.clone();
             let w2 = w.clone();
+            let url_for_preview = url.clone();
             std::thread::spawn(move || {
                 let meta = magpie_app::link_meta::fetch_link_meta(&url);
                 if let Some(title) = meta.title {
@@ -3245,6 +3285,9 @@ pub fn start() {
                     });
                 }
             });
+            // Explicit save — fetch a rich preview thumbnail (privacy: NEVER done
+            // for merely-copied URLs, only here and in `on_bookmark_selected`).
+            enrich_bookmark_preview(&s, w.clone(), url_for_preview);
         });
     }
     {
@@ -3289,6 +3332,32 @@ pub fn start() {
                         ui.set_board_mode(false);
                         ui.set_graph_mode(false);
                         refresh_bookmarks(&ui, &s);
+                    }
+                }
+            }
+        });
+    }
+    {
+        // ⌘K "Create task from link": any selected entry (not just URLs) becomes
+        // a task on today's daily note.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_task_from_link(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let text = e.full_text.trim().to_string();
+                    if !text.is_empty() {
+                        let store = match s.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        let day = abs_date(now_ms());
+                        if let Ok(n) = store.daily_note(&day, now_ms()) {
+                            let body = magpie_app::tasks::append_task_line(&n.body, &text);
+                            let _ = store.update_note_body(n.id, &body, now_ms());
+                        }
                     }
                 }
             }
