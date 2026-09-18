@@ -21,6 +21,9 @@ pub struct AppState {
     pub open_to_today: bool,
     /// Fetch site favicons for links/bookmarks (from `Config::fetch_link_favicons`).
     pub fetch_link_favicons: bool,
+    /// Log a completed task-timer session as an org CLOCK entry in the note's
+    /// `:LOGBOOK:` drawer (from `Config::log_clock_entries`).
+    pub log_clock_entries: bool,
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
@@ -62,6 +65,7 @@ mod tests {
             mask_visible_chars: 3,
             open_to_today: false,
             fetch_link_favicons: true,
+            log_clock_entries: true,
         }
     }
 

@@ -465,6 +465,78 @@ pub fn set_bookmark(store: &Store, note_id: i64, line_index: usize, now_ms: i64)
             .unwrap_or(false)
 }
 
+/// Format epoch-ms (shifted by `offset_secs`) as local `YYYY-MM-DD HH:MM`.
+fn local_stamp(ms: i64, offset_secs: i64) -> String {
+    const DAY_MS: i64 = 86_400_000;
+    let local_ms = ms + offset_secs * 1000;
+    let secs_of_day = local_ms.div_euclid(1000).rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(local_ms.div_euclid(DAY_MS));
+    let h = secs_of_day / 3600;
+    let mi = (secs_of_day % 3600) / 60;
+    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}")
+}
+
+/// Format a duration in ms as org's `H:MM` (hours unbounded, minutes zero-padded).
+/// Negative durations clamp to `0:00`.
+fn duration_hm(ms: i64) -> String {
+    let mins = (ms.max(0)) / 60_000;
+    format!("{}:{:02}", mins / 60, mins % 60)
+}
+
+/// Insert an org-mode CLOCK entry for a completed timer under the task line whose
+/// title matches `title`, into its `:LOGBOOK:` drawer (created if absent), indented
+/// two spaces past the task line's own indent. Newest CLOCK line goes first (right
+/// after `:LOGBOOK:`). Returns the new body; returns `body` unchanged if no matching
+/// task line is found.
+pub fn log_clock(body: &str, title: &str, start_ms: i64, end_ms: i64, offset_secs: i64) -> String {
+    // Reuse the real task parser (any `now_ms` works for title-matching purposes:
+    // due-token stripping doesn't depend on it — relative tokens like `@today`
+    // always resolve, and absolute `@YYYY-MM-DD` tokens don't consult it either).
+    let dummy = Note {
+        id: 0,
+        name: String::new(),
+        is_daily: false,
+        body: body.to_string(),
+        created_at_ms: 0,
+        updated_at_ms: 0,
+        source_app_id: None,
+        source_entry_id: None,
+    };
+    let Some(task_idx) = parse_tasks_in(&dummy, end_ms)
+        .into_iter()
+        .find(|t| t.title == title)
+        .map(|t| t.line_index)
+    else {
+        return body.to_string();
+    };
+    let lines: Vec<&str> = body.split('\n').collect();
+    let task_line = lines[task_idx];
+    let indent_len = task_line.len() - task_line.trim_start().len();
+    let indent = &task_line[..indent_len];
+    let drawer_indent = format!("{indent}  ");
+
+    let clock_line = format!(
+        "{drawer_indent}CLOCK: [{}]--[{}] => {}",
+        local_stamp(start_ms, offset_secs),
+        local_stamp(end_ms, offset_secs),
+        duration_hm(end_ms - start_ms)
+    );
+
+    let mut out: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    let has_drawer = out
+        .get(task_idx + 1)
+        .map(|l| l.trim() == ":LOGBOOK:")
+        .unwrap_or(false);
+    if has_drawer {
+        out.insert(task_idx + 2, clock_line);
+    } else {
+        out.insert(task_idx + 1, format!("{drawer_indent}:LOGBOOK:"));
+        out.insert(task_idx + 2, clock_line);
+        out.insert(task_idx + 3, format!("{drawer_indent}:END:"));
+    }
+    out.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,5 +827,78 @@ mod tests {
         let on = toggle_bookmark_line(&off, 0);
         assert_eq!(on.lines().next().unwrap(), "- [ ] buy milk *");
         assert_eq!(toggle_bookmark_line("hello", 0), "hello");
+    }
+
+    #[test]
+    fn log_clock_creates_new_drawer() {
+        const DAY_MS: i64 = 86_400_000;
+        let day = super::days_from_civil(2026, 1, 20) * DAY_MS;
+        let start = day + 9 * 3_600_000; // 09:00
+        let end = start + 90 * 60_000; // +90m -> 10:30
+        let body = "- [ ] Ship it";
+        let new = log_clock(body, "Ship it", start, end, 0);
+        assert_eq!(
+            new,
+            "- [ ] Ship it\n  :LOGBOOK:\n  CLOCK: [2026-01-20 09:00]--[2026-01-20 10:30] => 1:30\n  :END:"
+        );
+    }
+
+    #[test]
+    fn log_clock_appends_to_existing_drawer() {
+        const DAY_MS: i64 = 86_400_000;
+        let day = super::days_from_civil(2026, 1, 20) * DAY_MS;
+        let start = day + 9 * 3_600_000;
+        let end = start + 30 * 60_000; // 0:30
+        let body = "- [ ] Ship it\n  :LOGBOOK:\n  CLOCK: [2026-01-19 09:00]--[2026-01-19 10:00] => 1:00\n  :END:";
+        let new = log_clock(body, "Ship it", start, end, 0);
+        let lines: Vec<&str> = new.lines().collect();
+        assert_eq!(lines[0], "- [ ] Ship it");
+        assert_eq!(lines[1], "  :LOGBOOK:");
+        assert_eq!(
+            lines[2],
+            "  CLOCK: [2026-01-20 09:00]--[2026-01-20 09:30] => 0:30"
+        );
+        assert_eq!(
+            lines[3],
+            "  CLOCK: [2026-01-19 09:00]--[2026-01-19 10:00] => 1:00"
+        );
+        assert_eq!(lines[4], "  :END:");
+        assert_eq!(lines.len(), 5);
+        // no duplicate :END:
+        assert_eq!(new.matches(":END:").count(), 1);
+    }
+
+    #[test]
+    fn log_clock_no_matching_title_is_noop() {
+        let body = "- [ ] Ship it";
+        let new = log_clock(body, "Nope", 0, 1, 0);
+        assert_eq!(new, body);
+    }
+
+    #[test]
+    fn duration_hm_formats() {
+        assert_eq!(duration_hm(90 * 60_000), "1:30");
+        assert_eq!(duration_hm(5 * 60_000), "0:05");
+        assert_eq!(duration_hm(125 * 60_000), "2:05");
+        assert_eq!(duration_hm(-1000), "0:00");
+    }
+
+    #[test]
+    fn log_clock_preserves_indentation() {
+        const DAY_MS: i64 = 86_400_000;
+        let day = super::days_from_civil(2026, 1, 20) * DAY_MS;
+        let start = day;
+        let end = start + 5 * 60_000;
+        let body = "- [ ] Parent\n  - [ ] Nested";
+        let new = log_clock(body, "Nested", start, end, 0);
+        let lines: Vec<&str> = new.lines().collect();
+        assert_eq!(lines[0], "- [ ] Parent");
+        assert_eq!(lines[1], "  - [ ] Nested");
+        assert_eq!(lines[2], "    :LOGBOOK:");
+        assert_eq!(
+            lines[3],
+            "    CLOCK: [2026-01-20 00:00]--[2026-01-20 00:05] => 0:05"
+        );
+        assert_eq!(lines[4], "    :END:");
     }
 }

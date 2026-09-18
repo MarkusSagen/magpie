@@ -33,6 +33,10 @@ pub struct Config {
     /// Folder synced with notes via `--sync-vault` (Markdown files, one per note).
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// Record a completed task-timer session as an org `CLOCK:` line in the
+    /// note's `:LOGBOOK:` drawer, in addition to the `time_entries` DB row.
+    #[serde(default = "default_true")]
+    pub log_clock_entries: bool,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -59,6 +63,7 @@ impl Default for Config {
             fetch_link_favicons: true,
             open_to_today: false,
             vault_path: None,
+            log_clock_entries: true,
         }
     }
 }

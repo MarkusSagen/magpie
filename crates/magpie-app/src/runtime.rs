@@ -65,6 +65,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         mask_visible_chars: cfg.mask_visible_chars.max(0),
         open_to_today: cfg.open_to_today,
         fetch_link_favicons: cfg.fetch_link_favicons,
+        log_clock_entries: cfg.log_clock_entries,
     })
 }
 
@@ -2827,22 +2828,44 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_toggle_timer(move |note_id, title| {
+            // If this stops the running timer, capture its start/end so we can log
+            // an org CLOCK entry into the note after the stop is recorded.
+            let mut stopped: Option<(i64, i64)> = None;
             {
                 let store = match s.store.lock() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
                 };
                 let key = format!("{}|{}", note_id, title);
-                let running_this = store
-                    .active_timer()
-                    .ok()
-                    .flatten()
-                    .map(|a| a.task_key == key)
-                    .unwrap_or(false);
+                let active = store.active_timer().ok().flatten();
+                let running_this = active.as_ref().map(|a| a.task_key == key).unwrap_or(false);
                 if running_this {
-                    let _ = store.stop_active(now_ms());
+                    let end = now_ms();
+                    if store.stop_active(end).unwrap_or(false) {
+                        stopped = active.map(|a| (a.start_ms, end));
+                    }
                 } else {
                     let _ = store.start_timer(&key, title.as_str(), Some(note_id as i64), now_ms());
+                }
+            }
+            if let Some((start_ms, end_ms)) = stopped {
+                if s.log_clock_entries {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    if let Ok(Some(note)) = store.get_note(note_id as i64) {
+                        let new = magpie_app::tasks::log_clock(
+                            &note.body,
+                            title.as_str(),
+                            start_ms,
+                            end_ms,
+                            local_offset_seconds(),
+                        );
+                        if new != note.body {
+                            let _ = store.update_note_body(note_id as i64, &new, now_ms());
+                        }
+                    }
                 }
             }
             if let Some(ui) = w.upgrade() {
