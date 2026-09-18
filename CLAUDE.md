@@ -235,7 +235,8 @@ baseline `schema.sql`), keyed on `PRAGMA user_version`:
 - The `schema.sql` `CREATE` statements are the **frozen v0 baseline** — never edit an existing
   CREATE to add a column; append an `ALTER TABLE …` to the `MIGRATIONS` array instead.
 - `MIGRATIONS` is **append-only**: never edit or reorder an existing entry (that corrupts
-  already-migrated DBs). Entry index + 1 = the `user_version` it bumps to. v1 = bookmark `tags`.
+  already-migrated DBs). Entry index + 1 = the `user_version` it bumps to. v1 = bookmark
+  `tags`; v2 = `notes.vault_synced_hash` (baseline for the 3-way vault reconcile).
 - **Gotcha:** `sqlcipher_export()` copies schema+data but NOT the page-1 `user_version` header,
   so `backup_db` and `migrate_plaintext_to_encrypted` carry it across with an explicit
   `PRAGMA … user_version = N` — otherwise the destination reopens at 0 and re-runs ALTERs
@@ -246,7 +247,9 @@ baseline `schema.sql`), keyed on `PRAGMA user_version`:
 `~/Library/Application Support/magpie/`:
 - `config.toml` — only written once settings exist; until then defaults apply
   (so changing a `Config::default()` value takes effect with no migration).
-  Notable keys: `open_to_today`, `vault_path` (folder for `--sync-vault`).
+  Notable keys: `open_to_today`, `vault_path` (folder for `--sync-vault`), `vault_watch`
+  (opt-in 4s bidirectional reconcile of `vault_path`), `log_clock_entries` (org CLOCK on
+  timer stop, default on), `fetch_link_favicons` / `fetch_link_previews` (default on).
 - `magpie.sqlite3` (+ `-wal`, `-shm`) — history DB, **SQLCipher-encrypted at rest**
   (see below). Delete the dir to reset state.
 - `magpie.sqlite3.pre-encrypt-backup` — one-time plaintext backup written when a
