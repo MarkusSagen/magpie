@@ -272,14 +272,16 @@ fn sync_vault_cmd(data_dir: &std::path::Path, path: Option<std::path::PathBuf>) 
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    match magpie_core::sync_vault(&store, &dir, now) {
+    match magpie_core::reconcile_vault(&store, &dir, now) {
         Ok(r) => {
             println!(
-                "Vault sync: {} imported, {} updated, {} exported, {} unchanged ({})",
-                r.imported,
-                r.updated,
-                r.exported,
-                r.skipped,
+                "Vault reconcile: {} pulled, {} pushed, {} new notes, {} new files, {} conflicts, {} unchanged ({})",
+                r.pulled,
+                r.pushed,
+                r.created_notes,
+                r.created_files,
+                r.conflicts,
+                r.unchanged,
                 dir.display()
             );
             0

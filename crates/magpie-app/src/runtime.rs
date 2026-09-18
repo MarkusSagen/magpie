@@ -1560,6 +1560,60 @@ fn spawn_watcher(
     });
 }
 
+/// Opt-in live vault watcher: every ~4s, run a 3-way reconcile between the notes
+/// DB and `vault_path` (pulling external `.md` edits into notes, pushing note
+/// edits out, and writing a keep-both conflict file when both sides diverged).
+/// Refreshes the open window only when the reconcile actually changed something,
+/// so an idle vault doesn't cause needless UI churn. Never spawned unless
+/// `Config::vault_watch` is on (and `vault_path` is set) — see `start`.
+fn spawn_vault_watcher(
+    state: Arc<AppState>,
+    vault_path: std::path::PathBuf,
+    weak: slint::Weak<LauncherWindow>,
+) {
+    std::thread::spawn(move || {
+        let log_path = data_dir().join("logs").join("magpie.log");
+        loop {
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let report = {
+                    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                    magpie_core::reconcile_vault(&store, &vault_path, now_ms())
+                    // guard dropped here, before any refresh
+                };
+                match report {
+                    Ok(r) => {
+                        let changed =
+                            r.pulled + r.pushed + r.created_notes + r.created_files + r.conflicts
+                                > 0;
+                        if changed {
+                            let w = weak.clone();
+                            let s = state.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = w.upgrade() {
+                                    refresh(&ui, &s);
+                                }
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        magpie_app::diagnostics::log_line(
+                            &log_path,
+                            &format!("vault watcher reconcile failed: {e}"),
+                        );
+                    }
+                }
+            }));
+            if step.is_err() {
+                magpie_app::diagnostics::log_line(
+                    &log_path,
+                    "vault watcher iteration panicked; continuing",
+                );
+            }
+            std::thread::sleep(Duration::from_secs(4));
+        }
+    });
+}
+
 /// Local UTC offset in seconds, via `date +%z` (no dependency). 0 on failure/non-unix.
 fn local_offset_seconds() -> i64 {
     #[cfg(unix)]
@@ -3474,6 +3528,17 @@ pub fn start() {
     // reminder banners show as "Magpie" instead of being silently dropped.
     magpie_platform::request_notification_authorization();
     spawn_reminders(state.clone());
+    // Opt-in live bidirectional vault sync: only when explicitly enabled AND a
+    // vault path is configured.
+    if cfg.vault_watch {
+        if let Some(vault_path) = cfg.vault_path.clone() {
+            spawn_vault_watcher(
+                state.clone(),
+                std::path::PathBuf::from(vault_path),
+                weak.clone(),
+            );
+        }
+    }
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run. It lives in a thread-local

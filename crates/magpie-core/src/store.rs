@@ -92,6 +92,8 @@ pub struct Store {
 const MIGRATIONS: &[&str] = &[
     // v1: per-bookmark tags (comma-separated, normalized lowercase) for filtering.
     "ALTER TABLE bookmarks ADD COLUMN tags TEXT NOT NULL DEFAULT '';",
+    // v2: per-note baseline hash of the last vault-synced content (for 3-way sync).
+    "ALTER TABLE notes ADD COLUMN vault_synced_hash TEXT NOT NULL DEFAULT '';",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -529,7 +531,28 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert!(version >= 1);
+        assert!(version >= 2);
+    }
+
+    #[test]
+    fn migrations_are_idempotent_on_reopen() {
+        // A fresh in-memory DB reaches the latest version, and re-running
+        // `run_migrations` against an already-migrated connection must not error
+        // (e.g. "duplicate column") or change the version.
+        let s = open_in_memory().unwrap();
+        let version_before: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(version_before >= 2);
+
+        run_migrations(&s.conn).unwrap();
+
+        let version_after: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version_before, version_after);
     }
 
     #[test]

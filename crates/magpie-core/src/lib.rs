@@ -42,4 +42,6 @@ pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, T
 pub use store::{
     open, open_encrypted, open_in_memory, open_or_migrate_encrypted, ImageStore, Ingested, Store,
 };
-pub use vault::{resolve_action, sync_vault, SyncReport, VaultAction};
+pub use vault::{
+    reconcile_vault, resolve_action, sync_vault, ReconcileReport, SyncReport, VaultAction,
+};

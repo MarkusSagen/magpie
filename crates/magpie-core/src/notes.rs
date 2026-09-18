@@ -102,6 +102,24 @@ impl Store {
         rows.collect()
     }
 
+    /// (note, its stored vault_synced_hash) for every note — for 3-way reconcile.
+    pub fn notes_for_sync(&self) -> Result<Vec<(Note, String)>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {NOTE_COLS}, vault_synced_hash FROM notes"))?;
+        let rows = stmt.query_map([], |r| Ok((row_to_note(r)?, r.get::<_, String>(8)?)))?;
+        rows.collect()
+    }
+
+    /// Record the baseline hash after a successful sync of this note.
+    pub fn set_vault_hash(&self, id: i64, hash: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE notes SET vault_synced_hash = ?2 WHERE id = ?1",
+            rusqlite::params![id, hash],
+        )?;
+        Ok(())
+    }
+
     /// Daily journal notes (is_daily = 1), newest date first (names are YYYY-MM-DD,
     /// so lexical DESC = chronological DESC).
     pub fn daily_notes(&self, limit: i64) -> Result<Vec<Note>> {

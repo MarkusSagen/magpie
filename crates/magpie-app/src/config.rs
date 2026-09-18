@@ -33,6 +33,12 @@ pub struct Config {
     /// Folder synced with notes via `--sync-vault` (Markdown files, one per note).
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// Opt-in: run a periodic background 3-way reconcile against `vault_path`
+    /// while Magpie is running, so external edits to the vault's Markdown files
+    /// are pulled in live (and note edits pushed out) without a manual
+    /// `--sync-vault`. Off by default; requires `vault_path` to also be set.
+    #[serde(default)]
+    pub vault_watch: bool,
     /// Record a completed task-timer session as an org `CLOCK:` line in the
     /// note's `:LOGBOOK:` drawer, in addition to the `time_entries` DB row.
     #[serde(default = "default_true")]
@@ -63,6 +69,7 @@ impl Default for Config {
             fetch_link_favicons: true,
             open_to_today: false,
             vault_path: None,
+            vault_watch: false,
             log_clock_entries: true,
         }
     }
