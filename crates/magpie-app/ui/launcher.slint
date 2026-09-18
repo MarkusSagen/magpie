@@ -112,6 +112,23 @@ struct BoardColumn {
     tasks: [TaskRow],
 }
 
+// A note-link-graph node/edge, pre-positioned by `magpie_app::graph::build_graph`
+// (Rust owns the layout; Slint just draws normalized 0..1 coordinates). Edges
+// carry resolved endpoints directly — no index lookups in Slint.
+struct GraphNode {
+    id: int,
+    title: string,
+    x: float,
+    y: float,
+}
+
+struct GraphEdge {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+}
+
 struct ClipRow {
     title: string,
     glyph: string,
@@ -639,6 +656,17 @@ export component LauncherWindow inherits Window {
     callback board-open-task(int);
     callback board-set-status(int, int, int); // note_id, line_index, status (0/1/2)
 
+    // ---- Graph mode ----
+    // A force-directed visualization of notes linked by [[wiki-links]]; layout
+    // is computed in Rust (`magpie_app::graph::build_graph`), Slint only draws
+    // the pre-positioned nodes/edges and reports clicks back.
+    in-out property <bool> graph-mode: false;
+    callback set-mode-graph(bool);
+    in property <[GraphNode]> graph-nodes;
+    in property <[GraphEdge]> graph-edges;
+    in property <int> graph-total;
+    callback graph-open(int);
+
     // Re-focus the search field whenever we return to list mode.
     changed mode => {
         if root.mode == "list" {
@@ -815,6 +843,7 @@ export component LauncherWindow inherits Window {
                                         root.today-mode = false;
                                         root.journal-mode = false;
                                         root.board-mode = false;
+                                        root.graph-mode = false;
                                         root.search-query = "";
                                         root.search-mode = true;
                                         root.run-unified-search("");
@@ -940,6 +969,14 @@ export component LauncherWindow inherits Window {
                         border-radius: 6px;
                         boardta := TouchArea { clicked => { root.set-mode-board(!root.board-mode); } }
                         Text { text: "Board"; color: root.board-mode ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 58px;
+                        height: 26px;
+                        background: root.graph-mode ? Pal.accent : (graphta.has-hover ? #2c2c33 : #202024);
+                        border-radius: 6px;
+                        graphta := TouchArea { clicked => { root.set-mode-graph(!root.graph-mode); } }
+                        Text { text: "Graph"; color: root.graph-mode ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 58px;
@@ -2597,6 +2634,102 @@ export component LauncherWindow inherits Window {
                 if root.board.length == 0: HorizontalLayout {
                     alignment: center;
                     Text { text: "No tasks match these filters."; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // ---- Graph mode (opaque overlay: note-link graph) ----
+        // Layout is computed entirely in Rust (`magpie_app::graph::build_graph`);
+        // this just draws the pre-positioned nodes/edges in normalized 0..1 space,
+        // stretched to fill the canvas (matching the node x/y mapping below).
+        if root.graph-mode: Rectangle {
+            background: #1e1e21;
+            gfs := FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        root.set-mode-graph(false);
+                        searchinput.focus();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            VerticalLayout {
+                padding: 8px;
+                spacing: 8px;
+                // Top bar: back to clipboard + title + count caption.
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        width: 92px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: gback.has-hover ? #34343c : #2a2a30;
+                        gback := TouchArea { clicked => { root.set-mode-graph(false); } }
+                        Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Text { text: "Graph"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    Text {
+                        text: root.graph-total + (root.graph-total == 1 ? " linked note" : " linked notes")
+                            + (root.graph-total >= 150 ? " (showing top 150)" : "");
+                        color: #8a8a90;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                // Canvas: edges drawn first so node dots sit on top of them.
+                Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+                    background: #202024;
+                    border-radius: 8px;
+                    for e in root.graph-edges: Path {
+                        width: 100%;
+                        height: 100%;
+                        stroke: #3a3a44;
+                        stroke-width: 1px;
+                        viewbox-x: 0;
+                        viewbox-y: 0;
+                        viewbox-width: 1;
+                        viewbox-height: 1;
+                        fit: fill;
+                        MoveTo { x: e.x1; y: e.y1; }
+                        LineTo { x: e.x2; y: e.y2; }
+                    }
+                    for n in root.graph-nodes: Rectangle {
+                        x: n.x * parent.width - 5px;
+                        y: n.y * parent.height - 5px;
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: Pal.accent;
+                        Text {
+                            x: 12px;
+                            y: -3px;
+                            text: n.title;
+                            color: #9a9aa0;
+                            font-size: 10px;
+                            overflow: elide;
+                            width: 140px;
+                        }
+                        TouchArea { clicked => { root.graph-open(n.id); } }
+                    }
+                    if root.graph-nodes.length == 0: HorizontalLayout {
+                        alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "No linked notes yet — connect notes with [[links]] to see the graph.";
+                                color: #6a6a70;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                                width: 320px;
+                            }
+                        }
+                    }
                 }
             }
         }

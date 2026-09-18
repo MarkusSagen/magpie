@@ -1,13 +1,14 @@
 use crate::{
-    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, ClipRow, EntryRow, JournalRow,
-    LauncherWindow, NoteRow, Popover, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow,
-    SlotItem, TaskRow, TimeEntryRow,
+    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, ClipRow, EntryRow, GraphEdge, GraphNode,
+    JournalRow, LauncherWindow, NoteRow, Popover, RefRow, SearchBookmarkRow, SearchNoteRow,
+    SearchTaskRow, SlotItem, TaskRow, TimeEntryRow,
 };
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
 use magpie_app::config::Config;
 use magpie_app::favicon;
 use magpie_app::format_time::{abs_date, relative_time};
+use magpie_app::graph;
 use magpie_app::grouping;
 use magpie_app::image_cache::FsImageStore;
 use magpie_app::mask_view::{mask_render, should_mask, MaskRules};
@@ -450,6 +451,7 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
         ui.set_bookmarks_mode(false);
         ui.set_journal_mode(false);
         ui.set_board_mode(false);
+        ui.set_graph_mode(false);
         ui.set_today_mode(true);
         refresh_today(ui, state);
     }
@@ -943,6 +945,52 @@ fn refresh_board(ui: &LauncherWindow, state: &AppState) {
     ui.set_board_projects(ModelRc::new(VecModel::from(projects)));
 }
 
+/// Rebuild Graph mode: every note, laid out by `magpie_app::graph::build_graph`
+/// into force-directed positions from their `[[wiki-links]]`, mapped to Slint's
+/// `GraphNode`/`GraphEdge` structs (edges carry resolved endpoint coordinates —
+/// no index lookups on the Slint side).
+fn refresh_graph(ui: &LauncherWindow, state: &AppState) {
+    let triples: Vec<(i64, String, String)> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store
+            .all_notes()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|n| (n.id, n.name, n.body))
+            .collect()
+    };
+    let (nodes, edges) = graph::build_graph(&triples, 300);
+    let slint_edges: Vec<GraphEdge> = edges
+        .iter()
+        .map(|e| {
+            let a = &nodes[e.a];
+            let b = &nodes[e.b];
+            GraphEdge {
+                x1: a.x,
+                y1: a.y,
+                x2: b.x,
+                y2: b.y,
+            }
+        })
+        .collect();
+    let total = nodes.len() as i32;
+    let slint_nodes: Vec<GraphNode> = nodes
+        .into_iter()
+        .map(|n| GraphNode {
+            id: n.id as i32,
+            title: SharedString::from(n.title),
+            x: n.x,
+            y: n.y,
+        })
+        .collect();
+    ui.set_graph_nodes(ModelRc::new(VecModel::from(slint_nodes)));
+    ui.set_graph_edges(ModelRc::new(VecModel::from(slint_edges)));
+    ui.set_graph_total(total);
+}
+
 /// Rebuild the popover's Tasks tab: every **open** (`!done`) task across all
 /// notes, grouped/sorted, mapped to `TaskRow`s exactly as `refresh_tasks` does.
 /// Poison-tolerant lock so a panic elsewhere can't take the popover down.
@@ -1205,6 +1253,7 @@ fn open_note_into_notes_mode(ui: &LauncherWindow, state: &AppState, note_id: i32
     ui.set_tasks_mode(false);
     ui.set_search_mode(false);
     ui.set_board_mode(false);
+    ui.set_graph_mode(false);
     ui.set_notes_mode(true);
     refresh_notes(ui, state);
 }
@@ -1699,6 +1748,7 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
                         "today" => ui.invoke_set_mode_today(true),
                         "journal" => ui.invoke_set_mode_journal(true),
+                        "graph" => ui.invoke_set_mode_graph(true),
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
@@ -1938,6 +1988,7 @@ pub fn start() {
                 ui.set_notes_mode(true);
                 ui.set_tasks_mode(false);
                 ui.set_board_mode(false);
+                ui.set_graph_mode(false);
                 show_window(&ui, &s);
                 refresh_notes(&ui, &s);
             }
@@ -2618,11 +2669,13 @@ pub fn start() {
             if let Some(ui) = w.upgrade() {
                 ui.set_notes_mode(on);
                 if on {
+                    ui.set_tasks_mode(false);
                     ui.set_bookmarks_mode(false);
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
                     ui.set_board_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_notes(&ui, &s);
                 }
             }
@@ -2911,6 +2964,7 @@ pub fn start() {
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
                     ui.set_board_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_tasks(&ui, &s);
                 }
             }
@@ -3066,6 +3120,7 @@ pub fn start() {
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
                     ui.set_board_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_bookmarks(&ui, &s);
                     spawn_bookmark_favicons(&ui, &s);
                 }
@@ -3178,6 +3233,7 @@ pub fn start() {
                         ui.set_notes_mode(false);
                         ui.set_tasks_mode(false);
                         ui.set_board_mode(false);
+                        ui.set_graph_mode(false);
                         refresh_bookmarks(&ui, &s);
                     }
                 }
@@ -3202,6 +3258,7 @@ pub fn start() {
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
                     ui.set_board_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_today(&ui, &s);
                 }
             }
@@ -3233,6 +3290,7 @@ pub fn start() {
                     ui.set_today_mode(false);
                     ui.set_search_mode(false);
                     ui.set_board_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_journal(&ui, &s);
                 }
             }
@@ -3270,6 +3328,7 @@ pub fn start() {
                     ui.set_today_mode(false);
                     ui.set_journal_mode(false);
                     ui.set_search_mode(false);
+                    ui.set_graph_mode(false);
                     refresh_board(&ui, &s);
                 }
             }
@@ -3290,6 +3349,7 @@ pub fn start() {
         ui.on_board_open_task(move |note_id| {
             if let Some(ui) = w.upgrade() {
                 ui.set_board_mode(false);
+                ui.set_graph_mode(false);
                 open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
@@ -3318,6 +3378,37 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 refresh_board(&ui, &s);
+            }
+        });
+    }
+
+    // ---- Graph mode ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_mode_graph(move |on| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_graph_mode(on);
+                if on {
+                    ui.set_notes_mode(false);
+                    ui.set_tasks_mode(false);
+                    ui.set_bookmarks_mode(false);
+                    ui.set_today_mode(false);
+                    ui.set_journal_mode(false);
+                    ui.set_search_mode(false);
+                    ui.set_board_mode(false);
+                    refresh_graph(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_graph_open(move |note_id| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_graph_mode(false);
+                open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
     }

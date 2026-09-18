@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod external_editor;
 pub mod favicon;
 pub mod format_time;
+pub mod graph;
 pub mod grouping;
 pub mod image_cache;
 pub mod link_meta;
