@@ -338,12 +338,40 @@ component PopoverTaskRow inherits Rectangle {
 // the owning note. Shared by the Kanban and List board layouts.
 component BoardCard inherits Rectangle {
     in property <TaskRow> t;
+    in property <bool> draggable;
     callback open();
     callback set-status(int); // 0=Todo, 1=Doing, 2=Done
+    callback drag-start(int, int, string); // note_id, line_index, title
+    callback drag-move(length, length); // window x, y
+    callback drag-end(length, length); // window x, y
+    property <bool> dragging: false;
     height: 72px;
     background: bcta.has-hover ? #26262c : #202024;
     border-radius: 8px;
-    bcta := TouchArea { clicked => { root.open(); } }
+    opacity: root.dragging ? 0.4 : 1.0;
+    bcta := TouchArea {
+        moved => {
+            if (root.draggable && self.pressed) {
+                if (!root.dragging && (Math.abs(self.mouse-x - self.pressed-x) > 6px || Math.abs(self.mouse-y - self.pressed-y) > 6px)) {
+                    root.dragging = true;
+                    root.drag-start(root.t.note_id, root.t.line_index, root.t.title);
+                }
+                if (root.dragging) {
+                    root.drag-move(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+        }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up) {
+                if (root.dragging) {
+                    root.drag-end(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                } else {
+                    root.open();
+                }
+                root.dragging = false;
+            }
+        }
+    }
     VerticalLayout {
         padding: 8px;
         spacing: 4px;
@@ -661,6 +689,13 @@ export component LauncherWindow inherits Window {
     callback board-controls-changed();
     callback board-open-task(int);
     callback board-set-status(int, int, int); // note_id, line_index, status (0/1/2)
+    // Kanban drag-to-move state — only meaningful while board-group == 0 (Status).
+    in-out property <bool> board-drag-active;
+    in-out property <int> board-drag-note;
+    in-out property <int> board-drag-line;
+    in-out property <string> board-drag-title;
+    in-out property <length> board-drag-x;
+    in-out property <length> board-drag-y;
 
     // ---- Graph mode ----
     // A force-directed visualization of notes linked by [[wiki-links]]; layout
@@ -2493,7 +2528,9 @@ export component LauncherWindow inherits Window {
                         alignment: start;
                         for col in root.board: Rectangle {
                             width: 260px;
-                            background: #202024;
+                            background: (root.board-drag-active && root.board-group == 0
+                                && root.board-drag-x >= self.absolute-position.x
+                                && root.board-drag-x < self.absolute-position.x + self.width) ? #26263a : #202024;
                             border-radius: 8px;
                             VerticalLayout {
                                 padding: 8px;
@@ -2506,8 +2543,31 @@ export component LauncherWindow inherits Window {
                                 ListView {
                                     for t in col.tasks: BoardCard {
                                         t: t;
+                                        draggable: root.board-group == 0;
                                         open => { root.board-open-task(t.note_id); }
                                         set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                                        drag-start(id, line, title) => {
+                                            root.board-drag-note = id;
+                                            root.board-drag-line = line;
+                                            root.board-drag-title = title;
+                                            root.board-drag-active = true;
+                                        }
+                                        drag-move(x, y) => {
+                                            root.board-drag-x = x;
+                                            root.board-drag-y = y;
+                                        }
+                                        drag-end(x, y) => {
+                                            root.board-drag-active = false;
+                                            if (root.board-group == 0 && root.board.length > 0) {
+                                                // Columns are 260px wide + 10px spacing = 270px pitch, laid
+                                                // out from kanbanrow's left edge (absolute-position already
+                                                // accounts for any horizontal scroll).
+                                                root.board-set-status(
+                                                    root.board-drag-note,
+                                                    root.board-drag-line,
+                                                    Math.clamp(Math.floor((x - kanbanrow.absolute-position.x) / 270px), 0, root.board.length - 1));
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3694,6 +3754,30 @@ export component LauncherWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // ---- Kanban drag ghost ----
+    // The VERY LAST child of the root Window (after even the welcome overlay),
+    // so the floating drag label always renders on top. No TouchArea, so it
+    // never intercepts pointer events from the card underneath it.
+    if root.board-drag-active: Rectangle {
+        x: root.board-drag-x - 120px;
+        y: root.board-drag-y - 18px;
+        width: 240px;
+        height: 36px;
+        background: #2e2e38;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Pal.accent;
+        opacity: 0.95;
+        Text {
+            text: root.board-drag-title;
+            color: white;
+            font-size: 13px;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 }
