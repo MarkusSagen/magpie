@@ -1000,7 +1000,7 @@ fn refresh_graph(ui: &LauncherWindow, state: &AppState) {
             .map(|n| (n.id, n.name, n.body))
             .collect()
     };
-    let (nodes, edges) = graph::build_graph(&triples, 300);
+    let (nodes, edges) = graph::build_graph(&triples, 500);
     let slint_edges: Vec<GraphEdge> = edges
         .iter()
         .map(|e| {
@@ -1022,6 +1022,7 @@ fn refresh_graph(ui: &LauncherWindow, state: &AppState) {
             title: SharedString::from(n.title),
             x: n.x,
             y: n.y,
+            degree: n.degree as i32,
         })
         .collect();
     ui.set_graph_nodes(ModelRc::new(VecModel::from(slint_nodes)));

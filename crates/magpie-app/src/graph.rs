@@ -9,6 +9,7 @@ pub struct GraphNode {
     pub title: String,
     pub x: f32,
     pub y: f32,
+    pub degree: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -84,6 +85,7 @@ pub fn build_graph(
             title: name.clone(),
             x: 0.0,
             y: 0.0,
+            degree: 0,
         });
     }
 
@@ -92,6 +94,12 @@ pub fn build_graph(
         if let (Some(&na), Some(&nb)) = (reindex.get(&a), reindex.get(&b)) {
             edges.push(GraphEdge { a: na, b: nb });
         }
+    }
+
+    // Degree of the FINAL (pruned/re-indexed) node set, from the rebuilt edges.
+    for e in &edges {
+        nodes[e.a].degree += 1;
+        nodes[e.b].degree += 1;
     }
 
     if n == 0 {
@@ -119,9 +127,11 @@ pub fn build_graph(
 /// along edges, displacement capped by a cooling temperature.
 fn relax(nodes: &mut [GraphNode], edges: &[GraphEdge], iterations: usize) {
     let n = nodes.len() as f32;
-    let k = 1.0 / n.sqrt();
+    // A slightly larger ideal edge length than the classic 1/sqrt(n) spreads
+    // small graphs out more, instead of collapsing hubs into a tight clump.
+    let k = 1.3 / n.sqrt();
     let eps = 1e-6_f32;
-    let mut temp = 0.1_f32; // initial max displacement per iteration, in [0,1]-space
+    let mut temp = 0.15_f32; // initial max displacement per iteration, in [0,1]-space
 
     for iter in 0..iterations {
         let mut disp: Vec<(f32, f32)> = vec![(0.0, 0.0); nodes.len()];
@@ -182,11 +192,11 @@ fn relax(nodes: &mut [GraphNode], edges: &[GraphEdge], iterations: usize) {
 
         // Cool down linearly toward 0 over the run.
         let progress = (iter + 1) as f32 / iterations as f32;
-        temp = (0.1 * (1.0 - progress)).max(0.001);
+        temp = (0.15 * (1.0 - progress)).max(0.001);
     }
 }
 
-/// Rescale positions to fit within [0.05, 0.95] on both axes. Degenerate (all
+/// Rescale positions to fit within [0.08, 0.92] on both axes. Degenerate (all
 /// points coincide) leaves them centered.
 fn normalize(nodes: &mut [GraphNode]) {
     if nodes.is_empty() {
@@ -206,8 +216,8 @@ fn normalize(nodes: &mut [GraphNode]) {
     }
     let span_x = max_x - min_x;
     let span_y = max_y - min_y;
-    const LO: f32 = 0.05;
-    const HI: f32 = 0.95;
+    const LO: f32 = 0.08;
+    const HI: f32 = 0.92;
     for n in nodes.iter_mut() {
         n.x = if span_x > 1e-6 {
             LO + (n.x - min_x) / span_x * (HI - LO)
@@ -266,6 +276,22 @@ mod tests {
         let (nodes, edges) = build_graph(&notes, 50);
         assert!(nodes.is_empty());
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn degree_reflects_hub_vs_leaf() {
+        let notes = triples(&[
+            (1, "Hub", "[[Leaf1]] [[Leaf2]] [[Leaf3]]"),
+            (2, "Leaf1", "no links"),
+            (3, "Leaf2", "no links"),
+            (4, "Leaf3", "no links"),
+        ]);
+        let (nodes, _edges) = build_graph(&notes, 50);
+        let hub = nodes.iter().find(|n| n.title == "Hub").unwrap();
+        let leaf = nodes.iter().find(|n| n.title == "Leaf1").unwrap();
+        assert_eq!(hub.degree, 3);
+        assert_eq!(leaf.degree, 1);
+        assert!(hub.degree > leaf.degree);
     }
 
     #[test]

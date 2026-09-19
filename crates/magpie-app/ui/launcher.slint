@@ -122,6 +122,7 @@ struct GraphNode {
     title: string,
     x: float,
     y: float,
+    degree: int,
 }
 
 struct GraphEdge {
@@ -2757,8 +2758,8 @@ export component LauncherWindow inherits Window {
                     for e in root.graph-edges: Path {
                         width: 100%;
                         height: 100%;
-                        stroke: #3a3a44;
-                        stroke-width: 1px;
+                        stroke: #454552;
+                        stroke-width: 1.2px;
                         viewbox-x: 0;
                         viewbox-y: 0;
                         viewbox-width: 1;
@@ -2768,27 +2769,39 @@ export component LauncherWindow inherits Window {
                         LineTo { x: e.x2; y: e.y2; }
                     }
                     for n in root.graph-nodes: Rectangle {
-                        x: n.x * parent.width - 5px;
-                        y: n.y * parent.height - 5px;
-                        width: 10px;
-                        height: 10px;
-                        border-radius: 5px;
-                        background: Pal.accent;
+                        // Size by degree (hubs read bigger), capped so a mega-hub
+                        // doesn't swallow the canvas. Hovering grows it a touch more.
+                        property <length> r: 6px + min(n.degree, 5) * 3px;
+                        property <length> er: nta.has-hover ? r + 2px : r;
+                        x: n.x * parent.width - er;
+                        y: n.y * parent.height - er;
+                        width: 2 * er;
+                        height: 2 * er;
+                        border-radius: er;
+                        // Color by degree: hubs warmer/brighter than leaves.
+                        // Hovering brightens further so the target dot pops.
+                        background: nta.has-hover
+                            ? #c3d1ff
+                            : (n.degree >= 3 ? #9db4ff : (n.degree == 2 ? Pal.accent : #6a78c8));
+                        border-width: 1px;
+                        border-color: #1e1e21;
                         Text {
                             // Nodes near the right edge would otherwise push their
                             // label off the canvas — flip it to the dot's left there.
                             // Same idea near the bottom: nudge the label up so its
-                            // line doesn't run past the canvas edge.
-                            x: n.x > 0.75 ? -152px : 12px;
+                            // line doesn't run past the canvas edge. Offset scales
+                            // with the dot's radius so labels clear bigger hubs.
+                            x: n.x > 0.75 ? -(r + 4px + self.width) : r + 4px;
                             y: n.y > 0.9 ? -16px : -3px;
                             text: n.title;
-                            color: #9a9aa0;
+                            color: nta.has-hover ? white : #c8c8d0;
                             font-size: 10px;
+                            font-weight: nta.has-hover ? 600 : 400;
                             overflow: elide;
                             width: 140px;
                             horizontal-alignment: n.x > 0.75 ? right : left;
                         }
-                        TouchArea { clicked => { root.graph-open(n.id); } }
+                        nta := TouchArea { clicked => { root.graph-open(n.id); } }
                     }
                     if root.graph-nodes.length == 0: HorizontalLayout {
                         alignment: center;
