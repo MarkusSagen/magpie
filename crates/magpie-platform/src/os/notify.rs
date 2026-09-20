@@ -5,7 +5,11 @@
 //! honour a real permission grant, so they are not silently dropped. A bare dev
 //! binary has no app bundle, and `UNUserNotificationCenter` raises in that case, so
 //! `notify` falls back to `osascript` there (attributed to the terminal, but at
-//! least visible during development). Other platforms are a best-effort stub for now.
+//! least visible during development). On Windows and Linux, immediate notifications
+//! go through the cross-platform `notify-rust` crate (Linux: D-Bus/libnotify;
+//! Windows: WinRT toast). Scheduled "fire when the app is closed" reminders remain
+//! macOS-only (`UNTimeIntervalNotificationTrigger`); elsewhere the in-app 60s tick
+//! delivers reminders while Magpie runs.
 
 /// Post a notification. Branded via `UNUserNotificationCenter` when running as the
 /// packaged `.app`; otherwise `osascript` (dev) so notifications still appear.
@@ -20,7 +24,14 @@ pub fn notify(title: &str, body: &str) {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (title, body);
+        // Best-effort desktop notification (Linux D-Bus / Windows toast). Failures
+        // (e.g. no notification daemon) are swallowed — a missing banner must never
+        // disrupt the app.
+        let _ = notify_rust::Notification::new()
+            .summary(title)
+            .body(body)
+            .appname("Magpie")
+            .show();
     }
 }
 

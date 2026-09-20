@@ -30,3 +30,8 @@ windows = { version = "0.58", features = [
   "Win32_System_Registry",
   "Win32_Foundation",
 ] }
+
+# Cross-platform desktop notifications for non-macOS (Linux: zbus/D-Bus, pure Rust;
+# Windows: WinRT toast). macOS uses UNUserNotificationCenter instead (see os/notify.rs).
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+notify-rust = "4"
