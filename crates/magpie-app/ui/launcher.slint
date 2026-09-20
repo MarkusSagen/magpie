@@ -459,6 +459,24 @@ export component LauncherWindow inherits Window {
     callback set-task-view(string);
     callback set-note-view(string);
 
+    // ---- Keyboard nav layer (history + g-leader + view cycling) ----
+    // True right after a bare `g` (with an empty search query) is pressed —
+    // the NEXT key is consumed as a section-jump letter (c/t/n/b/s) instead
+    // of normal input. Cleared by that next keypress (or Esc).
+    in-out property <bool> nav-leader: false;
+    // Jump straight to a section, remembering its last-shown view (used by
+    // the g-leader; equivalent to `set-section` but named for this layer).
+    callback nav-section(string);
+    // History stack (screens visited via `nav-section`/`set-task-view`/
+    // `set-note-view`): ⌘[ back, ⌘] forward.
+    callback nav-back();
+    callback nav-forward();
+    // ⌘⌥← — toggle to the last screen you were on (alt-tab for screens).
+    callback nav-previous();
+    // ⌘⌥↑ / ⌘⌥↓ (-1 / +1) — cycle the current section's views. No-op outside
+    // tasks/notes.
+    callback nav-cycle-view(int);
+
     in property <[EntryRow]> entries;
     in-out property <string> query;
     in-out property <int> selected: 0;
@@ -877,6 +895,23 @@ export component LauncherWindow inherits Window {
                                     }
                                     return accept;
                                 }
+                                // ---- vim-style g-leader: `g` (empty query) arms it, then
+                                // c/t/n/b/s jumps to a section. Consume-check MUST come
+                                // first so it intercepts the very next keypress, whatever
+                                // it is (including Esc, which just disarms).
+                                if root.nav-leader {
+                                    root.nav-leader = false;
+                                    if event.text == "c" { root.nav-section("clipboard"); return accept; }
+                                    if event.text == "t" { root.nav-section("tasks"); return accept; }
+                                    if event.text == "n" { root.nav-section("notes"); return accept; }
+                                    if event.text == "b" { root.nav-section("bookmarks"); return accept; }
+                                    if event.text == "s" { root.nav-section("stats"); return accept; }
+                                    return accept;
+                                }
+                                if !event.modifiers.control && event.text == "g" && root.query == "" {
+                                    root.nav-leader = true;
+                                    return accept;
+                                }
                                 // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
                                 if event.text == Key.UpArrow {
                                     if root.selected > 0 { root.selected -= 1; }
@@ -939,6 +974,12 @@ export component LauncherWindow inherits Window {
                                     if event.text == "7" { root.activate-nth(7); return accept; }
                                     if event.text == "8" { root.activate-nth(8); return accept; }
                                     if event.text == "9" { root.activate-nth(9); return accept; }
+                                    // ---- keyboard-nav history / view cycling ----
+                                    if event.modifiers.alt && event.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                                    if event.modifiers.alt && event.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                                    if event.modifiers.alt && event.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                                    if event.text == "[" { root.nav-back(); return accept; }
+                                    if event.text == "]" { root.nav-forward(); return accept; }
                                     // ⌘A / ⌘V / ⌘X / ⌘←→ / ⌘⌫ etc. → native editing
                                     return reject;
                                 }
@@ -1740,6 +1781,24 @@ export component LauncherWindow inherits Window {
                     self.focus();
                 }
                 key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     if e.text == Key.Escape {
                         root.set-mode-notes(false);
                         searchinput.focus();
@@ -1934,6 +1993,35 @@ export component LauncherWindow inherits Window {
                                     // ⌘⏎ promotes the current line to a task; ⌘↑/⌘↓
                                     // switch notes while editing; Esc returns focus to
                                     // the note list. Everything else edits normally.
+                                    //
+                                    // Keyboard-nav layer: this is a live TextInput, so
+                                    // (unlike the other section FocusScopes) the bare
+                                    // `g`-leader is deliberately NOT wired here — it would
+                                    // eat every "g" typed into a note. ⌘-combos are safe
+                                    // (they don't collide with typing) so history/cycling
+                                    // still work while editing. Checked BEFORE the existing
+                                    // ⌘↑/⌘↓ below so ⌘⌥↑/↓ cycle views instead of switching
+                                    // notes.
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.LeftArrow {
+                                        root.nav-previous();
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.UpArrow {
+                                        root.nav-cycle-view(-1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.DownArrow {
+                                        root.nav-cycle-view(1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "[" {
+                                        root.nav-back();
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "]" {
+                                        root.nav-forward();
+                                        return accept;
+                                    }
                                     if event.modifiers.control && event.text == Key.Return {
                                         root.promote-line(self.cursor-position-byte-offset);
                                         return accept;
@@ -2092,6 +2180,29 @@ export component LauncherWindow inherits Window {
                     root.task-selected = 0;
                 }
                 key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment). NOTE:
+                    // this takes priority over the bare "b"/"t" shortcuts
+                    // below when chained right after "g" — e.g. "g" then "b"
+                    // jumps to Bookmarks rather than toggling this row's
+                    // bookmark. Press "b"/"t" on their own (not after "g")
+                    // for the row actions.
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     if e.text == Key.Escape {
                         root.set-mode-tasks(false);
                         searchinput.focus();
@@ -2384,6 +2495,24 @@ export component LauncherWindow inherits Window {
             bfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     if e.text == Key.Escape {
                         root.set-mode-board(false);
                         searchinput.focus();
@@ -2792,6 +2921,24 @@ export component LauncherWindow inherits Window {
             gfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     if e.text == Key.Escape {
                         root.set-mode-graph(false);
                         searchinput.focus();
@@ -3413,7 +3560,8 @@ export component LauncherWindow inherits Window {
                 width: 460px;
                 // Tall enough for the whole table — at 460px the last row was clipped
                 // mid-line, which reads as a rendering bug rather than "scroll me".
-                height: 540px;
+                // Bumped for the added "Sections" group (g-leader/history/cycling).
+                height: 620px;
                 background: #1e1e21;
                 border-radius: 12px;
                 border-width: 1px;
@@ -3435,6 +3583,17 @@ export component LauncherWindow inherits Window {
                                 { k: "Esc", d: "Clear search, then close" },
                                 { k: "type", d: "Filter entries" },
                                 { k: "⌘1–9", d: "Paste the Nth entry" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                            }
+
+                            Text { text: "Sections"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "g then c/t/n/b/s", d: "Jump to a section (empty search)" },
+                                { k: "⌘[ / ⌘]", d: "Back / forward through visited screens" },
+                                { k: "⌘⌥←", d: "Jump to the previous screen (toggle)" },
+                                { k: "⌘⌥↑ / ⌘⌥↓", d: "Cycle the section's views (Tasks/Notes)" },
                             ]: HorizontalLayout {
                                 Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
                                 Text { text: row.d; color: #9a9aa0; font-size: 12px; }
@@ -3941,9 +4100,9 @@ export component LauncherWindow inherits Window {
     }
 
     // ---- Kanban drag ghost ----
-    // The VERY LAST child of the root Window (after even the welcome overlay),
-    // so the floating drag label always renders on top. No TouchArea, so it
-    // never intercepts pointer events from the card underneath it.
+    // Was the VERY LAST child of the root Window (after even the welcome
+    // overlay); the g-leader hint below is now last instead, so it's never
+    // covered mid-drag.
     if root.board-drag-active: Rectangle {
         x: root.board-drag-x - 120px;
         y: root.board-drag-y - 18px;
@@ -3961,6 +4120,31 @@ export component LauncherWindow inherits Window {
             overflow: elide;
             horizontal-alignment: center;
             vertical-alignment: center;
+        }
+    }
+
+    // ---- g-leader hint ----
+    // The VERY LAST child of the root Window: a tiny bottom-left badge that
+    // appears the instant `g` arms the leader (see the searchinput/section
+    // key-pressed handlers) and disappears again on the very next keypress
+    // (which either consumes it into a jump or, on Esc, just disarms it). No
+    // TouchArea — purely informational, never intercepts clicks.
+    if root.nav-leader: Rectangle {
+        x: 12px;
+        y: root.height - 40px;
+        height: 28px;
+        width: hint-text.preferred-width + 20px;
+        background: #1e1e21;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Pal.accent;
+        hint-text := Text {
+            x: 10px;
+            text: "g → c·t·n·b·s";
+            color: #d0d0d4;
+            font-size: 12px;
+            vertical-alignment: center;
+            height: 100%;
         }
     }
 }

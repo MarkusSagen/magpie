@@ -68,6 +68,8 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         fetch_link_favicons: cfg.fetch_link_favicons,
         fetch_link_previews: cfg.fetch_link_previews,
         log_clock_entries: cfg.log_clock_entries,
+        nav_back: std::sync::Mutex::new(Vec::new()),
+        nav_fwd: std::sync::Mutex::new(Vec::new()),
     })
 }
 
@@ -419,19 +421,119 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     ui.invoke_rebuild_preview();
 }
 
+/// The view (if any) the given section is currently showing, for history
+/// bookkeeping. Mirrors the `(section, view)` pairs `nav_apply` accepts — ""
+/// for single-view sections (clipboard, bookmarks, stats).
+fn current_view_for(ui: &LauncherWindow, section: &str) -> String {
+    match section {
+        "tasks" => ui.get_tasks_view().to_string(),
+        "notes" => ui.get_notes_view().to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Record-and-navigate: the entry point every keyboard/mouse nav action
+/// should call (the sidebar, the per-section view-switchers, `on_set_mode_*`,
+/// "jump to note" links, the dev UI tour, the `g`-leader, ⌘⌥↑/↓ view-cycling).
+/// Pushes the CURRENT screen onto `nav_back` (so `⌘[` can return to it) and
+/// clears `nav_fwd` (a fresh navigation invalidates any undone `⌘[`) — unless
+/// we're already on that exact screen — then switches via `nav_apply`.
+/// `⌘[`/`⌘]` (back/forward) call `nav_apply` directly so they don't record
+/// themselves into their own history.
+fn nav_to(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &str) {
+    let cur_section = ui.get_section().to_string();
+    let cur_view = current_view_for(ui, &cur_section);
+    if cur_section != section || cur_view != view {
+        state
+            .nav_back
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((cur_section, cur_view));
+        state
+            .nav_fwd
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+    nav_apply(ui, state, section, view);
+}
+
+/// Jump to `section`, remembering its last-shown view (same lookup
+/// `on_set_section` used) — shared by the sidebar click and the `g`-leader.
+fn nav_section(ui: &LauncherWindow, state: &Arc<AppState>, section: &str) {
+    let view = current_view_for(ui, section);
+    nav_to(ui, state, section, &view);
+}
+
+/// Pop `nav_back`, push the current screen onto `nav_fwd`, and switch to it.
+/// Also used for the `⌘⌥←` "jump to previous screen" toggle — since the
+/// screen we're leaving lands on `nav_fwd`, pressing it again returns.
+fn on_nav_back(ui: &LauncherWindow, state: &Arc<AppState>) {
+    let popped = state
+        .nav_back
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop();
+    if let Some((section, view)) = popped {
+        let cur_section = ui.get_section().to_string();
+        let cur_view = current_view_for(ui, &cur_section);
+        state
+            .nav_fwd
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((cur_section, cur_view));
+        nav_apply(ui, state, &section, &view);
+    }
+}
+
+/// Pop `nav_fwd`, push the current screen onto `nav_back`, and switch to it.
+fn on_nav_forward(ui: &LauncherWindow, state: &Arc<AppState>) {
+    let popped = state
+        .nav_fwd
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop();
+    if let Some((section, view)) = popped {
+        let cur_section = ui.get_section().to_string();
+        let cur_view = current_view_for(ui, &cur_section);
+        state
+            .nav_back
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((cur_section, cur_view));
+        nav_apply(ui, state, &section, &view);
+    }
+}
+
+/// Cycle the current section's views by `dir` (+1/-1), wrapping. No-op for
+/// single-view sections (clipboard, bookmarks, stats).
+fn on_nav_cycle_view(ui: &LauncherWindow, state: &Arc<AppState>, dir: i32) {
+    let section = ui.get_section().to_string();
+    let (views, cur): (&[&str], String) = match section.as_str() {
+        "tasks" => (&["today", "list", "board"], ui.get_tasks_view().to_string()),
+        "notes" => (
+            &["notes", "journal", "graph"],
+            ui.get_notes_view().to_string(),
+        ),
+        _ => return,
+    };
+    let n = views.len() as i32;
+    let i = views.iter().position(|v| *v == cur).unwrap_or(0) as i32;
+    let next = views[(i + dir).rem_euclid(n) as usize];
+    nav_to(ui, state, &section, next);
+}
+
 /// Central navigation: set the section + view, drive the (existing) mode
 /// booleans so exactly one section's overlay body shows, and refresh its data.
 /// `view` is "" (or any value not recognized for that section) for
 /// single-view sections (clipboard, bookmarks, stats).
 ///
-/// This is now the ONLY place that clears the mode booleans — every entry
-/// point (the sidebar, the per-section view-switchers, the `on_set_mode_*`
-/// wrappers kept for internal callers, "jump to note" links, the dev UI tour)
-/// routes through here instead of each hand-rolling its own exclusion list.
-/// `tasks-view`/`notes-view` are left as-is by Slint's `in-out` bindings
-/// whenever we (re)enter that same section, which is what gives "remember the
-/// last view shown" for free.
-fn nav_to(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &str) {
+/// This is the ONLY place that clears the mode booleans; `nav_to` (history-
+/// recording) and back/forward/cycle (history-preserving) are the only
+/// callers. `tasks-view`/`notes-view` are left as-is by Slint's `in-out`
+/// bindings whenever we (re)enter that same section, which is what gives
+/// "remember the last view shown" for free.
+fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &str) {
     ui.set_today_mode(false);
     ui.set_journal_mode(false);
     ui.set_notes_mode(false);
@@ -2818,12 +2920,7 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_section(move |section| {
             if let Some(ui) = w.upgrade() {
-                let view = match section.as_str() {
-                    "tasks" => ui.get_tasks_view().to_string(),
-                    "notes" => ui.get_notes_view().to_string(),
-                    _ => String::new(),
-                };
-                nav_to(&ui, &s, section.as_str(), &view);
+                nav_section(&ui, &s, section.as_str());
             }
         });
     }
@@ -2842,6 +2939,55 @@ pub fn start() {
         ui.on_set_note_view(move |v| {
             if let Some(ui) = w.upgrade() {
                 nav_to(&ui, &s, "notes", v.as_str());
+            }
+        });
+    }
+    // ---- Keyboard nav layer: g-leader section jump, ⌘[/⌘] history,
+    // ⌘⌥← jump-to-previous, ⌘⌥↑/↓ view cycling (Slint side: launcher.slint). ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_nav_section(move |section| {
+            if let Some(ui) = w.upgrade() {
+                nav_section(&ui, &s, section.as_str());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_nav_back(move || {
+            if let Some(ui) = w.upgrade() {
+                on_nav_back(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_nav_forward(move || {
+            if let Some(ui) = w.upgrade() {
+                on_nav_forward(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        // Jump-to-previous is one `nav-back` — the screen we leave lands on
+        // `nav_fwd`, so pressing ⌘⌥← again toggles back to it.
+        ui.on_nav_previous(move || {
+            if let Some(ui) = w.upgrade() {
+                on_nav_back(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_nav_cycle_view(move |dir| {
+            if let Some(ui) = w.upgrade() {
+                on_nav_cycle_view(&ui, &s, dir);
             }
         });
     }
