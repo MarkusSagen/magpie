@@ -177,6 +177,8 @@ global Icons {
     out property <image> tab-today: @image-url("../../../assets/icons/tab-today.svg");
     out property <image> tab-daily: @image-url("../../../assets/icons/tab-daily.svg");
     out property <image> tab-clipboard: @image-url("../../../assets/icons/tab-clipboard.svg");
+    out property <image> tab-notes: @image-url("../../../assets/icons/tab-notes.svg");
+    out property <image> tab-stats: @image-url("../../../assets/icons/tab-stats.svg");
     out property <image> type-text: @image-url("../../../assets/icons/type-text.svg");
     out property <image> type-link: @image-url("../../../assets/icons/type-link.svg");
     out property <image> type-color: @image-url("../../../assets/icons/type-color.svg");
@@ -430,7 +432,8 @@ component BoardCard inherits Rectangle {
 
 export component LauncherWindow inherits Window {
     title: "Magpie";
-    preferred-width: 900px;
+    preferred-width: 960px;
+    min-width: 960px;
     preferred-height: 560px;
     background: #1e1e21;
     forward-focus: searchinput;
@@ -458,6 +461,28 @@ export component LauncherWindow inherits Window {
     callback set-section(string);
     callback set-task-view(string);
     callback set-note-view(string);
+
+    // ---- Quick nav cross-fade ----
+    // A true cross-fade between separate `if` overlays isn't directly
+    // supported in Slint, so this is a fade-pulse on the incoming content:
+    // on a section/view change the content dips to 0.35 opacity then eases
+    // back to 1.0 over ~120ms. Opacity ONLY — never x/y, per the renderer
+    // bug noted by `sidebar-w` above. Applied to the main clipboard content
+    // layout and each of the 7 section overlay Rectangles; the sidebar and
+    // transient modals (search/actions/help/etc.) are deliberately excluded.
+    property <float> nav-anim: 1.0;
+    animate nav-anim { duration: 120ms; easing: ease-out; }
+    navfade := Timer {
+        interval: 120ms;
+        running: false;
+        triggered => {
+            root.nav-anim = 1.0;
+            self.running = false;
+        }
+    }
+    changed section => { root.nav-anim = 0.35; navfade.running = true; }
+    changed tasks-view => { root.nav-anim = 0.35; navfade.running = true; }
+    changed notes-view => { root.nav-anim = 0.35; navfade.running = true; }
 
     // ---- Keyboard nav layer (history + g-leader + view cycling) ----
     // True right after a bare `g` (with an empty search query) is pressed —
@@ -787,6 +812,8 @@ export component LauncherWindow inherits Window {
     Rectangle {
 
         VerticalLayout {
+            // Nav cross-fade (see `nav-anim` above) — opacity only.
+            opacity: root.nav-anim;
             // Inset to the right of the sidebar via left padding (see the note
             // by `sidebar-w` above for why this isn't an `x`/`width` override).
             padding-left: root.sidebar-w + 8px;
@@ -1631,14 +1658,6 @@ export component LauncherWindow inherits Window {
                 HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
-                    Rectangle {
-                        width: 70px;
-                        height: 26px;
-                        background: #202024;
-                        border-radius: 6px;
-                        TouchArea { clicked => { root.toggle-view(); } }
-                        Text { text: "← Back"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    }
                     for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
                         width: 56px;
                         height: 26px;
@@ -1773,6 +1792,7 @@ export component LauncherWindow inherits Window {
         // ---- Notes mode (opaque overlay covering the clipboard body) ----
         if root.notes-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             // Keyboard nav: the list is focused on entry; ↑/↓ switch notes (opening
             // each), ⏎ dives into the editor, Esc exits. Empty FocusScope → no layout
             // impact; mouse still works on the panes below.
@@ -2172,6 +2192,7 @@ export component LauncherWindow inherits Window {
         // ---- Tasks mode (opaque overlay: flat, grouped/sorted task list) ----
         if root.tasks-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             // Keyboard nav: ↑/↓ select, Space toggles, ⏎ opens the note, Esc exits.
             // An empty FocusScope holds focus without affecting layout or mouse.
             tfs := FocusScope {
@@ -2277,7 +2298,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                    Text { text: "Tasks"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     // Live running-timer indicator (only while a timer runs).
                     if root.active-title != "": Rectangle {
                         height: 30px;
@@ -2492,6 +2512,7 @@ export component LauncherWindow inherits Window {
         // ---- Board mode (opaque overlay: cross-project task board) ----
         if root.board-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             bfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
@@ -2551,7 +2572,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                    Text { text: "Board"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                 }
                 // Controls row 1: Group / Layout / Sort chip groups + Hide done.
@@ -2918,6 +2938,7 @@ export component LauncherWindow inherits Window {
         // stretched to fill the canvas (matching the node x/y mapping below).
         if root.graph-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             gfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
@@ -2977,7 +2998,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                    Text { text: "Graph"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Text {
                         text: root.graph-total + (root.graph-total == 1 ? " linked note" : " linked notes")
                             + (root.graph-total >= 150 ? " (showing top 150)" : "");
@@ -3117,6 +3137,7 @@ export component LauncherWindow inherits Window {
 
         if root.bookmarks-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3127,12 +3148,6 @@ export component LauncherWindow inherits Window {
                 spacing: 8px;
                 HorizontalLayout {
                     spacing: 8px;
-                    Rectangle {
-                        width: 92px; height: 30px; border-radius: 6px;
-                        background: bkback.has-hover ? #34343c : #2a2a30;
-                        bkback := TouchArea { clicked => { root.set-mode-bookmarks(false); } }
-                        Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    }
                     Text { text: "Bookmarks"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                 }
@@ -3214,6 +3229,7 @@ export component LauncherWindow inherits Window {
         // Daily + Clipboard tabs) ----
         if root.today-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3245,7 +3261,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                    Text { text: "Today"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                     if root.active-title != "": Rectangle {
                         height: 30px;
@@ -3340,6 +3355,7 @@ export component LauncherWindow inherits Window {
         // ---- Journal (chronological timeline over the daily notes) ----
         if root.journal-mode: Rectangle {
             background: #1e1e21;
+            opacity: root.nav-anim;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3369,7 +3385,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                    Text { text: "Journal"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                 }
                 ListView {
@@ -3421,16 +3436,16 @@ export component LauncherWindow inherits Window {
                 spacing: 2px;
                 alignment: start;
                 for s in [
-                    { id: "clipboard", label: "Clip", glyph: "📋", accent: #6a8cff, tint: #6a8cff2e },
-                    { id: "tasks", label: "Tasks", glyph: "✅", accent: #5ac77a, tint: #5ac77a2e },
-                    { id: "notes", label: "Notes", glyph: "📝", accent: #c78a5a, tint: #c78a5a2e },
-                    { id: "bookmarks", label: "Marks", glyph: "🔖", accent: #b06ad0, tint: #b06ad02e },
-                    { id: "stats", label: "Stats", glyph: "📊", accent: #d0b04a, tint: #d0b04a2e },
+                    { id: "clipboard", label: "Clip", icon: Icons.tab-clipboard, accent: #6a8cff, tint: #6a8cff2e },
+                    { id: "tasks", label: "Tasks", icon: Icons.tab-tasks, accent: #5ac77a, tint: #5ac77a2e },
+                    { id: "notes", label: "Notes", icon: Icons.tab-notes, accent: #c78a5a, tint: #c78a5a2e },
+                    { id: "bookmarks", label: "Links", icon: Icons.type-link, accent: #b06ad0, tint: #b06ad02e },
+                    { id: "stats", label: "Stats", icon: Icons.tab-stats, accent: #d0b04a, tint: #d0b04a2e },
                 ]: Rectangle {
                     height: 54px;
                     background: root.section == s.id ? s.tint : (sbnav.has-hover ? #232329 : transparent);
                     // Active-section marker: a coloured left bar (in addition to
-                    // the tinted fill + brighter glyph/label below).
+                    // the tinted fill + brighter icon/label below).
                     if root.section == s.id: Rectangle {
                         x: 0;
                         y: 6px;
@@ -3442,12 +3457,16 @@ export component LauncherWindow inherits Window {
                     sbnav := TouchArea { clicked => { root.set-section(s.id); } }
                     VerticalLayout {
                         alignment: center;
-                        spacing: 3px;
-                        Text {
-                            text: s.glyph;
-                            font-size: 18px;
-                            horizontal-alignment: center;
-                            color: root.section == s.id ? s.accent : #8a8a92;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: center;
+                            Image {
+                                source: s.icon;
+                                width: 18px;
+                                height: 18px;
+                                image-fit: contain;
+                                colorize: root.section == s.id ? s.accent : #8a8a92;
+                            }
                         }
                         Text {
                             text: s.label;
