@@ -419,9 +419,80 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     ui.invoke_rebuild_preview();
 }
 
+/// Central navigation: set the section + view, drive the (existing) mode
+/// booleans so exactly one section's overlay body shows, and refresh its data.
+/// `view` is "" (or any value not recognized for that section) for
+/// single-view sections (clipboard, bookmarks, stats).
+///
+/// This is now the ONLY place that clears the mode booleans — every entry
+/// point (the sidebar, the per-section view-switchers, the `on_set_mode_*`
+/// wrappers kept for internal callers, "jump to note" links, the dev UI tour)
+/// routes through here instead of each hand-rolling its own exclusion list.
+/// `tasks-view`/`notes-view` are left as-is by Slint's `in-out` bindings
+/// whenever we (re)enter that same section, which is what gives "remember the
+/// last view shown" for free.
+fn nav_to(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &str) {
+    ui.set_today_mode(false);
+    ui.set_journal_mode(false);
+    ui.set_notes_mode(false);
+    ui.set_tasks_mode(false);
+    ui.set_bookmarks_mode(false);
+    ui.set_board_mode(false);
+    ui.set_graph_mode(false);
+    ui.set_search_mode(false);
+    ui.set_view(SharedString::from("list"));
+    ui.set_section(SharedString::from(section));
+    match (section, view) {
+        ("tasks", "today") => {
+            ui.set_tasks_view(SharedString::from("today"));
+            ui.set_today_mode(true);
+            refresh_today(ui, state);
+        }
+        ("tasks", "board") => {
+            ui.set_tasks_view(SharedString::from("board"));
+            ui.set_board_mode(true);
+            refresh_board(ui, state);
+        }
+        ("tasks", _) => {
+            // "list", or any unrecognized view — the flat Tasks list.
+            ui.set_tasks_view(SharedString::from("list"));
+            ui.set_tasks_mode(true);
+            refresh_tasks(ui, state);
+        }
+        ("notes", "journal") => {
+            ui.set_notes_view(SharedString::from("journal"));
+            ui.set_journal_mode(true);
+            refresh_journal(ui, state);
+        }
+        ("notes", "graph") => {
+            ui.set_notes_view(SharedString::from("graph"));
+            ui.set_graph_mode(true);
+            refresh_graph(ui, state);
+        }
+        ("notes", _) => {
+            // "notes", or any unrecognized view — the notes list + editor.
+            ui.set_notes_view(SharedString::from("notes"));
+            ui.set_notes_mode(true);
+            refresh_notes(ui, state);
+        }
+        ("bookmarks", _) => {
+            ui.set_bookmarks_mode(true);
+            refresh_bookmarks(ui, state);
+            spawn_bookmark_favicons(ui, state);
+        }
+        ("stats", _) => {
+            ui.set_view(SharedString::from("stats"));
+            refresh_stats(ui, state, ui.get_range_index());
+        }
+        _ => {
+            // clipboard: everything above is already cleared.
+        }
+    }
+}
+
 /// Refresh results and show the launcher window. Shared by the launcher hotkey
 /// and the tray (left-click + "Show Magpie").
-fn show_window(ui: &LauncherWindow, state: &AppState) {
+fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
     refresh(ui, state);
     // Capture the paste target: whatever app is frontmost right before we show.
     match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
@@ -447,14 +518,7 @@ fn show_window(ui: &LauncherWindow, state: &AppState) {
     }
     // Optional "open to Today" setting: land on the Today dashboard each summon.
     if state.open_to_today {
-        ui.set_notes_mode(false);
-        ui.set_tasks_mode(false);
-        ui.set_bookmarks_mode(false);
-        ui.set_journal_mode(false);
-        ui.set_board_mode(false);
-        ui.set_graph_mode(false);
-        ui.set_today_mode(true);
-        refresh_today(ui, state);
+        nav_to(ui, state, "tasks", "today");
     }
     let _ = ui.show();
     // Background/agent apps don't steal focus just by showing a window — activate
@@ -1288,14 +1352,9 @@ fn hide_launcher(ui: &LauncherWindow) {
 /// Open note `id` into Notes mode, exiting whatever other full-screen mode is
 /// currently showing. Shared by "jump to the owning note" from Tasks-mode rows
 /// and from the "Find everywhere" palette (⌘⇧F), so both paths behave identically.
-fn open_note_into_notes_mode(ui: &LauncherWindow, state: &AppState, note_id: i32) {
+fn open_note_into_notes_mode(ui: &LauncherWindow, state: &Arc<AppState>, note_id: i32) {
     ui.set_note_id(note_id);
-    ui.set_tasks_mode(false);
-    ui.set_search_mode(false);
-    ui.set_board_mode(false);
-    ui.set_graph_mode(false);
-    ui.set_notes_mode(true);
-    refresh_notes(ui, state);
+    nav_to(ui, state, "notes", "notes");
 }
 
 /// Open `url` in the default browser and hide the launcher. Shared by the
@@ -2078,13 +2137,8 @@ pub fn start() {
                 let _ = p.hide();
             }
             if let Some(ui) = w.upgrade() {
-                ui.set_note_id(note_id);
-                ui.set_notes_mode(true);
-                ui.set_tasks_mode(false);
-                ui.set_board_mode(false);
-                ui.set_graph_mode(false);
                 show_window(&ui, &s);
-                refresh_notes(&ui, &s);
+                open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
     }
@@ -2755,22 +2809,53 @@ pub fn start() {
             }
         });
     }
+    // ---- Sidebar navigation router ----
+    // `set-section` is what the sidebar's 5 icons call; reading back the
+    // retained `tasks-view`/`notes-view` before routing is what gives
+    // "remember the last view shown" for a re-entered multi-view section.
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_section(move |section| {
+            if let Some(ui) = w.upgrade() {
+                let view = match section.as_str() {
+                    "tasks" => ui.get_tasks_view().to_string(),
+                    "notes" => ui.get_notes_view().to_string(),
+                    _ => String::new(),
+                };
+                nav_to(&ui, &s, section.as_str(), &view);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_task_view(move |v| {
+            if let Some(ui) = w.upgrade() {
+                nav_to(&ui, &s, "tasks", v.as_str());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_note_view(move |v| {
+            if let Some(ui) = w.upgrade() {
+                nav_to(&ui, &s, "notes", v.as_str());
+            }
+        });
+    }
+
     // ---- Notes mode ----
     {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_set_mode_notes(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_notes_mode(on);
                 if on {
-                    ui.set_tasks_mode(false);
-                    ui.set_bookmarks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_notes(&ui, &s);
+                    nav_to(&ui, &s, "notes", "notes");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3006,9 +3091,7 @@ pub fn start() {
                             .map(|n| n.id as i32)
                     };
                     if let Some(id) = id {
-                        ui.set_note_id(id);
-                        ui.set_notes_mode(true);
-                        refresh_notes(&ui, &s);
+                        open_note_into_notes_mode(&ui, &s, id);
                     }
                 }
             }
@@ -3051,15 +3134,13 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_tasks(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_tasks_mode(on);
                 if on {
-                    ui.set_bookmarks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_tasks(&ui, &s);
+                    // Remembers the last tasks sub-view shown (today/list/board),
+                    // same as the sidebar's Tasks icon.
+                    let view = ui.get_tasks_view().to_string();
+                    nav_to(&ui, &s, "tasks", &view);
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3206,17 +3287,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_bookmarks(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_bookmarks_mode(on);
                 if on {
-                    ui.set_notes_mode(false);
-                    ui.set_tasks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_bookmarks(&ui, &s);
-                    spawn_bookmark_favicons(&ui, &s);
+                    nav_to(&ui, &s, "bookmarks", "");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3327,12 +3401,7 @@ pub fn start() {
                     let url = e.full_text.trim().to_string();
                     if url.starts_with("http://") || url.starts_with("https://") {
                         ui.invoke_add_bookmark(SharedString::from(url));
-                        ui.set_bookmarks_mode(true);
-                        ui.set_notes_mode(false);
-                        ui.set_tasks_mode(false);
-                        ui.set_board_mode(false);
-                        ui.set_graph_mode(false);
-                        refresh_bookmarks(&ui, &s);
+                        nav_to(&ui, &s, "bookmarks", "");
                     }
                 }
             }
@@ -3374,16 +3443,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_today(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_today_mode(on);
                 if on {
-                    ui.set_notes_mode(false);
-                    ui.set_tasks_mode(false);
-                    ui.set_bookmarks_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_today(&ui, &s);
+                    nav_to(&ui, &s, "tasks", "today");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3406,16 +3469,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_journal(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_journal_mode(on);
                 if on {
-                    ui.set_notes_mode(false);
-                    ui.set_tasks_mode(false);
-                    ui.set_bookmarks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_journal(&ui, &s);
+                    nav_to(&ui, &s, "notes", "journal");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3444,16 +3501,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_board(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_board_mode(on);
                 if on {
-                    ui.set_notes_mode(false);
-                    ui.set_tasks_mode(false);
-                    ui.set_bookmarks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_graph_mode(false);
-                    refresh_board(&ui, &s);
+                    nav_to(&ui, &s, "tasks", "board");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3472,8 +3523,6 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_board_open_task(move |note_id| {
             if let Some(ui) = w.upgrade() {
-                ui.set_board_mode(false);
-                ui.set_graph_mode(false);
                 open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
@@ -3512,16 +3561,10 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_set_mode_graph(move |on| {
             if let Some(ui) = w.upgrade() {
-                ui.set_graph_mode(on);
                 if on {
-                    ui.set_notes_mode(false);
-                    ui.set_tasks_mode(false);
-                    ui.set_bookmarks_mode(false);
-                    ui.set_today_mode(false);
-                    ui.set_journal_mode(false);
-                    ui.set_search_mode(false);
-                    ui.set_board_mode(false);
-                    refresh_graph(&ui, &s);
+                    nav_to(&ui, &s, "notes", "graph");
+                } else {
+                    nav_to(&ui, &s, "clipboard", "");
                 }
             }
         });
@@ -3531,7 +3574,6 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_graph_open(move |note_id| {
             if let Some(ui) = w.upgrade() {
-                ui.set_graph_mode(false);
                 open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
