@@ -73,18 +73,6 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
     })
 }
 
-/// The glyph shown at the left of a list row for each content kind.
-fn type_glyph(kind: &Kind) -> &'static str {
-    match kind {
-        Kind::Link => "🔗",
-        Kind::Color => "🎨",
-        Kind::Email => "✉️",
-        Kind::Image => "🖼️",
-        Kind::File => "📁",
-        Kind::Text | Kind::Rtf | Kind::Html => "📄",
-    }
-}
-
 /// A row badge like "3 lines" when the text has more than one non-empty line.
 fn line_badge(full_text: &str) -> String {
     let n = full_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -248,7 +236,6 @@ fn to_rows(
                 slot: *slots.get(&e.id).unwrap_or(&0) as i32,
                 merged: merge_set.contains(&e.id),
                 badge: SharedString::from(line_badge(&e.full_text)),
-                glyph: SharedString::from(type_glyph(&e.kind)),
                 source: SharedString::from(source),
                 when: SharedString::from(when),
                 copied: e.copy_count as i32,
@@ -1268,7 +1255,6 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
                     .map(|l| l.chars().take(80).collect::<String>())
                     .unwrap_or_else(|| e.kind.as_str().to_string()),
             ),
-            glyph: SharedString::from(type_glyph(&e.kind)),
             kind: SharedString::from(e.kind.as_str()),
         })
         .collect();
@@ -1331,7 +1317,6 @@ fn refresh_today(ui: &LauncherWindow, state: &AppState) {
                     .map(|l| l.chars().take(80).collect::<String>())
                     .unwrap_or_else(|| e.kind.as_str().to_string()),
             ),
-            glyph: SharedString::from(type_glyph(&e.kind)),
             kind: SharedString::from(e.kind.as_str()),
         })
         .collect();
@@ -1341,22 +1326,22 @@ fn refresh_today(ui: &LauncherWindow, state: &AppState) {
 /// The ⌘K action set: (id, icon, label, shortcut). Dispatch by id in Slint's
 /// `run-action`.
 /// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
-/// hint is worse than none. `📝` (not `✏️`) because the pencil-with-VS16
-/// rendered as tofu in Slint's text shaping.
+/// hint is worse than none. The icon field is unused (Slint's `ActionIcon`
+/// renders a monochrome SVG by `id` instead) — left empty, not emoji.
 const ACTIONS: &[(&str, &str, &str, &str)] = &[
-    ("paste", "📋", "Paste", "⏎"),
-    ("copy", "📄", "Copy", "⌘C"),
-    ("keep", "📎", "Paste & keep open", "⌘⏎"),
-    ("edit", "📝", "Edit", "⌘E"),
-    ("snippet", "🧩", "New snippet", "⌘N"),
-    ("pin", "📌", "Pin / Unpin", "⌘P"),
-    ("slot", "🔢", "Assign to slot…", "⌘S"),
-    ("merge", "➕", "Add to merge", "⌘G"),
-    ("note", "🗒", "New note from this entry", "⌘J"),
-    ("delete", "🗑", "Delete", "⌘⌫"),
-    ("export", "📤", "Export data…", ""),
-    ("bookmark", "🔖", "Bookmark this link", ""),
-    ("task-from-link", "✅", "Create task from link", ""),
+    ("paste", "", "Paste", "⏎"),
+    ("copy", "", "Copy", "⌘C"),
+    ("keep", "", "Paste & keep open", "⌘⏎"),
+    ("edit", "", "Edit", "⌘E"),
+    ("snippet", "", "New snippet", "⌘N"),
+    ("pin", "", "Pin / Unpin", "⌘P"),
+    ("slot", "", "Assign to slot…", "⌘S"),
+    ("merge", "", "Add to merge", "⌘G"),
+    ("note", "", "New note from this entry", "⌘J"),
+    ("delete", "", "Delete", "⌘⌫"),
+    ("export", "", "Export data…", ""),
+    ("bookmark", "", "Bookmark this link", ""),
+    ("task-from-link", "", "Create task from link", ""),
 ];
 
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
@@ -3998,13 +3983,14 @@ fn build_tray(
         .with_menu_on_left_click(false)
         .with_tooltip("Magpie");
     // Menu-bar icon: the magpie silhouette as a template image (macOS tints it for
-    // the light/dark menu bar). Falls back to a text glyph if decoding fails.
+    // the light/dark menu bar). No emoji fallback if decoding fails — an empty
+    // title just leaves the tray icon blank rather than shipping a bird emoji.
     match load_tray_icon() {
         Some(icon) => {
             builder = builder.with_icon(icon).with_icon_as_template(true);
         }
         None => {
-            builder = builder.with_title("🐦");
+            builder = builder.with_title("");
         }
     }
     let tray = builder.build().ok()?;
@@ -4076,23 +4062,6 @@ fn build_tray(
     }
 
     Some(tray)
-}
-
-#[cfg(test)]
-mod glyph_tests {
-    use super::type_glyph;
-    use magpie_core::Kind;
-    #[test]
-    fn every_kind_has_a_glyph() {
-        assert_eq!(type_glyph(&Kind::Link), "🔗");
-        assert_eq!(type_glyph(&Kind::Color), "🎨");
-        assert_eq!(type_glyph(&Kind::Email), "✉️");
-        assert_eq!(type_glyph(&Kind::Image), "🖼️");
-        assert_eq!(type_glyph(&Kind::File), "📁");
-        assert_eq!(type_glyph(&Kind::Text), "📄");
-        assert_eq!(type_glyph(&Kind::Rtf), "📄");
-        assert_eq!(type_glyph(&Kind::Html), "📄");
-    }
 }
 
 #[cfg(test)]
