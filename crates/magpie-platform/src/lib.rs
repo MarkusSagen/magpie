@@ -17,7 +17,8 @@ pub use os::accessibility::{
 pub use os::db_key::db_key;
 pub use os::factory::{platform_autostart, platform_clipboard};
 pub use os::notify::{
-    cancel_scheduled_reminders, notify, request_notification_authorization, schedule_notification,
+    cancel_scheduled_reminders, install_notification_delegate, notify,
+    request_notification_authorization, schedule_notification, set_notification_click_handler,
 };
 pub use os::window::{hide_and_yield_focus, raise_to_front};
 pub use policy::{CapturePolicy, Decision, SkipReason};

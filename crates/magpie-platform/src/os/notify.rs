@@ -11,6 +11,37 @@
 //! macOS-only (`UNTimeIntervalNotificationTrigger`); elsewhere the in-app 60s tick
 //! delivers reminders while Magpie runs.
 
+use std::sync::OnceLock;
+
+/// Process-global handler invoked (on the main thread) when the user clicks a
+/// reminder notification, with the note_id parsed from the notification
+/// identifier (or -1 when none is encoded). Set once via
+/// [`set_notification_click_handler`]; read by the macOS notification-center
+/// delegate installed by [`install_notification_delegate`].
+static CLICK_HANDLER: OnceLock<Box<dyn Fn(i64) + Send + Sync>> = OnceLock::new();
+
+/// Register the handler invoked when the user clicks a reminder notification,
+/// with the note_id parsed from the notification identifier (or -1 if none).
+/// Invoked on the main thread by AppKit. Call once, at startup. macOS bundle
+/// only in effect — on other platforms the handler is simply never called (their
+/// notifications route clicks via the OS default).
+pub fn set_notification_click_handler(f: impl Fn(i64) + Send + Sync + 'static) {
+    let _ = CLICK_HANDLER.set(Box::new(f));
+}
+
+/// Install the `UNUserNotificationCenter` delegate that routes notification
+/// clicks to the handler registered via [`set_notification_click_handler`], and
+/// keeps reminders visible even while Magpie is foreground. macOS bundle only;
+/// no-op otherwise.
+pub fn install_notification_delegate() {
+    #[cfg(target_os = "macos")]
+    {
+        if is_bundled() {
+            macos_un::install_delegate();
+        }
+    }
+}
+
 /// Post a notification. Branded via `UNUserNotificationCenter` when running as the
 /// packaged `.app`; a dev binary only logs it (macOS can't attribute a notification
 /// to an unbundled process).
@@ -93,14 +124,19 @@ fn is_bundled() -> bool {
 
 #[cfg(target_os = "macos")]
 mod macos_un {
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
+    use block2::{DynBlock, RcBlock};
+    use objc2::rc::Retained;
+    use objc2::runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{define_class, msg_send, AnyThread};
     use objc2_foundation::{NSError, NSString};
     use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
+        UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
         UNTimeIntervalNotificationTrigger, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
 
     /// Per-notification identifier counter (UN requires a unique request id).
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -153,5 +189,87 @@ mod macos_un {
     pub fn cancel_all() {
         UNUserNotificationCenter::currentNotificationCenter()
             .removeAllPendingNotificationRequests();
+    }
+
+    /// Recover the note id encoded in a scheduled reminder's identifier
+    /// (`magpie-task-<note_id>-<fingerprint>`): strip the prefix, then read the
+    /// leading integer up to the next `-`. The explicit `<note_id>-` prefix means
+    /// this stays correct even though the fingerprint itself contains `-` (e.g. a
+    /// `-1` due-time sentinel) and `|`. Returns -1 when the identifier isn't one
+    /// of ours or carries no parseable id.
+    fn note_id_from_identifier(identifier: &str) -> i64 {
+        identifier
+            .strip_prefix("magpie-task-")
+            .and_then(|rest| rest.split('-').next())
+            .and_then(|head| head.parse::<i64>().ok())
+            .unwrap_or(-1)
+    }
+
+    define_class!(
+        // A minimal (no-ivar) NSObject subclass conforming to
+        // `UNUserNotificationCenterDelegate`. AppKit calls its methods on the
+        // main thread, so the registered click handler runs there too.
+        #[unsafe(super(NSObject))]
+        #[name = "MagpieNotificationDelegate"]
+        struct NotificationDelegate;
+
+        unsafe impl NSObjectProtocol for NotificationDelegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for NotificationDelegate {
+            // The user clicked (or otherwise responded to) a notification.
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive_response(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                completion_handler: &DynBlock<dyn Fn()>,
+            ) {
+                let identifier = response.notification().request().identifier();
+                let note_id = note_id_from_identifier(&identifier.to_string());
+                if let Some(handler) = super::CLICK_HANDLER.get() {
+                    handler(note_id);
+                }
+                // macOS logs an error unless the completion handler is called.
+                completion_handler.call(());
+            }
+
+            // A notification arrived while Magpie is in the foreground — still
+            // show the banner and play the sound (default is to suppress it).
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                completion_handler: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                completion_handler.call((UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::Sound,));
+            }
+        }
+    );
+
+    /// Keeps the delegate alive for the process lifetime — `setDelegate:` holds
+    /// only a weak reference, so a dropped delegate would silently stop routing
+    /// clicks. Send + Sync because it is created once on the main thread at
+    /// startup and thereafter only read by AppKit on the main thread.
+    struct DelegateHolder(#[allow(dead_code)] Retained<NotificationDelegate>);
+    // SAFETY: installed once on the main thread; the delegate is never mutated or
+    // moved across threads afterwards.
+    unsafe impl Send for DelegateHolder {}
+    unsafe impl Sync for DelegateHolder {}
+
+    static DELEGATE: OnceLock<DelegateHolder> = OnceLock::new();
+
+    /// Create the delegate and register it with the current notification center.
+    /// Idempotent: a second call is a no-op.
+    pub fn install_delegate() {
+        if DELEGATE.get().is_some() {
+            return;
+        }
+        let this = NotificationDelegate::alloc().set_ivars(());
+        let delegate: Retained<NotificationDelegate> = unsafe { msg_send![super(this), init] };
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        let _ = DELEGATE.set(DelegateHolder(delegate));
     }
 }

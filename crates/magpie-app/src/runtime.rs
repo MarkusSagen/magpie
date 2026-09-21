@@ -1889,7 +1889,14 @@ fn reschedule_os_reminders(state: &AppState, default_min: i64) {
     magpie_platform::cancel_scheduled_reminders();
     for (t, inst) in magpie_app::reminders::future_reminders(tasks, now, offset, default_min) {
         let secs = ((inst - now) as f64 / 1000.0).max(1.0);
-        let ident = format!("magpie-task-{}", magpie_app::reminders::fingerprint(&t));
+        // Embed the note id right after the prefix so the notification-click
+        // delegate can recover it (`magpie-task-<note_id>-<fingerprint>`); the
+        // fingerprint stays as the stable dedup/replace key.
+        let ident = format!(
+            "magpie-task-{}-{}",
+            t.note_id,
+            magpie_app::reminders::fingerprint(&t)
+        );
         let body = if t.note_name.is_empty() {
             t.title.clone()
         } else {
@@ -3770,6 +3777,27 @@ pub fn start() {
     // Ask for notification permission once (macOS bundle only; no-op in dev), so
     // reminder banners show as "Magpie" instead of being silently dropped.
     magpie_platform::request_notification_authorization();
+    // Route reminder-notification clicks: recover the task's note (encoded in the
+    // notification identifier) and open Magpie to it. macOS bundle only — in dev
+    // the delegate install is a no-op, so the handler is simply never called.
+    {
+        let w = weak.clone();
+        let s = state.clone();
+        magpie_platform::set_notification_click_handler(move |note_id| {
+            let (w, s) = (w.clone(), s.clone());
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    show_window(&ui, &s);
+                    if note_id >= 0 {
+                        open_note_into_notes_mode(&ui, &s, note_id as i32);
+                    } else {
+                        nav_to(&ui, &s, "tasks", "today");
+                    }
+                }
+            });
+        });
+        magpie_platform::install_notification_delegate();
+    }
     spawn_reminders(state.clone());
     // Opt-in live bidirectional vault sync: only when explicitly enabled AND a
     // vault path is configured.
