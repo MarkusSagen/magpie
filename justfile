@@ -35,7 +35,7 @@ release:
     cargo build --release -p magpie-app
 
 # Print the release binary size
-size: release
+bin-size: release
     ls -lh target/release/magpie* | awk '{print $5, $9}'
 
 fmt:
