@@ -29,7 +29,17 @@ windows = { version = "0.58", features = [
   "Win32_System_DataExchange",
   "Win32_System_Registry",
   "Win32_Foundation",
+  # app_icons.rs: SHGetFileInfoW (+ its SHFILEINFOW/FILE_FLAGS_AND_ATTRIBUTES
+  # param) and the GDI icon->bitmap->DIB pipeline.
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
 ] }
+
+# app_icons.rs: resolve an app's icon from the freedesktop icon theme.
+[target.'cfg(target_os = "linux")'.dependencies]
+freedesktop-icons = "0.4"
 
 # Cross-platform desktop notifications for non-macOS (Linux: zbus/D-Bus, pure Rust;
 # Windows: WinRT toast). macOS uses UNUserNotificationCenter instead (see os/notify.rs).
