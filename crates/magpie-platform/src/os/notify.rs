@@ -3,23 +3,30 @@
 //! On macOS a bundled, signed app posts **branded** notifications through
 //! `UNUserNotificationCenter` — they appear as "Magpie" with the app icon and
 //! honour a real permission grant, so they are not silently dropped. A bare dev
-//! binary has no app bundle, and `UNUserNotificationCenter` raises in that case, so
-//! `notify` falls back to `osascript` there (attributed to the terminal, but at
-//! least visible during development). On Windows and Linux, immediate notifications
+//! binary has no app bundle, and `UNUserNotificationCenter` requires one, so a dev
+//! binary can only log the notification (an unbundled `osascript` notification is
+//! attributed to Script Editor and useless on click). On Windows and Linux, immediate notifications
 //! go through the cross-platform `notify-rust` crate (Linux: D-Bus/libnotify;
 //! Windows: WinRT toast). Scheduled "fire when the app is closed" reminders remain
 //! macOS-only (`UNTimeIntervalNotificationTrigger`); elsewhere the in-app 60s tick
 //! delivers reminders while Magpie runs.
 
 /// Post a notification. Branded via `UNUserNotificationCenter` when running as the
-/// packaged `.app`; otherwise `osascript` (dev) so notifications still appear.
+/// packaged `.app`; a dev binary only logs it (macOS can't attribute a notification
+/// to an unbundled process).
 pub fn notify(title: &str, body: &str) {
     #[cfg(target_os = "macos")]
     {
         if is_bundled() {
             macos_un::post(title, body);
         } else {
-            osascript(title, body);
+            // Unbundled dev binaries CANNOT post an app-attributed notification on
+            // macOS: the only unbundled route is `osascript display notification`,
+            // which macOS attributes to Script Editor and whose click opens an empty
+            // "Untitled" Script Editor window (useless + confusing). So in dev we just
+            // log — real, branded, clickable notifications require the packaged
+            // `Magpie.app` (UNUserNotificationCenter). Build it with `just package-macos`.
+            eprintln!("[magpie notification] {title} — {body}");
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -82,21 +89,6 @@ fn is_bundled() -> bool {
         .ok()
         .map(|p| p.to_string_lossy().contains("/Contents/MacOS/"))
         .unwrap_or(false)
-}
-
-/// Dev fallback: `osascript display notification` (attributed to the script runner).
-#[cfg(target_os = "macos")]
-fn osascript(title: &str, body: &str) {
-    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!(
-        "display notification \"{}\" with title \"{}\"",
-        esc(body),
-        esc(title)
-    );
-    let _ = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output();
 }
 
 #[cfg(target_os = "macos")]
