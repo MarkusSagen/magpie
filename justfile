@@ -1,12 +1,24 @@
 set shell := ["bash", "-uc"]
 
+# Force the repo's pinned rustup toolchain for EVERY cargo call, defeating this
+# machine's three-way toolchain tangle: a `mise` cargo/rustc shim on PATH, an
+# ambient `RUSTUP_TOOLCHAIN` (e.g. 1.96) that masks rust-toolchain.toml, and Nix.
+# Just using the rustup-proxy cargo isn't enough — the mise `rustc` shim (first on
+# PATH) still leaks into proc-macro/host compilation, producing mixed-toolchain
+# builds that fail on deps like `convert_case`/`unicode-segmentation` (E0514/E0599).
+# So: unset RUSTUP_TOOLCHAIN, put the 1.97.1 bin FIRST on PATH (shadows mise/Nix),
+# pin RUSTC, and call the toolchain's cargo directly. Bump the version here when
+# rust-toolchain.toml is bumped (and `rustup toolchain install <ver>`).
+tc := env_var('HOME') + "/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin"
+cargo := "env -u RUSTUP_TOOLCHAIN RUSTC=" + tc + "/rustc PATH=\"" + tc + ":$PATH\" " + tc + "/cargo"
+
 # Run the full test suite
 test:
-    cargo test --workspace
+    {{cargo}} test --workspace
 
 # Run the app (debug)
 run:
-    cargo run -p magpie-app
+    {{cargo}} run -p magpie-app
 
 # Run the debug build SIGNED with a stable identity so macOS Accessibility
 # (auto-paste) actually works in dev. One-time: `just make-signing-cert`, then
@@ -28,21 +40,21 @@ run-signed: build
 
 # Debug build of everything
 build:
-    cargo build --workspace
+    {{cargo}} build --workspace
 
 # Optimized release binary
 release:
-    cargo build --release -p magpie-app
+    {{cargo}} build --release -p magpie-app
 
 # Print the release binary size
 bin-size: release
     ls -lh target/release/magpie* | awk '{print $5, $9}'
 
 fmt:
-    cargo fmt --all
+    {{cargo}} fmt --all
 
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    {{cargo}} clippy --workspace --all-targets -- -D warnings
 
 # Show what target/ is using (debug builds are the disk hog — Slint's generated
 # code + per-crate artifacts + incremental cache across many test binaries).
@@ -60,7 +72,7 @@ slim:
 # With the dev profile stripping dependency debuginfo, a full debug+test build is
 # now ~4-5 GB (was ~40 GB before that profile change).
 clean:
-    cargo clean
+    {{cargo}} clean
 
 # Install login autostart using the built release binary
 install-autostart: release
