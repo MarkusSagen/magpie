@@ -2139,6 +2139,10 @@ pub fn start() {
     let popover = Popover::new().expect("create popover");
     popover.set_theme_dark(state.theme_dark);
 
+    // Match the native window chrome (titlebar / traffic-light strip) to the
+    // theme, so light mode isn't undercut by a dark OS titlebar.
+    magpie_platform::set_appearance(state.theme_dark);
+
     {
         let w = weak.clone();
         ui.on_dismiss_welcome(move || {
@@ -2157,6 +2161,7 @@ pub fn start() {
                 if let Some(p) = pw.upgrade() {
                     p.set_theme_dark(new_dark);
                 }
+                magpie_platform::set_appearance(new_dark);
                 let cfg_path = data_dir().join("config.toml");
                 let mut cfg = magpie_app::config::load_or_default(&cfg_path);
                 cfg.theme_dark = new_dark;

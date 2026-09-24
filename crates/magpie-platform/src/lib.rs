@@ -20,7 +20,7 @@ pub use os::notify::{
     cancel_scheduled_reminders, install_notification_delegate, notify,
     request_notification_authorization, schedule_notification, set_notification_click_handler,
 };
-pub use os::window::{hide_and_yield_focus, raise_to_front};
+pub use os::window::{hide_and_yield_focus, raise_to_front, set_appearance};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 pub use watcher::Watcher;

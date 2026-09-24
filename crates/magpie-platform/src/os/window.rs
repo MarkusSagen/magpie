@@ -70,3 +70,31 @@ pub fn hide_and_yield_focus() {
 /// No-op fallback: on Windows/Linux hiding the window returns focus to the WM.
 #[cfg(not(target_os = "macos"))]
 pub fn hide_and_yield_focus() {}
+
+/// Match the native window chrome (titlebar, traffic-light strip) to Magpie's
+/// theme. Slint paints the client area, but the OS-drawn titlebar follows the
+/// `NSApplication` appearance — so in light mode the titlebar stays dark unless
+/// we set the app appearance explicitly. Call on the main (UI) thread whenever
+/// the theme changes (and once at startup). No-op if the aqua appearance can't
+/// be resolved.
+#[cfg(target_os = "macos")]
+pub fn set_appearance(dark: bool) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAppearance, NSApplication};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let name = if dark {
+        unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }
+    } else {
+        unsafe { objc2_app_kit::NSAppearanceNameAqua }
+    };
+    if let Some(appearance) = NSAppearance::appearanceNamed(name) {
+        NSApplication::sharedApplication(mtm).setAppearance(Some(&appearance));
+    }
+}
+
+/// No-op fallback: Windows/Linux window chrome follows the desktop theme.
+#[cfg(not(target_os = "macos"))]
+pub fn set_appearance(_dark: bool) {}
