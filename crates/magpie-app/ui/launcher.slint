@@ -260,7 +260,7 @@ global Icons {
 // A type-kind glyph: picks the icon by `Kind::as_str()` value (rtf/html/text → text).
 component TypeIcon inherits Image {
     in property <string> kind;
-    in property <color> tint: #b8b8be;
+    in property <color> tint: Theme.text-dim;
     image-fit: contain;
     colorize: root.tint;
     source: root.kind == "link" ? Icons.type-link
@@ -274,7 +274,7 @@ component TypeIcon inherits Image {
 // A ⌘K action glyph: picks the icon by action id (unknown → paste).
 component ActionIcon inherits Image {
     in property <string> id;
-    in property <color> tint: #d0d0d4;
+    in property <color> tint: Theme.text;
     image-fit: contain;
     colorize: root.tint;
     source: root.id == "copy" ? Icons.act-copy
@@ -297,31 +297,31 @@ component HBar inherits Rectangle {
     in property <float> value_norm;
     height: 22px;
     HorizontalLayout {
-        spacing: 8px;
+        spacing: Theme.sp2;
         Text {
             text: label;
-            color: #d0d0d4;
-            font-size: 11px;
+            color: Theme.text;
+            font-size: Theme.fs-sm;
             width: 180px;
             overflow: elide;
             vertical-alignment: center;
         }
         track := Rectangle {
-            background: #2a2a30;
+            background: Theme.bg-panel;
             border-radius: 3px;
             Rectangle {
                 x: 0;
                 y: 0;
                 height: parent.height;
                 width: track.width * value_norm;
-                background: #6a8cff;
+                background: Theme.accent;
                 border-radius: 3px;
             }
         }
         Text {
             text: display;
-            color: #9a9aa0;
-            font-size: 11px;
+            color: Theme.text-dim;
+            font-size: Theme.fs-sm;
             width: 48px;
             vertical-alignment: center;
         }
@@ -335,13 +335,13 @@ component PopoverTaskRow inherits Rectangle {
     callback toggle();
     callback open();
     height: 40px;
-    background: prow.has-hover ? #26262c : transparent;
-    border-radius: 6px;
+    background: prow.has-hover ? Theme.bg-elevated : transparent;
+    border-radius: Theme.r-sm;
     prow := TouchArea { clicked => { root.open(); } }
     HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 8px;
+        padding-left: Theme.sp2;
+        padding-right: Theme.sp2;
+        spacing: Theme.sp2;
         Rectangle {
             width: 24px;
             Rectangle {
@@ -350,8 +350,8 @@ component PopoverTaskRow inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 border-width: 1px;
-                border-color: root.t.doing && !root.t.done ? #e0a44a : #6a6a72;
-                background: root.t.done ? Pal.accent : (root.t.doing ? #e0a44a33 : transparent);
+                border-color: root.t.doing && !root.t.done ? Theme.warn : Theme.text-faint;
+                background: root.t.done ? Pal.accent : (root.t.doing ? Theme.warn.with-alpha(0.2) : transparent);
                 if root.t.done: Text {
                     text: "✓";
                     color: Pal.on-accent;
@@ -363,7 +363,7 @@ component PopoverTaskRow inherits Rectangle {
                 }
                 if !root.t.done && root.t.doing: Text {
                     text: "◐";
-                    color: #e0a44a;
+                    color: Theme.warn;
                     font-size: 12px;
                     width: 18px;
                     height: 18px;
@@ -379,16 +379,16 @@ component PopoverTaskRow inherits Rectangle {
             padding-bottom: 5px;
             Text {
                 text: root.t.title;
-                color: root.t.done ? #6a6a70 : white;
-                font-size: 13px;
+                color: root.t.done ? Theme.text-faint : Theme.text;
+                font-size: Theme.fs-body;
                 overflow: elide;
             }
             HorizontalLayout {
-                spacing: 8px;
+                spacing: Theme.sp2;
                 alignment: start;
-                if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? #e06a6a : #9a9aa0; font-size: 10px; vertical-alignment: center; }
-                if root.t.project != "": Text { text: "#" + root.t.project; color: #9ab0ff; font-size: 10px; vertical-alignment: center; }
-                if root.t.recur != "": Text { text: root.t.recur; color: #7ad7a0; font-size: 10px; vertical-alignment: center; }
+                if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.link; font-size: Theme.fs-xs; vertical-alignment: center; }
+                if root.t.recur != "": Text { text: root.t.recur; color: Theme.success; font-size: Theme.fs-xs; vertical-alignment: center; }
             }
         }
     }
@@ -407,8 +407,8 @@ component BoardCard inherits Rectangle {
     callback drag-end(length, length); // window x, y
     property <bool> dragging: false;
     height: 72px;
-    background: bcta.has-hover ? #26262c : #202024;
-    border-radius: 8px;
+    background: bcta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+    border-radius: Theme.r-md;
     opacity: root.dragging ? 0.4 : 1.0;
     bcta := TouchArea {
         moved => {
@@ -434,14 +434,14 @@ component BoardCard inherits Rectangle {
         }
     }
     VerticalLayout {
-        padding: 8px;
+        padding: Theme.sp2;
         spacing: 4px;
         HorizontalLayout {
             spacing: 6px;
             Text {
                 text: root.t.title;
-                color: root.t.done ? #6a6a70 : white;
-                font-size: 13px;
+                color: root.t.done ? Theme.text-faint : Theme.text;
+                font-size: Theme.fs-body;
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
@@ -450,7 +450,7 @@ component BoardCard inherits Rectangle {
                 width: 16px;
                 height: 16px;
                 border-radius: 4px;
-                background: root.t.priority == 0 ? #e05a5a : (root.t.priority == 1 ? #e0a44a : #6a8cff);
+                background: root.t.priority == 0 ? Theme.prio-high : (root.t.priority == 1 ? Theme.prio-med : Theme.prio-low);
                 Text {
                     text: root.t.priority == 0 ? "H" : (root.t.priority == 1 ? "M" : "L");
                     color: #16161a;
@@ -462,10 +462,10 @@ component BoardCard inherits Rectangle {
             }
         }
         HorizontalLayout {
-            spacing: 8px;
+            spacing: Theme.sp2;
             alignment: start;
-            if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? #e06a6a : #9a9aa0; font-size: 10px; vertical-alignment: center; }
-            if root.t.project != "": Text { text: "#" + root.t.project; color: #9ab0ff; font-size: 10px; vertical-alignment: center; overflow: elide; }
+            if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+            if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.link; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
         }
         // Status targets: click one to move the card straight to that column.
         // Drawn as small circles (no font glyph dependency — some fonts lack ◐):
@@ -478,11 +478,11 @@ component BoardCard inherits Rectangle {
                 height: 13px;
                 border-radius: 7px;
                 border-width: 1.5px;
-                background: (i == 1 && root.t.doing) ? #e0a44a : (i == 2 && root.t.done) ? #7ad7a0 : transparent;
+                background: (i == 1 && root.t.doing) ? Theme.warn : (i == 2 && root.t.done) ? Theme.success : transparent;
                 border-color: (i == 0 && !root.t.done && !root.t.doing) ? Pal.accent
                     : (i == 1 && root.t.doing) ? transparent
                     : (i == 2 && root.t.done) ? transparent
-                    : (sst.has-hover ? #d0d0d4 : #55555f);
+                    : (sst.has-hover ? Theme.text : Theme.text-faint);
                 sst := TouchArea { clicked => { root.set-status(i); } }
             }
         }
@@ -1063,7 +1063,7 @@ export component LauncherWindow inherits Window {
 
             // ---- List view ----
             if root.view == "list": VerticalLayout {
-                spacing: 8px;
+                spacing: Theme.sp2;
 
                 // Row 1 — filter + sort the clipboard list.
                 HorizontalLayout {
@@ -1082,10 +1082,10 @@ export component LauncherWindow inherits Window {
                     for label[i] in ["Recent", "Most copied"]: Rectangle {
                         height: 26px;
                         width: i == 0 ? 62px : 92px;
-                        background: i == root.sort-index ? #3a3a40 : (sta.has-hover ? #2c2c33 : #202024);
-                        border-radius: 6px;
+                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
                         sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
-                        Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
 
@@ -1099,23 +1099,23 @@ export component LauncherWindow inherits Window {
                     Rectangle {
                         width: 84px;
                         height: 26px;
-                        background: root.screenshare ? #b04a4a : (lockta.has-hover ? #2c2c33 : #202024);
-                        border-radius: 6px;
+                        background: root.screenshare ? Theme.danger : (lockta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
                         lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
                         HorizontalLayout {
                             alignment: center;
                             spacing: 4px;
-                            Image { source: Icons.lock; colorize: white; width: 12px; height: 12px; image-fit: contain; }
-                            Text { text: root.screenshare ? "Masked" : "Mask"; color: white; font-size: 12px; vertical-alignment: center; }
+                            Image { source: Icons.lock; colorize: root.screenshare ? Theme.on-accent : Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                            Text { text: root.screenshare ? "Masked" : "Mask"; color: root.screenshare ? Theme.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
                         }
                     }
                     Rectangle {
                         width: 34px;
                         height: 26px;
-                        background: helpta.has-hover ? #2c2c33 : #202024;
-                        border-radius: 6px;
+                        background: helpta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
                         helpta := TouchArea { clicked => { root.mode = "help"; } }
-                        Text { text: "?"; color: white; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "?"; color: Theme.text; font-size: Theme.fs-body; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
 
@@ -1123,16 +1123,16 @@ export component LauncherWindow inherits Window {
                 // otherwise a wall of dots reads as broken data.
                 if root.screenshare: Rectangle {
                     height: 26px;
-                    background: #2e1f22;
-                    border-radius: 6px;
+                    background: Theme.danger.with-alpha(0.16);
+                    border-radius: Theme.r-sm;
                     HorizontalLayout {
                         padding-left: 10px;
                         padding-right: 10px;
                         spacing: 6px;
                         Text {
                             text: "Screenshare mode — content hidden. Click “Masked” to turn it off.";
-                            color: #e0a0a0;
-                            font-size: 11px;
+                            color: Theme.danger;
+                            font-size: Theme.fs-sm;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                             overflow: elide;
@@ -1146,13 +1146,13 @@ export component LauncherWindow inherits Window {
                     for t in root.all-tags: Rectangle {
                         height: 22px;
                         width: 64px;
-                        background: root.tag-filter == t ? Pal.accent : (tagta.has-hover ? #35353d : #2a2a30);
+                        background: root.tag-filter == t ? Pal.accent : (tagta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                         border-radius: 11px;
                         tagta := TouchArea { clicked => { root.set-tag-filter(t); } }
                         Text {
                             text: "#" + t;
-                            color: root.tag-filter == t ? Pal.on-accent : white;
-                            font-size: 11px;
+                            color: root.tag-filter == t ? Pal.on-accent : Theme.text;
+                            font-size: Theme.fs-sm;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             overflow: elide;
@@ -1169,8 +1169,8 @@ export component LauncherWindow inherits Window {
                         text: root.merge-count == 1
                             ? "1 item queued · join with"
                             : root.merge-count + " items queued · join with";
-                        color: white;
-                        font-size: 12px;
+                        color: Theme.text;
+                        font-size: Theme.fs-sm;
                         vertical-alignment: center;
                     }
                     // Segmented control (selected = the same grey as Recent/Most
@@ -1180,27 +1180,27 @@ export component LauncherWindow inherits Window {
                     for label[si] in ["New line", "Space", "Comma"]: Rectangle {
                         width: 72px;
                         height: 26px;
-                        background: si == root.merge-sep ? #3a3a40 : (msta.has-hover ? #2c2c33 : #202024);
-                        border-radius: 6px;
+                        background: si == root.merge-sep ? Theme.bg-elevated : (msta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
                         msta := TouchArea { clicked => { root.merge-sep = si; } }
-                        Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { width: 6px; }
                     Rectangle {
                         width: 110px;
                         height: 26px;
-                        background: mpta.has-hover ? #7f9dff : Pal.accent;
-                        border-radius: 6px;
+                        background: mpta.has-hover ? Theme.accent.brighter(0.25) : Theme.accent;
+                        border-radius: Theme.r-sm;
                         mpta := TouchArea { clicked => { root.merge-paste(); } }
-                        Text { text: "Merge & paste"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Merge & paste"; color: Pal.on-accent; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 54px;
                         height: 26px;
-                        background: mcta.has-hover ? #35353d : #2a2a30;
-                        border-radius: 6px;
+                        background: mcta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
                         mcta := TouchArea { clicked => { root.clear-merge(); } }
-                        Text { text: "Clear"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Clear"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
 
@@ -1208,19 +1208,19 @@ export component LauncherWindow inherits Window {
                 if root.slots.length > 0: HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
-                    Text { text: "Slots ⌘S"; color: #85858d; font-size: 11px; vertical-alignment: center; }
+                    Text { text: "Slots ⌘S"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
                     for s in root.slots: Rectangle {
                         height: 24px;
                         width: 120px;
-                        background: slotta.has-hover ? #2a2a30 : #202024;
-                        border-radius: 6px;
+                        background: slotta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
                         slotta := TouchArea { clicked => { root.paste-slot(s.n); } }
                         HorizontalLayout {
                             padding-left: 6px;
                             padding-right: 6px;
                             spacing: 4px;
-                            Text { text: "⌘" + s.n; color: #6a8cff; font-size: 11px; vertical-alignment: center; }
-                            Text { text: s.title; color: #d0d0d4; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            Text { text: "⌘" + s.n; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+                            Text { text: s.title; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                         }
                     }
                 }
@@ -1281,7 +1281,7 @@ export component LauncherWindow inherits Window {
                                     if i < 9: Text {
                                         y: 9px;
                                         text: i + 1;
-                                        color: root.cmd-held ? #6a8cff : #45454e;
+                                        color: root.cmd-held ? Theme.accent : Theme.border-strong;
                                         font-size: 12px;
                                         horizontal-alignment: center;
                                     }
@@ -1307,10 +1307,10 @@ export component LauncherWindow inherits Window {
                                         border-radius: 4px;
                                         background: row.swatch;
                                         border-width: 1px;
-                                        border-color: #55555f;
+                                        border-color: Theme.text-faint;
                                     }
                                     if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
-                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: #c2c2c8; }
+                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: Theme.text-dim; }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -1318,7 +1318,7 @@ export component LauncherWindow inherits Window {
                                     padding-bottom: 8px;
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        if row.pinned: Image { source: Icons.act-pin; colorize: #c2c2c8; width: 11px; height: 11px; image-fit: contain; }
+                                        if row.pinned: Image { source: Icons.act-pin; colorize: Theme.text-dim; width: 11px; height: 11px; image-fit: contain; }
                                         Text { text: row.title; color: Theme.text; font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
                                         if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     }
@@ -1328,16 +1328,16 @@ export component LauncherWindow inherits Window {
                                 if row.merged: Rectangle {
                                     width: 22px;
                                     height: 22px;
-                                    background: #6a8cff;
-                                    border-radius: 6px;
-                                    Text { text: "✓"; color: white; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                    background: Theme.accent;
+                                    border-radius: Theme.r-sm;
+                                    Text { text: "✓"; color: Theme.on-accent; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 if row.slot > 0: Rectangle {
                                     width: 24px;
                                     height: 22px;
-                                    border-radius: 6px;
-                                    background: #3a3a40;
-                                    Text { text: "⌘" + row.slot; color: #d0d0d4; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    border-radius: Theme.r-sm;
+                                    background: Theme.bg-elevated;
+                                    Text { text: "⌘" + row.slot; color: Theme.text; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                             }
@@ -1353,16 +1353,16 @@ export component LauncherWindow inherits Window {
                                 spacing: 4px;
                                 Text {
                                     text: (root.query != "" || root.filtered) ? "No matching items" : "No clipboard history yet";
-                                    color: #9a9aa0;
-                                    font-size: 14px;
+                                    color: Theme.text-dim;
+                                    font-size: Theme.fs-md;
                                     horizontal-alignment: center;
                                 }
                                 Text {
                                     text: (root.query != "" || root.filtered)
                                         ? "Nothing here matches your search and filters."
                                         : "Copy something and it will show up here.";
-                                    color: #6a6a70;
-                                    font-size: 12px;
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-sm;
                                     horizontal-alignment: center;
                                 }
                                 if root.query != "" || root.filtered: HorizontalLayout {
@@ -1371,8 +1371,8 @@ export component LauncherWindow inherits Window {
                                     Rectangle {
                                         height: 28px;
                                         width: 168px;
-                                        background: resetta.has-hover ? #35353d : #2a2a30;
-                                        border-radius: 6px;
+                                        background: resetta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                        border-radius: Theme.r-sm;
                                         resetta := TouchArea {
                                             clicked => {
                                                 root.query = "";
@@ -1380,7 +1380,7 @@ export component LauncherWindow inherits Window {
                                                 root.clear-filters();
                                             }
                                         }
-                                        Text { text: "Clear search & filters"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "Clear search & filters"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -1395,7 +1395,7 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             width: parent.width;
                             border-radius: 3px;
-                            background: sbta.pressed ? #6a6a72 : (sbta.has-hover ? #55555f : #3f3f47);
+                            background: sbta.pressed ? Theme.border-strong.brighter(0.3) : (sbta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
                             height: max(30px, sb.height * (list.visible-height / list.viewport-height));
                             y: -list.viewport-y / list.viewport-height * sb.height;
                         }
@@ -1438,18 +1438,18 @@ export component LauncherWindow inherits Window {
                                 if entries[root.selected].masked && !root.revealed: Rectangle {
                                     height: 26px;
                                     width: 88px;
-                                    background: revta.has-hover ? #35353d : #2a2a30;
-                                    border-radius: 6px;
+                                    background: revta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
                                     revta := TouchArea { clicked => { root.revealed = true; } }
-                                    Text { text: "Reveal"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "Reveal"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 Rectangle {
                                     height: 26px;
                                     width: 116px;
-                                    background: oeta.has-hover ? #35353d : #2a2a30;
-                                    border-radius: 6px;
+                                    background: oeta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
                                     oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
-                                    Text { text: "↗ Open in editor"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "↗ Open in editor"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
 
@@ -1477,7 +1477,7 @@ export component LauncherWindow inherits Window {
                                         border-radius: 8px;
                                         background: entries[root.selected].swatch;
                                         border-width: 1px;
-                                        border-color: #55555f;
+                                        border-color: Theme.text-faint;
                                     }
                                 }
                                 // Normal-size entries: a selectable, scrollable,
@@ -1527,7 +1527,7 @@ export component LauncherWindow inherits Window {
                                         Rectangle {
                                             width: parent.width;
                                             border-radius: 3px;
-                                            background: pvta.pressed ? #6a6a72 : (pvta.has-hover ? #55555f : #3f3f47);
+                                            background: pvta.pressed ? Theme.border-strong.brighter(0.3) : (pvta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
                                             height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
                                             y: -plist.viewport-y / plist.viewport-height * pv.height;
                                         }
@@ -1546,8 +1546,8 @@ export component LauncherWindow inherits Window {
 
                             if root.preview-truncated: Text {
                                 text: "Preview truncated — open in editor to see all";
-                                color: #6a6a70;
-                                font-size: 11px;
+                                color: Theme.text-faint;
+                                font-size: Theme.fs-sm;
                                 wrap: word-wrap;
                             }
 
@@ -1624,13 +1624,13 @@ export component LauncherWindow inherits Window {
                                 for t in root.selected-tags: Rectangle {
                                     height: 22px;
                                     width: 74px;
-                                    background: chipta.has-hover ? #4a4a52 : #3a3a40;
+                                    background: chipta.has-hover ? Theme.border-strong : Theme.bg-elevated;
                                     border-radius: 11px;
                                     chipta := TouchArea { clicked => { root.remove-tag(root.selected, t); } }
                                     Text {
                                         text: "#" + t + " ✕";
-                                        color: #d0d0d4;
-                                        font-size: 11px;
+                                        color: Theme.text;
+                                        font-size: Theme.fs-sm;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1652,10 +1652,10 @@ export component LauncherWindow inherits Window {
                                 Rectangle {
                                     width: 48px;
                                     height: 26px;
-                                    background: addta.has-hover ? #35353d : #2a2a30;
-                                    border-radius: 6px;
+                                    background: addta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
                                     addta := TouchArea { clicked => { root.add-tag(root.selected, root.add-tag-text); } }
-                                    Text { text: "Add"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "Add"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -1665,8 +1665,8 @@ export component LauncherWindow inherits Window {
                 // Bottom action bar.
                 Rectangle {
                     height: 34px;
-                    background: #161618;
-                    border-radius: 8px;
+                    background: Theme.bg-sidebar;
+                    border-radius: Theme.r-md;
                     HorizontalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
@@ -1674,8 +1674,8 @@ export component LauncherWindow inherits Window {
                         // "From <app>" — a bare app name here read as a stray word.
                         Text {
                             text: (entries.length > 0 && root.selected < entries.length) ? "From " + entries[root.selected].source : "";
-                            color: #9a9aa0;
-                            font-size: 12px;
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-sm;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
@@ -1688,12 +1688,12 @@ export component LauncherWindow inherits Window {
                         }
                         if entries.length > 0: Text {
                             text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
-                            color: #9a9aa0;
-                            font-size: 12px;
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-sm;
                             vertical-alignment: center;
                         }
-                        if entries.length > 0: Text { text: "⌘C Copy   ⌘K Actions"; color: #9a9aa0; font-size: 12px; vertical-alignment: center; }
-                        if entries.length == 0: Text { text: "⌘/ Shortcuts"; color: #6a6a70; font-size: 12px; vertical-alignment: center; }
+                        if entries.length > 0: Text { text: "⌘C Copy   ⌘K Actions"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        if entries.length == 0: Text { text: "⌘/ Shortcuts"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
                     }
                 }
             }
@@ -1709,8 +1709,8 @@ export component LauncherWindow inherits Window {
                     for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
                         width: 56px;
                         height: 26px;
-                        background: i == root.range-index ? #3a3a40 : #202024;
-                        border-radius: 6px;
+                        background: i == root.range-index ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
                         TouchArea {
                             clicked => {
                                 root.range-index = i;
@@ -1719,8 +1719,8 @@ export component LauncherWindow inherits Window {
                         }
                         Text {
                             text: label;
-                            color: white;
-                            font-size: 12px;
+                            color: Theme.text;
+                            font-size: Theme.fs-sm;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -1730,10 +1730,10 @@ export component LauncherWindow inherits Window {
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
-                        spacing: 8px;
-                        Text { text: root.totals-line; color: white; font-size: 13px; }
+                        spacing: Theme.sp2;
+                        Text { text: root.totals-line; color: Theme.text; font-size: Theme.fs-body; }
 
-                        Text { text: "Copies over time"; color: #9a9aa0; font-size: 11px; }
+                        Text { text: "Copies over time"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         if root.over-time-bars.length >= 2: Rectangle {
                             height: 64px;
                             HorizontalLayout {
@@ -1742,12 +1742,12 @@ export component LauncherWindow inherits Window {
                                 for bar in root.over-time-bars: Rectangle {
                                     width: 10px;
                                     // baseline track so empty days read as a bar, not a gap
-                                    Rectangle { width: parent.width; background: #2a2a30; border-radius: 2px; }
+                                    Rectangle { width: parent.width; background: Theme.bg-panel; border-radius: 2px; }
                                     Rectangle {
                                         width: parent.width;
                                         y: parent.height * (1.0 - bar.value_norm);
                                         height: parent.height * bar.value_norm;
-                                        background: #6a8cff;
+                                        background: Theme.accent;
                                         border-radius: 2px;
                                     }
                                 }
@@ -1756,78 +1756,78 @@ export component LauncherWindow inherits Window {
                         // Span + peak, so the bars aren't anonymous.
                         if root.over-time-bars.length >= 2 && root.over-time-caption != "": Text {
                             text: root.over-time-caption;
-                            color: #6a6a70;
-                            font-size: 11px;
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-sm;
                         }
                         if root.over-time-bars.length < 2: Text {
                             text: "Not enough data yet.";
-                            color: #6a6a70;
-                            font-size: 11px;
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-sm;
                         }
 
-                        Text { text: "Most copied"; color: #9a9aa0; font-size: 11px; }
+                        Text { text: "Most copied"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.most-copied-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
 
-                        Text { text: "By app"; color: #9a9aa0; font-size: 11px; }
+                        Text { text: "By app"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.per-app-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
 
-                        Text { text: "By type"; color: #9a9aa0; font-size: 11px; }
+                        Text { text: "By type"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.by-type-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
 
-                        Text { text: "Time tracked · last 7 days: " + root.time-week-total; color: #8a8a92; font-size: 12px; }
+                        Text { text: "Time tracked · last 7 days: " + root.time-week-total; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.time-by-day-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
-                        if root.time-by-project-bars.length > 0: Text { text: "By project (30 days)"; color: #8a8a92; font-size: 12px; }
+                        if root.time-by-project-bars.length > 0: Text { text: "By project (30 days)"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.time-by-project-bars: HBar {
                             label: bar.label;
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
 
-                        if root.time-entries.length > 0: Text { text: "Recent sessions"; color: #8a8a92; font-size: 12px; }
+                        if root.time-entries.length > 0: Text { text: "Recent sessions"; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for e in root.time-entries: Rectangle {
                             height: 30px;
-                            background: terow.has-hover ? #26262c : transparent;
-                            border-radius: 6px;
+                            background: terow.has-hover ? Theme.bg-elevated : transparent;
+                            border-radius: Theme.r-sm;
                             terow := TouchArea {}
                             HorizontalLayout {
                                 padding-left: 6px; padding-right: 6px; spacing: 8px;
                                 Text {
                                     text: e.title;
-                                    color: #d0d0d4;
-                                    font-size: 12px;
+                                    color: Theme.text;
+                                    font-size: Theme.fs-sm;
                                     overflow: elide;
                                     horizontal-stretch: 1;
                                     vertical-alignment: center;
                                 }
-                                Text { text: e.when; color: #6a6a70; font-size: 11px; vertical-alignment: center; }
+                                Text { text: e.when; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 if e.running: Rectangle {
                                     height: 18px;
                                     width: 52px;
                                     border-radius: 9px;
-                                    background: #3a3a44;
-                                    Text { text: "running"; color: #9aa8ff; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    background: Theme.link.with-alpha(0.25);
+                                    Text { text: "running"; color: Theme.link; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
-                                if !e.running: Text { text: e.duration; color: #9a9aa0; font-size: 11px; vertical-alignment: center; }
+                                if !e.running: Text { text: e.duration; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 Rectangle {
                                     width: 22px;
                                     tedel := TouchArea { clicked => { root.delete-time-entry(e.id); } }
-                                    Text { text: "×"; color: tedel.has-hover ? #ff9a9a : #55555f; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "×"; color: tedel.has-hover ? Theme.danger : Theme.text-faint; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -1839,7 +1839,7 @@ export component LauncherWindow inherits Window {
 
         // ---- Notes mode (opaque overlay covering the clipboard body) ----
         if root.notes-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             // Keyboard nav: the list is focused on entry; ↑/↓ switch notes (opening
             // each), ⏎ dives into the editor, Esc exits. Empty FocusScope → no layout
             // impact; mouse still works on the panes below.
@@ -1908,13 +1908,13 @@ export component LauncherWindow inherits Window {
                             for nv in ["notes", "journal", "graph"]: Rectangle {
                                 height: 30px;
                                 width: 62px;
-                                border-radius: 6px;
-                                background: root.notes-view == nv ? Pal.accent : (nvsw1.has-hover ? #34343c : #2a2a30);
+                                border-radius: Theme.r-sm;
+                                background: root.notes-view == nv ? Pal.accent : (nvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                                 nvsw1 := TouchArea { clicked => { root.set-note-view(nv); } }
                                 Text {
                                     text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
-                                    color: root.notes-view == nv ? Pal.on-accent : #d0d0d4;
-                                    font-size: 12px;
+                                    color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                    font-size: Theme.fs-sm;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
@@ -1927,21 +1927,21 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             horizontal-stretch: 1;
                             height: 30px;
-                            background: #2a2a30;
-                            border-radius: 6px;
+                            background: Theme.bg-panel;
+                            border-radius: Theme.r-sm;
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 if root.note-filter == "": Text {
                                     text: "Filter notes…";
-                                    color: #6a6a70;
-                                    font-size: 13px;
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-body;
                                     vertical-alignment: center;
                                 }
                                 nfilter := TextInput {
                                     text <=> root.note-filter;
-                                    color: #d0d0d4;
-                                    font-size: 13px;
+                                    color: Theme.text;
+                                    font-size: Theme.fs-body;
                                     single-line: true;
                                     vertical-alignment: center;
                                 }
@@ -1950,10 +1950,10 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             width: 60px;
                             height: 30px;
-                            border-radius: 6px;
-                            background: nnew.has-hover ? #34343c : #2a2a30;
+                            border-radius: Theme.r-sm;
+                            background: nnew.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                             nnew := TouchArea { clicked => { root.new-note(); } }
-                            Text { text: "New"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "New"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
                     // Tag-filter chip strip: "All" + one chip per distinct #tag across
@@ -1978,23 +1978,23 @@ export component LauncherWindow inherits Window {
                                 Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? #34343c : #2a2a30);
+                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                                     ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                                 for tag in root.note-all-tags: Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? #34343c : #2a2a30);
+                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                                     ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -2003,8 +2003,8 @@ export component LauncherWindow inherits Window {
                     ListView {
                         for n in root.notes: Rectangle {
                             height: 44px;
-                            background: n.id == root.note-id ? #2f2f37 : (nrow.has-hover ? #26262c : transparent);
-                            border-radius: 6px;
+                            background: n.id == root.note-id ? Theme.bg-elevated : (nrow.has-hover ? Theme.bg-elevated : transparent);
+                            border-radius: Theme.r-sm;
                             nrow := TouchArea { clicked => { root.open-note(n.id); } }
                             VerticalLayout {
                                 padding-left: 8px;
@@ -2013,38 +2013,38 @@ export component LauncherWindow inherits Window {
                                 padding-bottom: 4px;
                                 HorizontalLayout {
                                     spacing: 4px;
-                                    if n.is_daily: Image { source: Icons.act-pin; colorize: #e6e6ea; width: 11px; height: 11px; image-fit: contain; }
-                                    Text { text: n.title; color: #e6e6ea; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+                                    if n.is_daily: Image { source: Icons.act-pin; colorize: Theme.text; width: 11px; height: 11px; image-fit: contain; }
+                                    Text { text: n.title; color: Theme.text; font-size: Theme.fs-body; overflow: elide; horizontal-stretch: 1; }
                                 }
-                                Text { text: n.when; color: #8a8a90; font-size: 11px; overflow: elide; }
-                                if n.tags != "": Text { text: n.tags; color: #6a6a70; font-size: 10px; overflow: elide; }
+                                Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
+                                if n.tags != "": Text { text: n.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
                             }
                         }
                     }
                 }
                 // Right: editor pane (editor body filled in Task 5)
                 Rectangle {
-                    background: #161618;
-                    border-radius: 8px;
+                    background: Theme.bg-sidebar;
+                    border-radius: Theme.r-md;
                     VerticalLayout {
                         padding: 12px;
-                        spacing: 8px;
+                        spacing: Theme.sp2;
                         HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: root.note-provenance; color: #8a8a90; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                            spacing: Theme.sp2;
+                            Text { text: root.note-provenance; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
                             // Promote the line the cursor is on to a `- [ ]` task
                             // (same as ⌘⏎ in the editor).
                             Rectangle {
                                 width: 100px;
                                 height: 26px;
-                                border-radius: 6px;
-                                background: mktask.has-hover ? #34343c : #2a2a30;
+                                border-radius: Theme.r-sm;
+                                background: mktask.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                 mktask := TouchArea { clicked => { root.promote-line(ned.cursor-position-byte-offset); } }
                                 HorizontalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Image { source: Icons.tab-tasks; colorize: #d0d0d4; width: 12px; height: 12px; image-fit: contain; }
-                                    Text { text: "Make task"; color: #d0d0d4; font-size: 12px; vertical-alignment: center; }
+                                    Image { source: Icons.tab-tasks; colorize: Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                                    Text { text: "Make task"; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -2057,8 +2057,8 @@ export component LauncherWindow inherits Window {
                             ned := TextInput {
                                 width: parent.width;
                                 text: root.note-body;
-                                color: #d0d0d4;
-                                font-size: 13px;
+                                color: Theme.text;
+                                font-size: Theme.fs-body;
                                 single-line: false;
                                 wrap: word-wrap;
                                 edited => {
@@ -2132,48 +2132,48 @@ export component LauncherWindow inherits Window {
                         // editor while an open `[[…` query has matches.
                         if root.note-suggestions.length > 0: Rectangle {
                             max-height: 160px;
-                            background: #26262c;
-                            border-color: #3a3a40;
+                            background: Theme.bg-elevated;
+                            border-color: Theme.border-strong;
                             border-width: 1px;
-                            border-radius: 6px;
+                            border-radius: Theme.r-sm;
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 2px;
                                 for name in root.note-suggestions: Rectangle {
                                     height: 24px;
                                     border-radius: 4px;
-                                    background: srow.has-hover ? #34343c : transparent;
+                                    background: srow.has-hover ? Theme.border-strong : transparent;
                                     srow := TouchArea { clicked => { root.accept-note-suggestion(name); } }
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         padding-right: 8px;
-                                        Text { text: name; color: #d0d0d4; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                                        Text { text: name; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
                                     }
                                 }
-                                Text { text: "Tab to insert"; color: #6a6a70; font-size: 10px; }
+                                Text { text: "Tab to insert"; color: Theme.text-faint; font-size: 10px; }
                             }
                         }
                         // Links strip: clickable [[page]] chips parsed from the body.
                         if root.note-links.length > 0: HorizontalLayout {
                             spacing: 6px;
                             alignment: start;
-                            Text { text: "Links:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "Links:"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                             for name in root.note-links: Rectangle {
                                 height: 24px;
                                 border-radius: 12px;
-                                background: chip.has-hover ? #34343c : #2a2a30;
+                                background: chip.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                 HorizontalLayout {
                                     padding-left: 10px;
                                     padding-right: 10px;
-                                    Text { text: name; color: #9ab0ff; font-size: 12px; vertical-alignment: center; }
+                                    Text { text: name; color: Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 }
                                 chip := TouchArea { clicked => { root.open-page(name); } }
                             }
                         }
                         if root.backlinks.length > 0 || root.unlinked.length > 0: Rectangle {
                             height: 176px;
-                            background: #121214;
-                            border-radius: 8px;
+                            background: Theme.bg-app;
+                            border-radius: Theme.r-md;
                             Flickable {
                                 viewport-width: self.width;
                                 VerticalLayout {
@@ -2182,14 +2182,14 @@ export component LauncherWindow inherits Window {
                                     spacing: 4px;
                                     if root.backlinks.length > 0: Text {
                                         text: "Linked references (" + root.backlinks.length + ")";
-                                        color: #8a8a90;
-                                        font-size: 11px;
+                                        color: Theme.text-dim;
+                                        font-size: Theme.fs-sm;
                                         font-weight: 700;
                                     }
                                     for r in root.backlinks: Rectangle {
                                         height: 38px;
-                                        background: lrow.has-hover ? #26262c : transparent;
-                                        border-radius: 6px;
+                                        background: lrow.has-hover ? Theme.bg-elevated : transparent;
+                                        border-radius: Theme.r-sm;
                                         lrow := TouchArea { clicked => { root.open-page(r.source); } }
                                         HorizontalLayout {
                                             padding-left: 8px;
@@ -2199,21 +2199,21 @@ export component LauncherWindow inherits Window {
                                                 horizontal-stretch: 1;
                                                 padding-top: 4px;
                                                 padding-bottom: 4px;
-                                                Text { text: r.source; color: #7a7a80; font-size: 10px; }
-                                                Text { text: r.line; color: #d0d0d4; font-size: 12px; overflow: elide; }
+                                                Text { text: r.source; color: Theme.text-faint; font-size: 10px; }
+                                                Text { text: r.line; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
                                             }
                                         }
                                     }
                                     if root.unlinked.length > 0: Text {
                                         text: "Unlinked references (" + root.unlinked.length + ")";
-                                        color: #8a8a90;
-                                        font-size: 11px;
+                                        color: Theme.text-dim;
+                                        font-size: Theme.fs-sm;
                                         font-weight: 700;
                                     }
                                     for r in root.unlinked: Rectangle {
                                         height: 38px;
-                                        background: urow.has-hover ? #26262c : transparent;
-                                        border-radius: 6px;
+                                        background: urow.has-hover ? Theme.bg-elevated : transparent;
+                                        border-radius: Theme.r-sm;
                                         urow := TouchArea { clicked => { root.open-page(r.source); } }
                                         HorizontalLayout {
                                             padding-left: 8px;
@@ -2223,17 +2223,17 @@ export component LauncherWindow inherits Window {
                                                 horizontal-stretch: 1;
                                                 padding-top: 4px;
                                                 padding-bottom: 4px;
-                                                Text { text: r.source; color: #7a7a80; font-size: 10px; }
-                                                Text { text: r.line; color: #d0d0d4; font-size: 12px; overflow: elide; }
+                                                Text { text: r.source; color: Theme.text-faint; font-size: 10px; }
+                                                Text { text: r.line; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
                                             }
                                             Rectangle {
                                                 width: 48px;
                                                 height: 24px;
                                                 y: 7px;
-                                                border-radius: 6px;
-                                                background: lk.has-hover ? #34343c : #2a2a30;
+                                                border-radius: Theme.r-sm;
+                                                background: lk.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                                 lk := TouchArea { clicked => { root.link-mention(r.note_id, r.line_index); } }
-                                                Text { text: "Link"; color: #9ab0ff; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                                Text { text: "Link"; color: Theme.link; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                             }
                                         }
                                     }
@@ -2247,7 +2247,7 @@ export component LauncherWindow inherits Window {
 
         // ---- Tasks mode (opaque overlay: flat, grouped/sorted task list) ----
         if root.tasks-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             // Keyboard nav: ↑/↓ select, Space toggles, ⏎ opens the note, Esc exits.
             // An empty FocusScope holds focus without affecting layout or mouse.
             tfs := FocusScope {
@@ -2342,11 +2342,11 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             width: 56px;
                             border-radius: 6px;
-                            background: root.tasks-view == tv ? Pal.accent : (tvsw2.has-hover ? #34343c : #2a2a30);
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw2.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             tvsw2 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
                                 text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
-                                color: root.tasks-view == tv ? Pal.on-accent : #d0d0d4;
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -2357,16 +2357,16 @@ export component LauncherWindow inherits Window {
                     if root.active-title != "": Rectangle {
                         height: 30px;
                         border-radius: 6px;
-                        background: #24352b;
+                        background: Theme.success.with-alpha(0.18);
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 6px;
-                            Text { text: "▶"; color: #7ad7a0; font-size: 12px; vertical-alignment: center; }
-                            Text { text: root.active-title; color: #d7e6dd; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
                             Text {
                                 text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
-                                color: #7ad7a0;
+                                color: Theme.success;
                                 font-size: 12px;
                                 font-weight: 700;
                                 vertical-alignment: center;
@@ -2378,14 +2378,14 @@ export component LauncherWindow inherits Window {
                         width: 100px;
                         height: 30px;
                         border-radius: 6px;
-                        background: root.show-done ? Pal.accent : (tdone.has-hover ? #34343c : #2a2a30);
+                        background: root.show-done ? Pal.accent : (tdone.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                         tdone := TouchArea {
                             clicked => {
                                 root.show-done = !root.show-done;
                                 root.refresh-tasks();
                             }
                         }
-                        Text { text: "Show done"; color: root.show-done ? Pal.on-accent : #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Show done"; color: root.show-done ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 // Tick the running-timer display once a second while active.
@@ -2408,9 +2408,9 @@ export component LauncherWindow inherits Window {
                         height: 26px;
                         width: f.id == "star" ? 34px : (f.id == "recurring" ? 96px : 60px);
                         border-radius: 6px;
-                        background: root.task-filter == f.id ? Pal.accent : (chf.has-hover ? #34343c : #2a2a30);
+                        background: root.task-filter == f.id ? Pal.accent : (chf.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                         chf := TouchArea { clicked => { root.task-filter = f.id; root.refresh-tasks(); } }
-                        Text { text: f.label; color: root.task-filter == f.id ? Pal.on-accent : #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: f.label; color: root.task-filter == f.id ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 // The list. `group_sort` already clusters by project + orders within,
@@ -2422,7 +2422,7 @@ export component LauncherWindow inherits Window {
                         // grouping is legible.
                         if i == 0 || root.tasks[i - 1].project != t.project: Text {
                             text: t.project == "" ? "No project" : "#" + t.project;
-                            color: #8a8a90;
+                            color: Theme.text-dim;
                             font-size: 11px;
                             font-weight: 700;
                             height: 26px;
@@ -2430,7 +2430,7 @@ export component LauncherWindow inherits Window {
                         }
                         Rectangle {
                         height: 48px;
-                        background: i == root.task-selected ? #262b3d : (trow.has-hover ? #26262c : transparent);
+                        background: i == root.task-selected ? Theme.bg-elevated : (trow.has-hover ? Theme.bg-elevated : transparent);
                         border-radius: 6px;
                         // Accent bar marks the keyboard-selected row.
                         if i == root.task-selected: Rectangle {
@@ -2458,8 +2458,8 @@ export component LauncherWindow inherits Window {
                                     height: 22px;
                                     border-radius: 5px;
                                     border-width: 1px;
-                                    border-color: t.doing && !t.done ? #e0a44a : #55555f;
-                                    background: t.done ? Pal.accent : (t.doing ? #e0a44a33 : transparent);
+                                    border-color: t.doing && !t.done ? Theme.warn : Theme.text-faint;
+                                    background: t.done ? Pal.accent : (t.doing ? Theme.warn.with-alpha(0.2) : transparent);
                                     if t.done: Text {
                                         text: "✓";
                                         color: Pal.on-accent;
@@ -2471,7 +2471,7 @@ export component LauncherWindow inherits Window {
                                     }
                                     if !t.done && t.doing: Text {
                                         text: "◐";
-                                        color: #e0a44a;
+                                        color: Theme.warn;
                                         font-size: 13px;
                                         width: 22px;
                                         height: 22px;
@@ -2491,8 +2491,8 @@ export component LauncherWindow inherits Window {
                                     width: 18px;
                                     height: 18px;
                                     border-radius: 5px;
-                                    background: t.priority == 0 ? #e05a5a
-                                        : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                    background: t.priority == 0 ? Theme.prio-high
+                                        : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
                                     Text {
                                         text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
                                         color: #16161a;
@@ -2510,19 +2510,19 @@ export component LauncherWindow inherits Window {
                                 Text {
                                     text: t.title;
                                     // Done tasks are dimmed (Slint Text has no strike).
-                                    color: t.done ? #6a6a70 : white;
+                                    color: t.done ? Theme.text-faint : Theme.text;
                                     font-size: 14px;
                                     overflow: elide;
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
                                     alignment: start;
-                                    if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
-                                    if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; }
-                                    if t.recur != "": Text { text: t.recur; color: #7ad7a0; font-size: 11px; vertical-alignment: center; }
-                                    if t.time_total != "": Text { text: "⏱ " + t.time_total; color: #9a9aa0; font-size: 11px; vertical-alignment: center; }
+                                    if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                    if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; }
+                                    if t.recur != "": Text { text: t.recur; color: Theme.success; font-size: 11px; vertical-alignment: center; }
+                                    if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                                     // (bookmark shown by the trailing ★ toggle, not a badge)
-                                    if t.source != "": Text { text: t.source; color: #62626a; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                    if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                             Rectangle {
@@ -2530,7 +2530,7 @@ export component LauncherWindow inherits Window {
                                 bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
                                 Text {
                                     text: t.bookmarked ? "★" : "☆";
-                                    color: t.bookmarked ? #e0c04a : (bmk.has-hover ? #d0d0d4 : #55555f);
+                                    color: t.bookmarked ? Theme.warn : (bmk.has-hover ? Theme.text : Theme.text-faint);
                                     font-size: 16px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -2541,7 +2541,7 @@ export component LauncherWindow inherits Window {
                                 tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
                                 Text {
                                     text: t.tracking ? "⏹" : "▶";
-                                    color: t.tracking ? #7ad7a0 : (tmr.has-hover ? #d0d0d4 : #55555f);
+                                    color: t.tracking ? Theme.success : (tmr.has-hover ? Theme.text : Theme.text-faint);
                                     font-size: 14px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -2556,7 +2556,7 @@ export component LauncherWindow inherits Window {
                     alignment: center;
                     Text {
                         text: root.show-done ? "No tasks yet." : "No open tasks. Add “- [ ] …” to a note.";
-                        color: #6a6a70;
+                        color: Theme.text-faint;
                         font-size: 13px;
                         vertical-alignment: center;
                     }
@@ -2566,7 +2566,7 @@ export component LauncherWindow inherits Window {
 
         // ---- Board mode (opaque overlay: cross-project task board) ----
         if root.board-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             bfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
@@ -2615,11 +2615,11 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             width: 56px;
                             border-radius: 6px;
-                            background: root.tasks-view == tv ? Pal.accent : (tvsw3.has-hover ? #34343c : #2a2a30);
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw3.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             tvsw3 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
                                 text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
-                                color: root.tasks-view == tv ? Pal.on-accent : #d0d0d4;
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -2634,47 +2634,47 @@ export component LauncherWindow inherits Window {
                     alignment: start;
                     HorizontalLayout {
                         spacing: 4px;
-                        Text { text: "Group:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                        Text { text: "Group:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                         for g[i] in ["Status", "Priority", "Project"]: Rectangle {
                             height: 24px;
                             width: 66px;
                             border-radius: 6px;
-                            background: root.board-group == i ? Pal.accent : (bgta.has-hover ? #34343c : #2a2a30);
+                            background: root.board-group == i ? Pal.accent : (bgta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             bgta := TouchArea { clicked => { root.board-group = i; root.board-controls-changed(); } }
-                            Text { text: g; color: root.board-group == i ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: g; color: root.board-group == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
                     HorizontalLayout {
                         spacing: 4px;
-                        Text { text: "Layout:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                        Text { text: "Layout:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                         for lo[i] in ["Kanban", "List", "Grid", "Table"]: Rectangle {
                             height: 24px;
                             width: 58px;
                             border-radius: 6px;
-                            background: root.board-layout == i ? Pal.accent : (blta.has-hover ? #34343c : #2a2a30);
+                            background: root.board-layout == i ? Pal.accent : (blta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             blta := TouchArea { clicked => { root.board-layout = i; root.board-controls-changed(); } }
-                            Text { text: lo; color: root.board-layout == i ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: lo; color: root.board-layout == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
                     HorizontalLayout {
                         spacing: 4px;
-                        Text { text: "Sort:"; color: #8a8a90; font-size: 11px; vertical-alignment: center; }
+                        Text { text: "Sort:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                         for so[i] in ["Due", "Priority", "Title", "Status"]: Rectangle {
                             height: 24px;
                             width: 66px;
                             border-radius: 6px;
-                            background: root.board-sort == i ? Pal.accent : (bsta.has-hover ? #34343c : #2a2a30);
+                            background: root.board-sort == i ? Pal.accent : (bsta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             bsta := TouchArea { clicked => { root.board-sort = i; root.board-controls-changed(); } }
-                            Text { text: so; color: root.board-sort == i ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: so; color: root.board-sort == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
                     Rectangle {
                         height: 24px;
                         width: 84px;
                         border-radius: 6px;
-                        background: root.board-hide-done ? Pal.accent : (bhdta.has-hover ? #34343c : #2a2a30);
+                        background: root.board-hide-done ? Pal.accent : (bhdta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                         bhdta := TouchArea { clicked => { root.board-hide-done = !root.board-hide-done; root.board-controls-changed(); } }
-                        Text { text: "Hide done"; color: root.board-hide-done ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Hide done"; color: root.board-hide-done ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 // Controls row 2: project filter chips + title search.
@@ -2700,17 +2700,17 @@ export component LauncherWindow inherits Window {
                                     height: 24px;
                                     width: 40px;
                                     border-radius: 6px;
-                                    background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? #34343c : #2a2a30);
+                                    background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                                     bpallta := TouchArea { clicked => { root.board-project-filter = ""; root.board-controls-changed(); } }
-                                    Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 for p in root.board-projects: Rectangle {
                                     height: 24px;
                                     width: 76px;
                                     border-radius: 6px;
-                                    background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? #34343c : #2a2a30);
+                                    background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                                     bpta := TouchArea { clicked => { root.board-project-filter = p; root.board-controls-changed(); } }
-                                    Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : #d0d0d4; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                    Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -2718,15 +2718,15 @@ export component LauncherWindow inherits Window {
                     Rectangle {
                         horizontal-stretch: 1;
                         height: 26px;
-                        background: #2a2a30;
+                        background: Theme.bg-panel;
                         border-radius: 6px;
                         HorizontalLayout {
                             padding-left: 8px;
                             padding-right: 8px;
-                            if root.board-query == "": Text { text: "Search title…"; color: #6a6a70; font-size: 12px; vertical-alignment: center; }
+                            if root.board-query == "": Text { text: "Search title…"; color: Theme.text-faint; font-size: 12px; vertical-alignment: center; }
                             bqta := TextInput {
                                 text <=> root.board-query;
-                                color: #d0d0d4;
+                                color: Theme.text;
                                 font-size: 12px;
                                 single-line: true;
                                 vertical-alignment: center;
@@ -2748,15 +2748,15 @@ export component LauncherWindow inherits Window {
                             width: 260px;
                             background: (root.board-drag-active && root.board-group == 0
                                 && root.board-drag-x >= self.absolute-position.x
-                                && root.board-drag-x < self.absolute-position.x + self.width) ? #26263a : #202024;
+                                && root.board-drag-x < self.absolute-position.x + self.width) ? Theme.bg-elevated : Theme.bg-panel;
                             border-radius: 8px;
                             VerticalLayout {
                                 padding: 8px;
                                 spacing: 8px;
                                 HorizontalLayout {
                                     spacing: 6px;
-                                    Text { text: col.title; color: white; font-size: 13px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                                    Text { text: col.count; color: #8a8a90; font-size: 12px; vertical-alignment: center; }
+                                    Text { text: col.title; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                    Text { text: col.count; color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
                                 }
                                 ListView {
                                     for t in col.tasks: BoardCard {
@@ -2802,12 +2802,12 @@ export component LauncherWindow inherits Window {
                             spacing: 6px;
                             height: 24px;
                             alignment: start;
-                            Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
-                            Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
+                            Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                            Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
                         }
                         for t in col.tasks: Rectangle {
                             height: 40px;
-                            background: lrta.has-hover ? #26262c : transparent;
+                            background: lrta.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             lrta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
                             HorizontalLayout {
@@ -2823,17 +2823,17 @@ export component LauncherWindow inherits Window {
                                         height: 11px;
                                         border-radius: 6px;
                                         border-width: 1.5px;
-                                        background: (i == 1 && t.doing) ? #e0a44a : (i == 2 && t.done) ? #7ad7a0 : transparent;
+                                        background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
                                         border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
                                             : (i == 1 && t.doing) ? transparent
                                             : (i == 2 && t.done) ? transparent
-                                            : (lsta.has-hover ? #d0d0d4 : #55555f);
+                                            : (lsta.has-hover ? Theme.text : Theme.text-faint);
                                         lsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
                                     }
                                 }
                                 Text {
                                     text: t.title;
-                                    color: t.done ? #6a6a70 : white;
+                                    color: t.done ? Theme.text-faint : Theme.text;
                                     font-size: 13px;
                                     overflow: elide;
                                     horizontal-stretch: 1;
@@ -2843,7 +2843,7 @@ export component LauncherWindow inherits Window {
                                     width: 16px;
                                     height: 16px;
                                     border-radius: 4px;
-                                    background: t.priority == 0 ? #e05a5a : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                    background: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
                                     Text {
                                         text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
                                         color: #16161a;
@@ -2853,8 +2853,8 @@ export component LauncherWindow inherits Window {
                                         vertical-alignment: center;
                                     }
                                 }
-                                if t.due != "": Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; vertical-alignment: center; }
-                                if t.project != "": Text { text: "#" + t.project; color: #9ab0ff; font-size: 11px; vertical-alignment: center; overflow: elide; width: 90px; }
+                                if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; overflow: elide; width: 90px; }
                             }
                         }
                     }
@@ -2875,8 +2875,8 @@ export component LauncherWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 6px;
                                 height: 24px;
-                                Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
-                                Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
+                                Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
                             }
                             gridtiles := Rectangle {
                                 width: 100%;
@@ -2912,25 +2912,25 @@ export component LauncherWindow inherits Window {
                                 padding-left: 4px;
                                 padding-right: 4px;
                                 spacing: 8px;
-                                Text { text: "Title"; color: #8a8a90; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
-                                Text { text: "Status"; color: #8a8a90; font-size: 11px; width: 64px; vertical-alignment: center; }
-                                Text { text: "Prio"; color: #8a8a90; font-size: 11px; width: 28px; vertical-alignment: center; }
-                                Text { text: "Due"; color: #8a8a90; font-size: 11px; width: 90px; vertical-alignment: center; }
-                                Text { text: "#Project"; color: #8a8a90; font-size: 11px; width: 120px; vertical-alignment: center; }
+                                Text { text: "Title"; color: Theme.text-dim; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+                                Text { text: "Status"; color: Theme.text-dim; font-size: 11px; width: 64px; vertical-alignment: center; }
+                                Text { text: "Prio"; color: Theme.text-dim; font-size: 11px; width: 28px; vertical-alignment: center; }
+                                Text { text: "Due"; color: Theme.text-dim; font-size: 11px; width: 90px; vertical-alignment: center; }
+                                Text { text: "#Project"; color: Theme.text-dim; font-size: 11px; width: 120px; vertical-alignment: center; }
                             }
-                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: #33333c; }
+                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: Theme.border; }
                         }
                         for col in root.board: VerticalLayout {
                             spacing: 2px;
                             HorizontalLayout {
                                 spacing: 6px;
                                 height: 22px;
-                                Text { text: col.title; color: #8a8a90; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
-                                Text { text: "(" + col.count + ")"; color: #6a6a70; font-size: 11px; vertical-alignment: bottom; }
+                                Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
                             }
                             for t in col.tasks: Rectangle {
                                 height: 30px;
-                                background: trta.has-hover ? #26262c : transparent;
+                                background: trta.has-hover ? Theme.bg-elevated : transparent;
                                 trta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
                                 HorizontalLayout {
                                     padding-left: 4px;
@@ -2938,7 +2938,7 @@ export component LauncherWindow inherits Window {
                                     spacing: 8px;
                                     Text {
                                         text: t.title;
-                                        color: t.done ? #6a6a70 : white;
+                                        color: t.done ? Theme.text-faint : Theme.text;
                                         font-size: 12px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -2953,11 +2953,11 @@ export component LauncherWindow inherits Window {
                                             height: 13px;
                                             border-radius: 7px;
                                             border-width: 1.5px;
-                                            background: (i == 1 && t.doing) ? #e0a44a : (i == 2 && t.done) ? #7ad7a0 : transparent;
+                                            background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
                                             border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
                                                 : (i == 1 && t.doing) ? transparent
                                                 : (i == 2 && t.done) ? transparent
-                                                : (tsta.has-hover ? #d0d0d4 : #55555f);
+                                                : (tsta.has-hover ? Theme.text : Theme.text-faint);
                                             tsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
                                         }
                                     }
@@ -2965,15 +2965,15 @@ export component LauncherWindow inherits Window {
                                         width: 28px;
                                         if t.priority <= 2: Text {
                                             text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
-                                            color: t.priority == 0 ? #e05a5a : (t.priority == 1 ? #e0a44a : #6a8cff);
+                                            color: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
                                             font-size: 11px;
                                             font-weight: 700;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
                                     }
-                                    Text { text: t.due; color: t.overdue ? #e06a6a : #9a9aa0; font-size: 11px; width: 90px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: t.project != "" ? "#" + t.project : ""; color: #9ab0ff; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
+                                    Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; width: 90px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: t.project != "" ? "#" + t.project : ""; color: Theme.link; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -2981,7 +2981,7 @@ export component LauncherWindow inherits Window {
                 }
                 if root.board.length == 0: HorizontalLayout {
                     alignment: center;
-                    Text { text: "No tasks match these filters."; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                    Text { text: "No tasks match these filters."; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
                 }
             }
         }
@@ -2991,7 +2991,7 @@ export component LauncherWindow inherits Window {
         // this just draws the pre-positioned nodes/edges in normalized 0..1 space,
         // stretched to fill the canvas (matching the node x/y mapping below).
         if root.graph-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             gfs := FocusScope {
                 init => { self.focus(); }
                 key-pressed(e) => {
@@ -3040,11 +3040,11 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             width: 62px;
                             border-radius: 6px;
-                            background: root.notes-view == nv ? Pal.accent : (nvsw2.has-hover ? #34343c : #2a2a30);
+                            background: root.notes-view == nv ? Pal.accent : (nvsw2.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             nvsw2 := TouchArea { clicked => { root.set-note-view(nv); } }
                             Text {
                                 text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
-                                color: root.notes-view == nv ? Pal.on-accent : #d0d0d4;
+                                color: root.notes-view == nv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -3054,7 +3054,7 @@ export component LauncherWindow inherits Window {
                     Text {
                         text: root.graph-total + (root.graph-total == 1 ? " linked note" : " linked notes")
                             + (root.graph-total >= 150 ? " (showing top 150)" : "");
-                        color: #8a8a90;
+                        color: Theme.text-dim;
                         font-size: 12px;
                         vertical-alignment: center;
                     }
@@ -3063,7 +3063,7 @@ export component LauncherWindow inherits Window {
                         width: 84px;
                         height: 30px;
                         border-radius: 6px;
-                        background: gresetta.has-hover ? #34343c : #2a2a30;
+                        background: gresetta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                         gresetta := TouchArea {
                             clicked => {
                                 gcanvas.gzoom = 1.0;
@@ -3071,7 +3071,7 @@ export component LauncherWindow inherits Window {
                                 gcanvas.gpan-y = 0px;
                             }
                         }
-                        Text { text: "Reset view"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Reset view"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 // Canvas: edges drawn first so node dots sit on top of them.
@@ -3083,7 +3083,7 @@ export component LauncherWindow inherits Window {
                 gcanvas := Rectangle {
                     vertical-stretch: 1;
                     clip: true;
-                    background: #202024;
+                    background: Theme.bg-panel;
                     border-radius: 8px;
                     property <float> gzoom: 1.0;
                     property <float> gnz: 1.0;
@@ -3125,7 +3125,7 @@ export component LauncherWindow inherits Window {
                         y: gcanvas.gpan-y;
                         width: gcanvas.gcw;
                         height: gcanvas.gch;
-                        stroke: #454552;
+                        stroke: Theme.border;
                         stroke-width: 1.2px;
                         viewbox-x: 0;
                         viewbox-y: 0;
@@ -3148,10 +3148,10 @@ export component LauncherWindow inherits Window {
                         // Color by degree: hubs warmer/brighter than leaves.
                         // Hovering brightens further so the target dot pops.
                         background: nta.has-hover
-                            ? #c3d1ff
-                            : (n.degree >= 3 ? #9db4ff : (n.degree == 2 ? Pal.accent : #6a78c8));
+                            ? Theme.link.brighter(0.3)
+                            : (n.degree >= 3 ? Theme.link : (n.degree == 2 ? Pal.accent : Theme.text-faint));
                         border-width: 1px;
-                        border-color: #1e1e21;
+                        border-color: Theme.bg-app;
                         Text {
                             // Nodes near the right edge would otherwise push their
                             // label off the canvas — flip it to the dot's left there.
@@ -3161,7 +3161,7 @@ export component LauncherWindow inherits Window {
                             x: n.x > 0.75 ? -(r + 4px + self.width) : r + 4px;
                             y: n.y > 0.9 ? -16px : -3px;
                             text: n.title;
-                            color: nta.has-hover ? white : #c8c8d0;
+                            color: nta.has-hover ? Theme.text : Theme.text-dim;
                             font-size: 10px;
                             font-weight: nta.has-hover ? 600 : 400;
                             overflow: elide;
@@ -3176,7 +3176,7 @@ export component LauncherWindow inherits Window {
                             alignment: center;
                             Text {
                                 text: "No linked notes yet — connect notes with [[links]] to see the graph.";
-                                color: #6a6a70;
+                                color: Theme.text-faint;
                                 font-size: 13px;
                                 horizontal-alignment: center;
                                 wrap: word-wrap;
@@ -3189,7 +3189,7 @@ export component LauncherWindow inherits Window {
         }
 
         if root.bookmarks-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3200,32 +3200,32 @@ export component LauncherWindow inherits Window {
                 spacing: 8px;
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { text: "Bookmarks"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    Text { text: "Bookmarks"; color: Theme.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                 }
                 // Search + add-url row.
                 HorizontalLayout {
                     spacing: 6px;
                     Rectangle {
-                        horizontal-stretch: 1; height: 30px; background: #2a2a30; border-radius: 6px;
+                        horizontal-stretch: 1; height: 30px; background: Theme.bg-panel; border-radius: 6px;
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px;
-                            if root.bookmark-query == "": Text { text: "Search bookmarks…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                            if root.bookmark-query == "": Text { text: "Search bookmarks…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
                             bkq := TextInput {
                                 text <=> root.bookmark-query;
-                                color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
+                                color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
                                 edited => { root.bookmark-search(self.text); }
                             }
                         }
                     }
                     Rectangle {
-                        horizontal-stretch: 1; height: 30px; background: #2a2a30; border-radius: 6px;
+                        horizontal-stretch: 1; height: 30px; background: Theme.bg-panel; border-radius: 6px;
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px;
-                            if root.bookmark-add-url == "": Text { text: "Add URL  (optionally  #tags)…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                            if root.bookmark-add-url == "": Text { text: "Add URL  (optionally  #tags)…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
                             bkadd := TextInput {
                                 text <=> root.bookmark-add-url;
-                                color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
+                                color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
                                 key-pressed(e) => {
                                     if e.text == Key.Return { root.add-bookmark(self.text); self.text = ""; return accept; }
                                     return reject;
@@ -3237,18 +3237,18 @@ export component LauncherWindow inherits Window {
                 ListView {
                     for b in root.bookmarks: Rectangle {
                         height: b.has-thumb ? 58px : 46px;
-                        background: bkrow.has-hover ? #26262c : transparent;
+                        background: bkrow.has-hover ? Theme.bg-elevated : transparent;
                         border-radius: 6px;
                         bkrow := TouchArea { clicked => { root.open-bookmark(b.url); } }
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px; spacing: 8px;
                             if b.has-icon: Image { source: b.icon; width: 16px; height: 16px; }
-                            if !b.has-icon: Image { source: Icons.bookmark; colorize: #b8b8be; width: 15px; height: 15px; image-fit: contain; }
+                            if !b.has-icon: Image { source: Icons.bookmark; colorize: Theme.text-dim; width: 15px; height: 15px; image-fit: contain; }
                             VerticalLayout {
                                 horizontal-stretch: 1; padding-top: 5px; padding-bottom: 5px;
-                                Text { text: b.title == "" ? b.url : b.title; color: white; font-size: 13px; overflow: elide; }
-                                Text { text: b.domain; color: #8a8a90; font-size: 11px; overflow: elide; }
-                                if b.tags != "": Text { text: b.tags; color: #6a6a70; font-size: 10px; overflow: elide; }
+                                Text { text: b.title == "" ? b.url : b.title; color: Theme.text; font-size: 13px; overflow: elide; }
+                                Text { text: b.domain; color: Theme.text-dim; font-size: 11px; overflow: elide; }
+                                if b.tags != "": Text { text: b.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
                             }
                             if b.has-thumb: Rectangle {
                                 width: 64px;
@@ -3265,14 +3265,14 @@ export component LauncherWindow inherits Window {
                             Rectangle {
                                 width: 28px;
                                 bkdel := TouchArea { clicked => { root.delete-bookmark(b.id); } }
-                                Text { text: "×"; color: bkdel.has-hover ? #ff9a9a : #55555f; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                                Text { text: "×"; color: bkdel.has-hover ? Theme.danger : Theme.text-faint; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
                             }
                         }
                     }
                 }
                 if root.bookmarks.length == 0: HorizontalLayout {
                     alignment: center;
-                    Text { text: "No bookmarks yet. Add a URL above, or ⌘K → Bookmark a copied link."; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                    Text { text: "No bookmarks yet. Add a URL above, or ⌘K → Bookmark a copied link."; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
                 }
             }
         }
@@ -3280,7 +3280,7 @@ export component LauncherWindow inherits Window {
         // ---- Today dashboard (full-window merge of the popover's Today +
         // Daily + Clipboard tabs) ----
         if root.today-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3301,11 +3301,11 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             width: 56px;
                             border-radius: 6px;
-                            background: root.tasks-view == tv ? Pal.accent : (tvsw1.has-hover ? #34343c : #2a2a30);
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             tvsw1 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
                                 text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
-                                color: root.tasks-view == tv ? Pal.on-accent : #d0d0d4;
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -3316,16 +3316,16 @@ export component LauncherWindow inherits Window {
                     if root.active-title != "": Rectangle {
                         height: 30px;
                         border-radius: 6px;
-                        background: #24352b;
+                        background: Theme.success.with-alpha(0.18);
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 6px;
-                            Text { text: "▶"; color: #7ad7a0; font-size: 12px; vertical-alignment: center; }
-                            Text { text: root.active-title; color: #d7e6dd; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
                             Text {
                                 text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
-                                color: #7ad7a0;
+                                color: Theme.success;
                                 font-size: 12px;
                                 font-weight: 700;
                                 vertical-alignment: center;
@@ -3354,18 +3354,18 @@ export component LauncherWindow inherits Window {
                         width: parent.width;
                         spacing: 10px;
 
-                        Text { text: "Due & overdue"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Due & overdue"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         for t in root.today-due: PopoverTaskRow {
                             t: t;
                             toggle => { root.toggle-task(t.note_id, t.line_index); }
                             open => { root.open-task-note(t.note_id); }
                         }
-                        if root.today-due.length == 0: Text { text: "Nothing due — you're clear"; color: #6a6a70; font-size: 13px; }
+                        if root.today-due.length == 0: Text { text: "Nothing due — you're clear"; color: Theme.text-faint; font-size: 13px; }
 
-                        Text { text: "Journal"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Journal"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         Rectangle {
                             height: 100px;
-                            background: #2a2a30;
+                            background: Theme.bg-panel;
                             border-radius: 8px;
                             Flickable {
                                 x: 10px;
@@ -3375,7 +3375,7 @@ export component LauncherWindow inherits Window {
                                 TextInput {
                                     width: parent.width;
                                     text <=> root.today-journal;
-                                    color: #d0d0d4;
+                                    color: Theme.text;
                                     font-size: 13px;
                                     single-line: false;
                                     wrap: word-wrap;
@@ -3384,18 +3384,18 @@ export component LauncherWindow inherits Window {
                             }
                         }
 
-                        Text { text: "Recent clips"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Recent clips"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         for c[i] in root.today-clips: Rectangle {
                             height: 34px;
-                            background: crow.has-hover ? #26262c : transparent;
+                            background: crow.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             crow := TouchArea { clicked => { root.today-paste-clip(i); } }
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 8px;
-                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: #b8b8be; }
-                                Text { text: c.title; color: white; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: Theme.text-dim; }
+                                Text { text: c.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                             }
                         }
                     }
@@ -3405,7 +3405,7 @@ export component LauncherWindow inherits Window {
 
         // ---- Journal (chronological timeline over the daily notes) ----
         if root.journal-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             VerticalLayout {
                 // Inset to the right of the sidebar via left padding (see the
                 // note by `sidebar-w` for why this isn't an `x`/`width` override).
@@ -3424,11 +3424,11 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             width: 62px;
                             border-radius: 6px;
-                            background: root.notes-view == nv ? Pal.accent : (nvsw3.has-hover ? #34343c : #2a2a30);
+                            background: root.notes-view == nv ? Pal.accent : (nvsw3.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             nvsw3 := TouchArea { clicked => { root.set-note-view(nv); } }
                             Text {
                                 text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
-                                color: root.notes-view == nv ? Pal.on-accent : #d0d0d4;
+                                color: root.notes-view == nv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -3444,27 +3444,27 @@ export component LauncherWindow inherits Window {
                         VerticalLayout {
                             padding: 10px;
                             spacing: 6px;
-                            Text { text: j.date; color: #9ab0ff; font-size: 13px; font-weight: 700; }
+                            Text { text: j.date; color: Theme.link; font-size: 13px; font-weight: 700; }
                             Rectangle {
-                                background: #161618;
+                                background: Theme.bg-sidebar;
                                 border-radius: 8px;
                                 VerticalLayout {
                                     padding: 8px;
                                     jed := TextInput {
                                         text: j.body;
-                                        color: #d0d0d4;
+                                        color: Theme.text;
                                         font-size: 13px;
                                         single-line: false;
                                         wrap: word-wrap;
                                         edited => { root.edit-journal-entry(j.note_id, self.text); }
                                     }
-                                    if j.body == "": Text { text: "Empty — jot something…"; color: #55555f; font-size: 12px; }
+                                    if j.body == "": Text { text: "Empty — jot something…"; color: Theme.text-faint; font-size: 12px; }
                                 }
                             }
                         }
                     }
                 }
-                if root.journal.length == 0: Text { text: "No journal entries yet."; color: #6a6a70; font-size: 13px; }
+                if root.journal.length == 0: Text { text: "No journal entries yet."; color: Theme.text-faint; font-size: 13px; }
             }
         }
 
@@ -3544,7 +3544,7 @@ export component LauncherWindow inherits Window {
         // The clipboard already has its own search box; this covers the other
         // three surfaces in one palette. Styled to match the Bookmarks overlay. ----
         if root.search-mode: Rectangle {
-            background: #1e1e21;
+            background: Theme.bg-app;
             VerticalLayout {
                 padding: 8px;
                 spacing: 8px;
@@ -3552,21 +3552,21 @@ export component LauncherWindow inherits Window {
                     spacing: 8px;
                     Rectangle {
                         width: 92px; height: 30px; border-radius: 6px;
-                        background: sback.has-hover ? #34343c : #2a2a30;
+                        background: sback.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                         sback := TouchArea { clicked => { root.close-search(); } }
-                        Text { text: "← Clipboard"; color: #d0d0d4; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "← Clipboard"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     }
-                    Text { text: "Find everywhere"; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    Text { text: "Find everywhere"; color: Theme.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                 }
                 Rectangle {
-                    height: 30px; background: #2a2a30; border-radius: 6px;
+                    height: 30px; background: Theme.bg-panel; border-radius: 6px;
                     HorizontalLayout {
                         padding-left: 8px; padding-right: 8px;
-                        if root.search-query == "": Text { text: "Find in notes, tasks, bookmarks…"; color: #6a6a70; font-size: 13px; vertical-alignment: center; }
+                        if root.search-query == "": Text { text: "Find in notes, tasks, bookmarks…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
                         sq := TextInput {
                             text <=> root.search-query;
-                            color: #d0d0d4; font-size: 13px; single-line: true; vertical-alignment: center;
+                            color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
                             init => { self.focus(); }
                             edited => { root.run-unified-search(self.text); }
                             accepted => { root.run-unified-search(self.text); }
@@ -3586,47 +3586,47 @@ export component LauncherWindow inherits Window {
                     VerticalLayout {
                         spacing: 4px;
 
-                        Text { text: "Notes"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Notes"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         for n in root.search-notes: Rectangle {
                             height: 34px;
-                            background: snrow.has-hover ? #26262c : transparent;
+                            background: snrow.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             snrow := TouchArea { clicked => { root.open-search-note(n.id); } }
                             HorizontalLayout {
                                 padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.tab-notes; colorize: #b8b8be; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: n.title; color: white; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                Image { source: Icons.tab-notes; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
+                                Text { text: n.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                             }
                         }
-                        if root.search-notes.length == 0: Text { text: "—"; color: #55555f; font-size: 12px; }
+                        if root.search-notes.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
 
-                        Text { text: "Tasks"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Tasks"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         for t in root.search-tasks: Rectangle {
                             height: 34px;
-                            background: strow.has-hover ? #26262c : transparent;
+                            background: strow.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             strow := TouchArea { clicked => { root.open-search-task(t.id); } }
                             HorizontalLayout {
                                 padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.tab-tasks; colorize: #b8b8be; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: t.title; color: white; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                Image { source: Icons.tab-tasks; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
+                                Text { text: t.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                             }
                         }
-                        if root.search-tasks.length == 0: Text { text: "—"; color: #55555f; font-size: 12px; }
+                        if root.search-tasks.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
 
-                        Text { text: "Bookmarks"; color: #8a8a90; font-size: 11px; font-weight: 700; }
+                        Text { text: "Bookmarks"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                         for b in root.search-bookmarks: Rectangle {
                             height: 34px;
-                            background: sbrow.has-hover ? #26262c : transparent;
+                            background: sbrow.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             sbrow := TouchArea { clicked => { root.open-search-bookmark(b.url); } }
                             HorizontalLayout {
                                 padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.bookmark; colorize: #b8b8be; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: b.title; color: white; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                Image { source: Icons.bookmark; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
+                                Text { text: b.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                             }
                         }
-                        if root.search-bookmarks.length == 0: Text { text: "—"; color: #55555f; font-size: 12px; }
+                        if root.search-bookmarks.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
                     }
                 }
             }
@@ -3642,14 +3642,14 @@ export component LauncherWindow inherits Window {
                 // mid-line, which reads as a rendering bug rather than "scroll me".
                 // Bumped for the added "Sections" group (g-leader/history/cycling).
                 height: 620px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 16px;
                     spacing: 8px;
-                    Text { text: "Keyboard Shortcuts"; color: white; font-size: 15px; font-weight: 700; }
+                    Text { text: "Keyboard Shortcuts"; color: Theme.text; font-size: 15px; font-weight: 700; }
                     ScrollView {
                         vertical-stretch: 1;
                         VerticalLayout {
@@ -3664,8 +3664,8 @@ export component LauncherWindow inherits Window {
                                 { k: "type", d: "Filter entries" },
                                 { k: "⌘1–9", d: "Paste the Nth entry" },
                             ]: HorizontalLayout {
-                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
                             }
 
                             Text { text: "Sections"; color: Pal.accent; font-size: 12px; }
@@ -3675,8 +3675,8 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘⌥←", d: "Jump to the previous screen (toggle)" },
                                 { k: "⌘⌥↑ / ⌘⌥↓", d: "Cycle the section's views (Tasks/Notes)" },
                             ]: HorizontalLayout {
-                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
                             }
 
                             Text { text: "Actions"; color: Pal.accent; font-size: 12px; }
@@ -3694,8 +3694,8 @@ export component LauncherWindow inherits Window {
                                 { k: "⌘V", d: "Paste clipboard into search" },
                                 { k: "⌘⌫", d: "Delete the entry" },
                             ]: HorizontalLayout {
-                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
                             }
 
                             Text { text: "Views"; color: Pal.accent; font-size: 12px; }
@@ -3709,13 +3709,13 @@ export component LauncherWindow inherits Window {
                                 { k: "Stats", d: "Copy analytics" },
                             ]: HorizontalLayout {
                                 spacing: 4px;
-                                if row.k == "Mask": Image { source: Icons.lock; colorize: #d0d0d4; width: 12px; height: 12px; image-fit: contain; }
-                                Text { text: row.k; color: #d0d0d4; font-size: 12px; width: 130px; }
-                                Text { text: row.d; color: #9a9aa0; font-size: 12px; }
+                                if row.k == "Mask": Image { source: Icons.lock; colorize: Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
                             }
                         }
                     }
-                    Text { text: "Esc to close"; color: #6a6a70; font-size: 11px; horizontal-alignment: center; }
+                    Text { text: "Esc to close"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; }
                 }
             }
         }
@@ -3727,28 +3727,28 @@ export component LauncherWindow inherits Window {
             Rectangle {
                 width: 460px;
                 height: 300px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 20px;
                     spacing: 12px;
                     Text {
                         text: "Enable auto-paste";
-                        color: white;
+                        color: Theme.text;
                         font-size: 16px;
                         font-weight: 700;
                     }
                     Text {
                         text: "Magpie needs Accessibility permission to paste into other apps (it sends ⌘V for you). Your clipboard history still works without it — you can paste manually.";
-                        color: #b0b0b6;
+                        color: Theme.text-dim;
                         font-size: 13px;
                         wrap: word-wrap;
                     }
                     Text {
                         text: "1. Click “Open System Settings”.\n2. Enable Magpie under Privacy & Security ▸ Accessibility.\n3. Come back and click “I’ve enabled it”.";
-                        color: #9a9aa0;
+                        color: Theme.text-dim;
                         font-size: 12px;
                         wrap: word-wrap;
                     }
@@ -3756,7 +3756,7 @@ export component LauncherWindow inherits Window {
                         spacing: 10px;
                         Rectangle {
                             height: 34px;
-                            background: openta.has-hover ? #7f9dff : Pal.accent;
+                            background: openta.has-hover ? Theme.accent.brighter(0.25) : Pal.accent;
                             border-radius: 8px;
                             openta := TouchArea {
                                 clicked => { root.open-accessibility-settings(); }
@@ -3766,12 +3766,12 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             height: 34px;
                             width: 130px;
-                            background: recheckta.has-hover ? #34343c : #2a2a30;
+                            background: recheckta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                             border-radius: 8px;
                             recheckta := TouchArea {
                                 clicked => { root.recheck-accessibility(); }
                             }
-                            Text { text: "I’ve enabled it"; color: #d0d0d4; font-size: 13px; }
+                            Text { text: "I’ve enabled it"; color: Theme.text; font-size: 13px; }
                         }
                     }
                     Rectangle {
@@ -3781,7 +3781,7 @@ export component LauncherWindow inherits Window {
                         }
                         Text {
                             text: "Not now";
-                            color: dismissta.has-hover ? #c0c0c6 : #7a7a80;
+                            color: dismissta.has-hover ? Theme.text-dim : Theme.text-faint;
                             font-size: 12px;
                         }
                     }
@@ -3796,36 +3796,36 @@ export component LauncherWindow inherits Window {
             Rectangle {
                 width: 460px;
                 height: 520px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 14px;
                     spacing: 10px;
-                    Text { text: "Filters"; color: white; font-size: 14px; font-weight: 700; }
+                    Text { text: "Filters"; color: Theme.text; font-size: 14px; font-weight: 700; }
 
-                    Text { text: "Time range"; color: #8a8a92; font-size: 11px; }
+                    Text { text: "Time range"; color: Theme.text-dim; font-size: 11px; }
                     HorizontalLayout {
                         spacing: 6px;
                         for label[i] in ["All", "Today", "Last 7 days", "Last 30 days"]: Rectangle {
                             height: 28px;
                             width: 100px;
-                            background: i == root.time-index ? Pal.accent : (tfta.has-hover ? #35353d : #2a2a30);
+                            background: i == root.time-index ? Pal.accent : (tfta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             border-radius: 6px;
                             tfta := TouchArea { clicked => { root.time-index = i; root.set-time-filter(i); } }
-                            Text { text: label; color: i == root.time-index ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: label; color: i == root.time-index ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
 
-                    Text { text: "Show"; color: #8a8a92; font-size: 11px; }
+                    Text { text: "Show"; color: Theme.text-dim; font-size: 11px; }
                     HorizontalLayout {
                         spacing: 6px;
                         alignment: start;
                         for label[i] in ["Everything", "Pinned only"]: Rectangle {
                             height: 28px;
                             width: 110px;
-                            background: (i == 1) == root.pinned-only ? Pal.accent : (pota.has-hover ? #35353d : #2a2a30);
+                            background: (i == 1) == root.pinned-only ? Pal.accent : (pota.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             border-radius: 6px;
                             pota := TouchArea {
                                 clicked => {
@@ -3835,7 +3835,7 @@ export component LauncherWindow inherits Window {
                             }
                             Text {
                                 text: label;
-                                color: (i == 1) == root.pinned-only ? Pal.on-accent : white;
+                                color: (i == 1) == root.pinned-only ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -3843,33 +3843,33 @@ export component LauncherWindow inherits Window {
                         }
                     }
 
-                    Text { text: "Sort"; color: #8a8a92; font-size: 11px; }
+                    Text { text: "Sort"; color: Theme.text-dim; font-size: 11px; }
                     HorizontalLayout {
                         spacing: 6px;
                         alignment: start;
                         for label[i] in ["Recent", "Most copied"]: Rectangle {
                             height: 28px;
                             width: 110px;
-                            background: i == root.sort-index ? #3a3a40 : (sota.has-hover ? #2c2c33 : #202024);
+                            background: i == root.sort-index ? Theme.bg-elevated : (sota.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             border-radius: 6px;
                             sota := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
-                            Text { text: label; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: label; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
 
-                    Text { text: "Source app"; color: #8a8a92; font-size: 11px; }
+                    Text { text: "Source app"; color: Theme.text-dim; font-size: 11px; }
                     // Left-aligned rows with hover + a ✓ on the active filter — the
                     // previous centred labels read as floating text, and there was no
                     // way to tell which app was filtered.
                     Rectangle {
                         height: 30px;
                         border-radius: 6px;
-                        background: root.app-index == -1 ? #2f2f37 : (anyta.has-hover ? #232329 : transparent);
+                        background: root.app-index == -1 ? Theme.bg-elevated : (anyta.has-hover ? Theme.bg-panel : transparent);
                         anyta := TouchArea { clicked => { root.set-app-filter(-1); } }
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
-                            Text { text: "Any app"; color: white; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: "Any app"; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
                             Text { text: root.app-index == -1 ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
                         }
                     }
@@ -3878,12 +3878,12 @@ export component LauncherWindow inherits Window {
                         for a in root.apps: Rectangle {
                             height: 30px;
                             border-radius: 6px;
-                            background: root.app-index == a.id ? #2f2f37 : (apta.has-hover ? #232329 : transparent);
+                            background: root.app-index == a.id ? Theme.bg-elevated : (apta.has-hover ? Theme.bg-panel : transparent);
                             apta := TouchArea { clicked => { root.set-app-filter(a.id); } }
                             HorizontalLayout {
                                 padding-left: 10px;
                                 padding-right: 10px;
-                                Text { text: a.name; color: white; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Text { text: a.name; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                                 Text { text: root.app-index == a.id ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
                             }
                         }
@@ -3894,12 +3894,12 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             height: 30px;
                             width: 110px;
-                            background: cfta.has-hover ? #35353d : #2a2a30;
+                            background: cfta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                             border-radius: 6px;
                             cfta := TouchArea { clicked => { root.clear-filters(); } }
-                            Text { text: "Clear filters"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "Clear filters"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
-                        Text { text: "Esc to close"; color: #6a6a70; font-size: 11px; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; }
+                        Text { text: "Esc to close"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; }
                     }
                 }
             }
@@ -3912,10 +3912,10 @@ export component LauncherWindow inherits Window {
             Rectangle {
                 width: 440px;
                 height: 360px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 10px;
                     spacing: 8px;
@@ -3925,19 +3925,19 @@ export component LauncherWindow inherits Window {
                     // stands in for the real one.
                     Rectangle {
                         height: 34px;
-                        background: #161618;
+                        background: Theme.bg-sidebar;
                         border-radius: 8px;
                         border-width: 1px;
-                        border-color: #33333c;
+                        border-color: Theme.border;
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 2px;
-                            Image { source: Icons.search; colorize: #8a8a92; width: 13px; height: 13px; image-fit: contain; }
+                            Image { source: Icons.search; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
                             Rectangle { width: 4px; }
                             Text {
                                 text: root.actions-query;
-                                color: white;
+                                color: Theme.text;
                                 font-size: 13px;
                                 vertical-alignment: center;
                                 overflow: elide;
@@ -3945,7 +3945,7 @@ export component LauncherWindow inherits Window {
                             Rectangle { width: 2px; height: 17px; background: Pal.accent; }
                             if root.actions-query == "": Text {
                                 text: "Search actions…";
-                                color: #6a6a70;
+                                color: Theme.text-faint;
                                 font-size: 13px;
                                 vertical-alignment: center;
                             }
@@ -3956,28 +3956,28 @@ export component LauncherWindow inherits Window {
                         vertical-stretch: 1;
                         for a[i] in root.actions: Rectangle {
                             height: 34px;
-                            background: i == root.action-selected ? #2f2f37 : (acta.has-hover ? #232329 : transparent);
+                            background: i == root.action-selected ? Theme.bg-elevated : (acta.has-hover ? Theme.bg-panel : transparent);
                             border-radius: 6px;
                             acta := TouchArea { clicked => { root.run-action(a.id); } }
                             HorizontalLayout {
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 spacing: 10px;
-                                ActionIcon { id: a.id; width: 22px; height: 18px; tint: a.id == "delete" ? #ff9a9a : #d0d0d4; }
-                                Text { text: a.label; color: a.id == "delete" ? #ff9a9a : white; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
-                                Text { text: a.key; color: #85858d; font-size: 12px; vertical-alignment: center; }
+                                ActionIcon { id: a.id; width: 22px; height: 18px; tint: a.id == "delete" ? Theme.danger : Theme.text; }
+                                Text { text: a.label; color: a.id == "delete" ? Theme.danger : Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: a.key; color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
                             }
                         }
                     }
                     if root.actions.length == 0: Text {
                         text: "No matching action";
-                        color: #6a6a70;
+                        color: Theme.text-faint;
                         font-size: 12px;
                         horizontal-alignment: center;
                     }
                     Text {
                         text: "↑↓ Move · ⏎ Run · Esc Close";
-                        color: #6a6a70;
+                        color: Theme.text-faint;
                         font-size: 11px;
                         horizontal-alignment: center;
                     }
@@ -3995,17 +3995,17 @@ export component LauncherWindow inherits Window {
             Rectangle {
                 width: 420px;
                 height: 420px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 14px;
                     spacing: 8px;
-                    Text { text: "Assign to slot"; color: white; font-size: 14px; font-weight: 700; }
+                    Text { text: "Assign to slot"; color: Theme.text; font-size: 14px; font-weight: 700; }
                     Text {
                         text: "Slotted entries paste from anywhere with ⌘1–9, even when Magpie is closed. Picking a slot that already holds this entry clears it.";
-                        color: #9a9aa0;
+                        color: Theme.text-dim;
                         font-size: 12px;
                         wrap: word-wrap;
                     }
@@ -4019,7 +4019,7 @@ export component LauncherWindow inherits Window {
                             height: 30px;
                             border-radius: 6px;
                             background: (entries.length > 0 && root.selected < entries.length && entries[root.selected].slot == s.n)
-                                ? #2f2f37 : (slpta.has-hover ? #232329 : transparent);
+                                ? Theme.bg-elevated : (slpta.has-hover ? Theme.bg-panel : transparent);
                             slpta := TouchArea {
                                 clicked => {
                                     root.assign-slot(root.selected, s.n);
@@ -4033,7 +4033,7 @@ export component LauncherWindow inherits Window {
                                 Text { text: "⌘" + s.n; color: Pal.accent; font-size: 12px; width: 30px; vertical-alignment: center; }
                                 Text {
                                     text: s.title;
-                                    color: s.filled ? white : #6a6a70;
+                                    color: s.filled ? Theme.text : Theme.text-faint;
                                     font-size: 12px;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
@@ -4050,7 +4050,7 @@ export component LauncherWindow inherits Window {
                     }
                     Text {
                         text: "1–9 Assign · Esc Cancel";
-                        color: #6a6a70;
+                        color: Theme.text-faint;
                         font-size: 11px;
                         horizontal-alignment: center;
                     }
@@ -4068,16 +4068,16 @@ export component LauncherWindow inherits Window {
             Rectangle {
                 width: 540px;
                 height: 420px;
-                background: #1e1e21;
+                background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: #3a3a40;
+                border-color: Theme.border-strong;
                 VerticalLayout {
                     padding: 16px;
                     spacing: 10px;
                     Text {
                         text: root.edit-mode == "snippet" ? "New snippet" : "Edit entry";
-                        color: white;
+                        color: Theme.text;
                         font-size: 15px;
                         font-weight: 700;
                     }
@@ -4085,7 +4085,7 @@ export component LauncherWindow inherits Window {
                         text: root.edit-mode == "snippet"
                             ? "Snippets are saved alongside your history — search and paste them like any other entry."
                             : "Saving replaces this entry’s text. The original is not kept.";
-                        color: #9a9aa0;
+                        color: Theme.text-dim;
                         font-size: 12px;
                         wrap: word-wrap;
                     }
@@ -4112,7 +4112,7 @@ export component LauncherWindow inherits Window {
                         spacing: 8px;
                         Text {
                             text: "⌘⏎ Save · Esc Cancel";
-                            color: #6a6a70;
+                            color: Theme.text-faint;
                             font-size: 11px;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
@@ -4120,15 +4120,15 @@ export component LauncherWindow inherits Window {
                         Rectangle {
                             width: 74px;
                             height: 30px;
-                            background: cancelta.has-hover ? #35353d : #2a2a30;
+                            background: cancelta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                             border-radius: 6px;
                             cancelta := TouchArea { clicked => { root.cancel-edit(); } }
-                            Text { text: "Cancel"; color: white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "Cancel"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Rectangle {
                             width: 74px;
                             height: 30px;
-                            background: saveta.has-hover ? #7f9dff : Pal.accent;
+                            background: saveta.has-hover ? Theme.accent.brighter(0.25) : Pal.accent;
                             border-radius: 6px;
                             saveta := TouchArea { clicked => { root.save-edit(root.edit-text); } }
                             Text { text: "Save"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
@@ -4148,31 +4148,31 @@ export component LauncherWindow inherits Window {
         Rectangle {
             width: 460px;
             height: 340px;
-            background: #1e1e21;
+            background: Theme.bg-app;
             border-radius: 14px;
             border-width: 1px;
-            border-color: #3a3a40;
+            border-color: Theme.border-strong;
             // Swallow clicks on the card so they don't dismiss.
             TouchArea {}
             VerticalLayout {
                 padding: 24px;
                 spacing: 12px;
-                Text { text: "Welcome to Magpie"; color: white; font-size: 20px; font-weight: 700; }
+                Text { text: "Welcome to Magpie"; color: Theme.text; font-size: 20px; font-weight: 700; }
                 Text {
                     text: "Your clipboard, notes, tasks, bookmarks and time — in one local-first place.";
-                    color: #b0b0b8; font-size: 13px; wrap: word-wrap;
+                    color: Theme.text-dim; font-size: 13px; wrap: word-wrap;
                 }
-                Text { text: "Keys that matter"; color: #8a8a92; font-size: 11px; font-weight: 700; }
-                Text { text: "⌘⇧Space — summon Magpie anywhere"; color: #d0d0d4; font-size: 13px; }
-                Text { text: "⌘K — actions on any clipboard entry"; color: #d0d0d4; font-size: 13px; }
-                Text { text: "Menu-bar icon — a quick popover"; color: #d0d0d4; font-size: 13px; }
-                Text { text: "Today · Notes · Tasks · Bookmarks — the top bar"; color: #d0d0d4; font-size: 13px; }
+                Text { text: "Keys that matter"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
+                Text { text: "⌘⇧Space — summon Magpie anywhere"; color: Theme.text; font-size: 13px; }
+                Text { text: "⌘K — actions on any clipboard entry"; color: Theme.text; font-size: 13px; }
+                Text { text: "Menu-bar icon — a quick popover"; color: Theme.text; font-size: 13px; }
+                Text { text: "Today · Notes · Tasks · Bookmarks — the top bar"; color: Theme.text; font-size: 13px; }
                 Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
                     alignment: end;
                     Rectangle {
                         width: 130px; height: 34px; border-radius: 8px;
-                        background: gsb.has-hover ? #7a97ff : Pal.accent;
+                        background: gsb.has-hover ? Theme.accent.brighter(0.15) : Pal.accent;
                         gsb := TouchArea { clicked => { root.dismiss-welcome(); } }
                         Text { text: "Get started"; color: Pal.on-accent; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                     }
@@ -4190,14 +4190,14 @@ export component LauncherWindow inherits Window {
         y: root.board-drag-y - 18px;
         width: 240px;
         height: 36px;
-        background: #2e2e38;
+        background: Theme.bg-elevated;
         border-radius: 6px;
         border-width: 1px;
         border-color: Pal.accent;
         opacity: 0.95;
         Text {
             text: root.board-drag-title;
-            color: white;
+            color: Theme.text;
             font-size: 13px;
             overflow: elide;
             horizontal-alignment: center;
@@ -4216,14 +4216,14 @@ export component LauncherWindow inherits Window {
         y: root.height - 40px;
         height: 28px;
         width: hint-text.preferred-width + 20px;
-        background: #1e1e21;
+        background: Theme.bg-app;
         border-radius: 6px;
         border-width: 1px;
         border-color: Pal.accent;
         hint-text := Text {
             x: 10px;
             text: "g → c·t·n·b·s";
-            color: #d0d0d4;
+            color: Theme.text;
             font-size: 12px;
             vertical-alignment: center;
             height: 100%;
@@ -4246,6 +4246,19 @@ export component Popover inherits Window {
     background: transparent;
     forward-focus: fs;
 
+    // ---- Theme (light/dark) ----
+    // Mirrors `LauncherWindow`'s wiring: `global Theme` can't read the root
+    // directly, so the root pushes its own `theme-dark` into it. NOTE: this
+    // is a SEPARATE window/component instance from `LauncherWindow`, so it
+    // has its own independent copy of `global Theme` — Rust must call
+    // `popover.set_theme_dark(...)` (mirroring the existing `ui.set_theme_dark`
+    // call) for this popover to ever actually pick up the app's theme; until
+    // that Rust wiring exists, this popover keeps rendering with `Theme.dark`
+    // defaulted to `true` regardless of the toggle in the main window.
+    in-out property <bool> theme-dark: true;
+    init => { Theme.dark = root.theme-dark; }
+    changed theme-dark => { Theme.dark = root.theme-dark; }
+
     in property <[TaskRow]> ptasks;
     in-out property <string> quick-add;
 
@@ -4266,10 +4279,10 @@ export component Popover inherits Window {
     // Rounded panel — the window itself is transparent + frameless, so this draws
     // the visible chrome (border + fill + padding).
     Rectangle {
-        background: #1e1e21;
+        background: Theme.bg-app;
         border-radius: 12px;
         border-width: 1px;
-        border-color: #3a3a40;
+        border-color: Theme.border-strong;
 
         fs := FocusScope {
             width: 100%;
@@ -4317,7 +4330,7 @@ export component Popover inherits Window {
                                     : i == 1 ? Icons.tab-today
                                     : i == 2 ? Icons.tab-daily
                                     : Icons.tab-clipboard;
-                                colorize: root.tab == i ? Pal.accent : #7a7a80;
+                                colorize: root.tab == i ? Pal.accent : Theme.text-faint;
                                 width: 22px;
                                 height: 22px;
                                 image-fit: contain;
@@ -4332,13 +4345,13 @@ export component Popover inherits Window {
                     vertical-stretch: 1;
                     spacing: 10px;
 
-                    Text { text: "My tasks"; font-size: 16px; font-weight: 700; color: white; }
+                    Text { text: "My tasks"; font-size: 16px; font-weight: 700; color: Theme.text; }
 
                     // Quick-add: Enter appends "- [ ] <text>" to today's daily note
                     // (wired in Task 3) and clears the field.
                     Rectangle {
                         height: 34px;
-                        background: #2a2a30;
+                        background: Theme.bg-panel;
                         border-radius: 8px;
                         Rectangle {
                             x: 10px;
@@ -4346,7 +4359,7 @@ export component Popover inherits Window {
                             if root.quick-add == "": Text {
                                 x: 0;
                                 text: "Add a task…";
-                                color: #6a6a70;
+                                color: Theme.text-faint;
                                 font-size: 13px;
                                 vertical-alignment: center;
                             }
@@ -4354,7 +4367,7 @@ export component Popover inherits Window {
                                 width: 100%;
                                 height: 100%;
                                 text <=> root.quick-add;
-                                color: #d0d0d4;
+                                color: Theme.text;
                                 font-size: 13px;
                                 single-line: true;
                                 vertical-alignment: center;
@@ -4385,19 +4398,19 @@ export component Popover inherits Window {
                 if root.tab == 1: VerticalLayout {
                     vertical-stretch: 1;
                     spacing: 6px;
-                    Text { text: "Today"; font-size: 16px; font-weight: 700; color: white; }
+                    Text { text: "Today"; font-size: 16px; font-weight: 700; color: Theme.text; }
                     if root.overdue-tasks.length == 0 && root.today-tasks.length == 0: Text {
                         text: "Nothing due today.";
-                        color: #6a6a70;
+                        color: Theme.text-faint;
                         font-size: 13px;
                     }
-                    if root.overdue-tasks.length > 0: Text { text: "Overdue"; color: #e06a6a; font-size: 11px; font-weight: 700; }
+                    if root.overdue-tasks.length > 0: Text { text: "Overdue"; color: Theme.danger; font-size: 11px; font-weight: 700; }
                     for t in root.overdue-tasks: PopoverTaskRow {
                         t: t;
                         toggle => { root.toggle-ptask(t.note_id, t.line_index); }
                         open => { root.open-task-note(t.note_id); }
                     }
-                    if root.today-tasks.length > 0: Text { text: "Due today"; color: #9a9aa0; font-size: 11px; font-weight: 700; }
+                    if root.today-tasks.length > 0: Text { text: "Due today"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
                     for t in root.today-tasks: PopoverTaskRow {
                         t: t;
                         toggle => { root.toggle-ptask(t.note_id, t.line_index); }
@@ -4409,10 +4422,10 @@ export component Popover inherits Window {
                 if root.tab == 2: VerticalLayout {
                     vertical-stretch: 1;
                     spacing: 8px;
-                    Text { text: "Daily"; font-size: 16px; font-weight: 700; color: white; }
+                    Text { text: "Daily"; font-size: 16px; font-weight: 700; color: Theme.text; }
                     Rectangle {
                         vertical-stretch: 1;
-                        background: #2a2a30;
+                        background: Theme.bg-panel;
                         border-radius: 8px;
                         Flickable {
                             x: 10px;
@@ -4422,7 +4435,7 @@ export component Popover inherits Window {
                             TextInput {
                                 width: parent.width;
                                 text <=> root.daily-body;
-                                color: #d0d0d4;
+                                color: Theme.text;
                                 font-size: 13px;
                                 single-line: false;
                                 wrap: word-wrap;
@@ -4435,23 +4448,23 @@ export component Popover inherits Window {
                 if root.tab == 3: VerticalLayout {
                     vertical-stretch: 1;
                     spacing: 6px;
-                    Text { text: "Clipboard"; font-size: 16px; font-weight: 700; color: white; }
-                    if root.clips.length == 0: Text { text: "No recent clips."; color: #6a6a70; font-size: 13px; }
+                    Text { text: "Clipboard"; font-size: 16px; font-weight: 700; color: Theme.text; }
+                    if root.clips.length == 0: Text { text: "No recent clips."; color: Theme.text-faint; font-size: 13px; }
                     ListView {
                         vertical-stretch: 1;
                         for c[i] in root.clips: Rectangle {
                             height: 34px;
-                            background: crow.has-hover ? #26262c : transparent;
+                            background: crow.has-hover ? Theme.bg-elevated : transparent;
                             border-radius: 6px;
                             crow := TouchArea { clicked => { root.paste-clip(i); } }
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 8px;
-                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: #b8b8be; }
+                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: Theme.text-dim; }
                                 Text {
                                     text: c.title;
-                                    color: white;
+                                    color: Theme.text;
                                     font-size: 13px;
                                     overflow: elide;
                                     horizontal-stretch: 1;
@@ -4468,7 +4481,7 @@ export component Popover inherits Window {
                     clicked => { root.open-full(); }
                     Text {
                         text: "Open Magpie ↗";
-                        color: foot.has-hover ? white : #9ab0ff;
+                        color: foot.has-hover ? Theme.text : Theme.link;
                         font-size: 12px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
