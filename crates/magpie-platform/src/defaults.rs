@@ -59,4 +59,32 @@ mod tests {
         assert!(res.iter().any(|r| r.is_match("sk-abc123")));
         assert!(res.iter().any(|r| r.is_match("sk_abc123")));
     }
+
+    #[test]
+    fn ignore_regexes_match_jwts() {
+        let res = default_ignore_regexes();
+        // Each dot-separated segment must be at least 10 chars of the
+        // base64url alphabet for the JWT regex to match; a short signature
+        // (e.g. the 6-char "abc123" one might reach for) does NOT match.
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        assert!(
+            res.iter().any(|r| r.is_match(jwt)),
+            "expected a JWT-shaped string to match"
+        );
+    }
+
+    #[test]
+    fn ignore_regexes_match_pem_private_keys() {
+        let res = default_ignore_regexes();
+        assert!(res
+            .iter()
+            .any(|r| r.is_match("-----BEGIN RSA PRIVATE KEY-----")));
+    }
+
+    #[test]
+    fn ignore_regexes_do_not_match_plain_text() {
+        let res = default_ignore_regexes();
+        let sentence = "The quick brown fox jumps over the lazy dog.";
+        assert!(!res.iter().any(|r| r.is_match(sentence)));
+    }
 }

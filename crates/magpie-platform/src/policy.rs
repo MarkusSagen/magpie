@@ -150,4 +150,58 @@ mod tests {
         );
         assert!(matches!(d, Decision::Keep));
     }
+
+    #[test]
+    fn content_text_of_rich_uses_the_text_field() {
+        let c = Content::Rich {
+            text: "hi".into(),
+            html: Some("<b>hi</b>".into()),
+            rtf: None,
+        };
+        assert_eq!(content_text(&c), "hi");
+    }
+
+    #[test]
+    fn content_text_of_files_joins_with_newlines() {
+        let c = Content::Files(vec!["/a".into(), "/b".into()]);
+        assert_eq!(content_text(&c), "/a\n/b");
+    }
+
+    #[test]
+    fn content_text_of_image_is_empty() {
+        let c = Content::Image {
+            bytes: vec![1, 2, 3],
+        };
+        assert_eq!(content_text(&c), "");
+    }
+
+    #[test]
+    fn ignore_regex_matches_a_file_path_in_files_content() {
+        let mut p = CapturePolicy::new();
+        p.ignore_regexes = vec![regex::Regex::new(r"/a").unwrap()];
+        let d = p.decide(
+            &snap(Some(Content::Files(vec!["/a".into(), "/b".into()])), false),
+            None,
+        );
+        assert!(matches!(d, Decision::Skip(SkipReason::IgnoredContent)));
+    }
+
+    #[test]
+    fn image_content_is_kept_even_with_matching_ignore_regexes() {
+        // content_text() for Image is always "", and the empty-text guard in
+        // decide() skips the ignore-regex check entirely, so an image is kept
+        // regardless of what the ignore list contains.
+        let mut p = CapturePolicy::new();
+        p.ignore_regexes = vec![regex::Regex::new(r".*").unwrap()];
+        let d = p.decide(
+            &snap(
+                Some(Content::Image {
+                    bytes: vec![1, 2, 3],
+                }),
+                false,
+            ),
+            None,
+        );
+        assert!(matches!(d, Decision::Keep));
+    }
 }

@@ -314,4 +314,54 @@ mod tests {
         assert_eq!(got, Some(p));
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn downscale_png_rejects_non_image_bytes() {
+        assert!(downscale_png(b"not an image").is_none());
+    }
+
+    #[test]
+    fn downscale_png_round_trips_and_shrinks_to_at_most_64px() {
+        let img = image::ImageBuffer::from_fn(200, 100, |x, y| {
+            image::Rgba([(x % 256) as u8, (y % 256) as u8, 0u8, 255u8])
+        });
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        let raw = buf.into_inner();
+
+        let out = downscale_png(&raw).expect("a valid in-memory PNG should decode + downscale");
+        let decoded = image::load_from_memory(&out).expect("output must itself be a valid PNG");
+        assert!(decoded.width() <= 64 && decoded.height() <= 64);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bundle_path_from_exe_resolves_app_ancestor() {
+        assert_eq!(
+            bundle_path_from_exe(Path::new("/Applications/Foo.app/Contents/MacOS/foo")),
+            Some(PathBuf::from("/Applications/Foo.app"))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bundle_path_from_exe_falls_back_to_exe_itself_when_no_app_ancestor() {
+        assert_eq!(
+            bundle_path_from_exe(Path::new("/usr/bin/ls")),
+            Some(PathBuf::from("/usr/bin/ls"))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bundle_path_from_exe_resolves_deeply_nested_exe() {
+        assert_eq!(
+            bundle_path_from_exe(Path::new(
+                "/Applications/Foo.app/Contents/MacOS/Helpers/foo"
+            )),
+            Some(PathBuf::from("/Applications/Foo.app"))
+        );
+    }
 }

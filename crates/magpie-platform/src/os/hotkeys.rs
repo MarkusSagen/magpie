@@ -133,4 +133,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn maps_grave_dot_escape_return_aliases() {
+        for combo in ["ctrl+grave", "ctrl+dot", "ctrl+escape", "ctrl+return"] {
+            assert!(
+                to_global_hotkey(&parse_hotkey(combo).unwrap()).is_ok(),
+                "{combo} should map"
+            );
+        }
+    }
+
+    #[test]
+    fn aliases_map_to_the_same_code_as_their_canonical_spelling() {
+        assert_eq!(key_to_code("DOT").unwrap(), key_to_code("PERIOD").unwrap());
+        assert_eq!(
+            key_to_code("RETURN").unwrap(),
+            key_to_code("ENTER").unwrap()
+        );
+        assert_eq!(key_to_code("ESC").unwrap(), key_to_code("ESCAPE").unwrap());
+        assert_eq!(
+            key_to_code("GRAVE").unwrap(),
+            key_to_code("BACKQUOTE").unwrap()
+        );
+    }
 }

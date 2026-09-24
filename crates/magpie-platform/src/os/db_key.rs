@@ -102,3 +102,60 @@ fn file_key(data_dir: &Path) -> Result<String, String> {
     }
     Ok(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_hex_key_is_64_lowercase_hex_and_differs_between_calls() {
+        let a = generate_hex_key().unwrap();
+        let b = generate_hex_key().unwrap();
+        assert_eq!(a.len(), 64);
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(a, b, "two calls should not produce the same random key");
+    }
+
+    /// All `MAGPIE_DB_KEY` env manipulation is confined to this single test
+    /// (env vars are process-global, so a second test touching it could race
+    /// under parallel `cargo test` execution), and the previous value is
+    /// always restored at the end.
+    #[test]
+    fn db_key_honors_nonempty_override_and_empty_fallback() {
+        let prev = std::env::var("MAGPIE_DB_KEY").ok();
+        let dir = std::env::temp_dir().join(format!("magpie-dbkey-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        std::env::set_var("MAGPIE_DB_KEY", "deadbeefcafef00d");
+        let got =
+            db_key(&dir).expect("a non-empty MAGPIE_DB_KEY must short-circuit before OS storage");
+        assert_eq!(got, "deadbeefcafef00d");
+
+        std::env::set_var("MAGPIE_DB_KEY", "");
+        #[cfg(not(target_os = "macos"))]
+        {
+            // An empty override falls through to the plain-file generator on
+            // non-macOS. (On macOS the same fallback goes through the real
+            // login Keychain via the `security` CLI against the production
+            // service/account `io.magpie`/`magpie-db` — deliberately NOT
+            // exercised here, since that could hang on a permission prompt or
+            // mutate the developer's real keychain entry during `cargo test`.)
+            let generated = db_key(&dir).unwrap();
+            assert_eq!(generated.len(), 64);
+            assert!(generated.chars().all(|c| c.is_ascii_hexdigit()));
+            let again = db_key(&dir).unwrap();
+            assert_eq!(
+                generated, again,
+                "second call should reuse the persisted key file"
+            );
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+        match prev {
+            Some(v) => std::env::set_var("MAGPIE_DB_KEY", v),
+            None => std::env::remove_var("MAGPIE_DB_KEY"),
+        }
+    }
+}

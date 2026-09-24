@@ -272,4 +272,45 @@ mod macos_un {
         center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         let _ = DELEGATE.set(DelegateHolder(delegate));
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn extracts_note_id_from_well_formed_identifier() {
+            assert_eq!(note_id_from_identifier("magpie-task-42-abcdef"), 42);
+        }
+
+        #[test]
+        fn fingerprint_containing_dashes_and_sentinel_does_not_confuse_parsing() {
+            // The fingerprint itself may contain `-` (e.g. a `-1` due-time
+            // sentinel) and `|`; the explicit `<note_id>-` prefix must still
+            // isolate just the note id, not e.g. return -1 from the sentinel.
+            assert_eq!(
+                note_id_from_identifier("magpie-task-7-1699999999|-1|foo"),
+                7
+            );
+        }
+
+        #[test]
+        fn missing_task_prefix_returns_sentinel() {
+            assert_eq!(note_id_from_identifier("magpie-5"), -1);
+        }
+
+        #[test]
+        fn empty_id_after_prefix_returns_sentinel() {
+            assert_eq!(note_id_from_identifier("magpie-task-"), -1);
+        }
+
+        #[test]
+        fn non_numeric_id_returns_sentinel() {
+            assert_eq!(note_id_from_identifier("magpie-task-x-y"), -1);
+        }
+
+        #[test]
+        fn unrelated_identifier_returns_sentinel() {
+            assert_eq!(note_id_from_identifier("com.apple.whatever"), -1);
+        }
+    }
 }

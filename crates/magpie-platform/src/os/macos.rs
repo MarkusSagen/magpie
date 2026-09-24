@@ -158,7 +158,7 @@ fn tagged_rgba(img: &arboard::ImageData) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::file_url_to_path;
+    use super::{file_url_to_path, percent_decode};
 
     #[test]
     fn decodes_finder_file_urls() {
@@ -181,5 +181,29 @@ mod tests {
     fn rejects_non_file_urls() {
         assert_eq!(file_url_to_path("https://example.com"), None);
         assert_eq!(file_url_to_path(""), None);
+    }
+
+    #[test]
+    fn root_url_decodes_to_root_path() {
+        assert_eq!(file_url_to_path("file:///"), Some("/".to_string()));
+    }
+
+    #[test]
+    fn bare_scheme_with_no_path_is_none() {
+        assert_eq!(file_url_to_path("file://"), None);
+    }
+
+    #[test]
+    fn incomplete_percent_escape_is_preserved_literally_without_panicking() {
+        // Only 1 char follows '%' (not 2), so the decode loop can't consume a
+        // full escape and must fall back to passing '%' through unchanged.
+        assert_eq!(percent_decode("/a%2"), "/a%2");
+        assert_eq!(file_url_to_path("file:///a%2"), Some("/a%2".to_string()));
+    }
+
+    #[test]
+    fn invalid_hex_escape_is_passed_through_unchanged() {
+        assert_eq!(percent_decode("/a%zz"), "/a%zz");
+        assert_eq!(file_url_to_path("file:///a%zz"), Some("/a%zz".to_string()));
     }
 }
