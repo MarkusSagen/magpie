@@ -1,0 +1,204 @@
+export struct EntryRow {
+    title: string,
+    subtitle: string,
+    kind: string,
+    slot: int,
+    merged: bool,
+    badge: string,
+    source: string,
+    when: string,
+    copied: int,
+    size: string,
+    masked: bool,
+    icon: image,
+    has_icon: bool,
+    words: int,
+    section: string,
+    copied_date: string,
+    pinned: bool,
+    // The entry's OWN content preview, as opposed to `icon` (the source app):
+    // a thumbnail for image entries, a swatch colour for colour entries.
+    thumb: image,
+    has_thumb: bool,
+    swatch: color,
+    has_swatch: bool,
+}
+
+export struct Bar {
+    label: string,
+    display: string,
+    value_norm: float,
+}
+
+export struct ActionItem {
+    icon: string,
+    label: string,
+    key: string,
+    id: string,
+}
+
+export struct SlotItem {
+    n: int,
+    title: string,
+    filled: bool,
+}
+
+export struct AppItem {
+    id: int,
+    name: string,
+}
+
+export struct NoteRow {
+    id: int,
+    title: string,
+    when: string,
+    is_daily: bool,
+    tags: string,
+}
+
+export struct BookmarkRow {
+    id: int,
+    title: string,
+    domain: string,
+    url: string,
+    icon: image,
+    has_icon: bool,
+    thumb: image,
+    has_thumb: bool,
+    tags: string,
+}
+
+export struct JournalRow {
+    note_id: int,
+    date: string,
+    body: string,
+}
+
+export struct RefRow {
+    note_id: int,
+    line_index: int,
+    source: string,
+    line: string,
+}
+
+// A single task row (a `- [ ]` line parsed out of a note). `priority` is 0=High,
+// 1=Medium, 2=Low, 3=None; `due` is a pre-formatted date string (empty if none);
+// `source` is the owning note's name.
+export struct TaskRow {
+    note_id: int,
+    line_index: int,
+    title: string,
+    done: bool,
+    // In-progress (`- [/]`), the Obsidian/Logseq convention. Mutually exclusive
+    // with `done`; drives the amber half-filled checkbox glyph.
+    doing: bool,
+    priority: int,
+    due: string,
+    project: string,
+    source: string,
+    recur: string,
+    overdue: bool,
+    bookmarked: bool,
+    tracking: bool,
+    time_total: string,
+}
+
+// One column of the cross-project task Board (Kanban/List layouts share this
+// shape — see `magpie_app::tasks::board_columns`).
+export struct BoardColumn {
+    title: string,
+    count: int,
+    tasks: [TaskRow],
+}
+
+// A note-link-graph node/edge, pre-positioned by `magpie_app::graph::build_graph`
+// (Rust owns the layout; Slint just draws normalized 0..1 coordinates). Edges
+// carry resolved endpoints directly — no index lookups in Slint.
+export struct GraphNode {
+    id: int,
+    title: string,
+    x: float,
+    y: float,
+    degree: int,
+}
+
+export struct GraphEdge {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+}
+
+export struct ClipRow {
+    title: string,
+    kind: string,
+}
+
+// A single tracked session in the Stats → "Recent sessions" list.
+export struct TimeEntryRow {
+    id: int,
+    title: string,
+    when: string,      // e.g. "2h ago" (relative_time)
+    duration: string,  // fmt_duration, or ignored when `running`
+    running: bool,
+}
+
+// ---- "Find everywhere" palette rows (unified search over notes/tasks/bookmarks) ----
+export struct SearchNoteRow {
+    id: int,
+    title: string,
+}
+
+export struct SearchTaskRow {
+    id: int,
+    title: string,
+}
+
+export struct SearchBookmarkRow {
+    url: string,
+    title: string,
+}
+
+// Accent + the text colour that is legible ON the accent. White-on-accent only
+// reaches ~2.9:1, so filled controls use `on-accent` for their label.
+// Theme tokens (light + dark). `dark` is wired from the `LauncherWindow` root
+// (a global can't read the root directly — see `theme-dark` on the root and
+// its `init`/`changed` handler that push the value in here). Phase 1: only
+// the core surfaces (sidebar, clipboard/list view) consume these tokens —
+// everything else keeps its hardcoded dark values until a later migration
+// pass, so default dark mode is visually unchanged.
+// One named colour theme. Every colour token the UI consumes lives here, so a
+// new theme is just one more entry in `Theme.palettes` (order MUST match the
+// Rust registry in `themes.rs`). `dark` drives the native window chrome.
+export struct Palette {
+    name: string,
+    dark: bool,
+    // surfaces
+    bg-app: color,
+    bg-panel: color,
+    bg-elevated: color,
+    bg-sidebar: color,
+    border: color,
+    border-strong: color,
+    // text
+    text: color,
+    text-dim: color,
+    text-faint: color,
+    // brand + semantic
+    accent: color,
+    on-accent: color,
+    danger: color,
+    warn: color,
+    success: color,
+    link: color,
+    // priority pills
+    prio-high: color,
+    prio-med: color,
+    prio-low: color,
+    // section accents
+    sec-clip: color,
+    sec-tasks: color,
+    sec-notes: color,
+    sec-links: color,
+    sec-stats: color,
+}

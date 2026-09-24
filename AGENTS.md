@@ -33,26 +33,6 @@ env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo fmt --check
 that add multi-line expressions frequently trip `fmt --check` (e.g. arrays,
 `Command` chains, long `use` lists reorder alphabetically).
 
-## UI design system ("Graphite") — follow on every UI change
-
-Spec: `docs/superpowers/specs/2026-09-24-magpie-graphite-redesign-design.md` · plan:
-`docs/superpowers/plans/2026-09-24-magpie-graphite-redesign.md` · reference screens:
-`docs/design/graphite/NN-*.png` (exact values in `docs/design/graphite/html/`).
-
-- **One accent, one job:** accent = focus / current selection / the single datum that
-  matters. No per-section colours, no coloured priority badges, no coloured highlight fills.
-- **Tokens only** — views read `Theme.*`; never hex literals in `ui/views/`.
-- **Selection = `bg-elevated` background**, never a coloured fill or left border.
-- **Same skeleton everywhere:** Sidebar · TopBar (search + `Filter ⌘F`) · TabRow ·
-  content · BottomBar (next actions with keycaps). Reuse the shared components; don't
-  hand-roll a new button row.
-- **Every shortcut is visible where it applies** (`Keycap` / `HintText`): sidebar `G x`,
-  `⌘1–9` on rows, menu rows, BottomBar. A new shortcut must also be added to the Shortcuts
-  sheet and the spec's shortcut list.
-- **Menus over button rows** — options go in a Display/Filter menu, not more pills.
-- **Verify visually**: screenshot the changed screen (recipe below) and compare with the
-  matching reference PNG before calling UI work done.
-
 ## Running headless / launch-verify
 
 Compile-clean ≠ runs. After **any** UI or dependency change, launch-verify that the

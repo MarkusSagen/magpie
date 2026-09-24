@@ -1,0 +1,684 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component ClipboardView inherits VerticalLayout {
+    callback activate(int);
+    callback add-tag(int, string);
+    in-out property <string> add-tag-text;
+    in property <[string]> all-tags;
+    callback clear-filters();
+    callback clear-merge();
+    in-out property <bool> cmd-held;
+    in property <[EntryRow]> entries;
+    in property <bool> filtered;
+    in property <int> merge-count;
+    callback merge-paste();
+    in-out property <int> merge-sep;
+    in-out property <string> mode;
+    callback open-in-editor(int);
+    callback paste-slot(int);
+    in-out property <length> preview-font-size;
+    in property <bool> preview-has-image;
+    in property <image> preview-image;
+    in property <[string]> preview-lines;
+    in property <string> preview-text;
+    in property <bool> preview-truncated;
+    in-out property <string> query;
+    callback remove-tag(int, string);
+    in-out property <bool> revealed;
+    in property <bool> screenshare;
+    callback search-changed(string);
+    in-out property <int> selected;
+    in property <[string]> selected-tags;
+    callback set-sort(int);
+    callback set-tag-filter(string);
+    callback set-type-filter(int);
+    in property <[SlotItem]> slots;
+    in-out property <int> sort-index;
+    in-out property <string> tag-filter;
+    in property <string> target-app;
+    in property <bool> target-has-icon;
+    in property <image> target-icon;
+    callback toggle-screenshare();
+    in-out property <int> type-index;
+    in-out property <string> view;
+                spacing: Theme.sp2;
+
+                // Row 1 — filter + sort the clipboard list.
+                HorizontalLayout {
+                    spacing: 6px;
+                    // Order must match `viewmodel::type_filter_from_index` /
+                    // `runtime::TYPE_CHIPS`.
+                    for label[i] in ["All", "Text", "Link", "Email", "Color", "Image", "File"]: Rectangle {
+                        height: 26px;
+                        width: 52px;
+                        background: i == root.type-index ? Theme.accent : (fta.has-hover ? Theme.border-strong : Theme.bg-elevated);
+                        border-radius: Theme.r-sm;
+                        fta := TouchArea { clicked => { root.type-index = i; root.set-type-filter(i); } }
+                        Text { text: label; color: i == root.type-index ? Theme.on-accent : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    for label[i] in ["Recent", "Most copied"]: Rectangle {
+                        height: 26px;
+                        width: i == 0 ? 62px : 92px;
+                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
+                        sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
+                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+
+                // Row 2 — utilities not covered by the left sidebar (screenshare
+                // mask, keyboard-shortcut help). Section navigation (Today/
+                // Journal/Notes/Tasks/Bookmarks/Board/Graph/Stats) now lives in
+                // the sidebar + its per-section view-switchers (Task 4).
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 84px;
+                        height: 26px;
+                        background: root.screenshare ? Theme.danger : (lockta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
+                        lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Image { source: Icons.lock; colorize: root.screenshare ? Theme.on-accent : Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                            Text { text: root.screenshare ? "Masked" : "Mask"; color: root.screenshare ? Theme.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        }
+                    }
+                    Rectangle {
+                        width: 34px;
+                        height: 26px;
+                        background: helpta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
+                        helpta := TouchArea { clicked => { root.mode = "help"; } }
+                        Text { text: "?"; color: Theme.text; font-size: Theme.fs-body; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+
+                // Screenshare mode is a big, silent change to every row — say so,
+                // otherwise a wall of dots reads as broken data.
+                if root.screenshare: Rectangle {
+                    height: 26px;
+                    background: Theme.danger.with-alpha(0.16);
+                    border-radius: Theme.r-sm;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 6px;
+                        Text {
+                            text: "Screenshare mode — content hidden. Click “Masked” to turn it off.";
+                            color: Theme.danger;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.all-tags.length > 0: HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    for t in root.all-tags: Rectangle {
+                        height: 22px;
+                        width: 64px;
+                        background: root.tag-filter == t ? Pal.accent : (tagta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: 11px;
+                        tagta := TouchArea { clicked => { root.set-tag-filter(t); } }
+                        Text {
+                            text: "#" + t;
+                            color: root.tag-filter == t ? Pal.on-accent : Theme.text;
+                            font-size: Theme.fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.merge-count > 0: HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Text {
+                        // "Merge 3 · sep:" was cryptic, and the ↵ / ␣ glyphs below
+                        // shaped as tofu — the options were literally unreadable.
+                        text: root.merge-count == 1
+                            ? "1 item queued · join with"
+                            : root.merge-count + " items queued · join with";
+                        color: Theme.text;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                    // Segmented control (selected = the same grey as Recent/Most
+                    // copied), NOT accent — accent is reserved for the one primary
+                    // action in this row, and two blue pills side by side made it
+                    // impossible to tell the selection from the button.
+                    for label[si] in ["New line", "Space", "Comma"]: Rectangle {
+                        width: 72px;
+                        height: 26px;
+                        background: si == root.merge-sep ? Theme.bg-elevated : (msta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        border-radius: Theme.r-sm;
+                        msta := TouchArea { clicked => { root.merge-sep = si; } }
+                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle { width: 6px; }
+                    Rectangle {
+                        width: 110px;
+                        height: 26px;
+                        background: mpta.has-hover ? Theme.accent.brighter(0.25) : Theme.accent;
+                        border-radius: Theme.r-sm;
+                        mpta := TouchArea { clicked => { root.merge-paste(); } }
+                        Text { text: "Merge & paste"; color: Pal.on-accent; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 54px;
+                        height: 26px;
+                        background: mcta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
+                        mcta := TouchArea { clicked => { root.clear-merge(); } }
+                        Text { text: "Clear"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+
+                // Speed-dial: assigned slots (⌘1-9). Shown only when any is filled.
+                if root.slots.length > 0: HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    Text { text: "Slots ⌘S"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                    for s in root.slots: Rectangle {
+                        height: 24px;
+                        width: 120px;
+                        background: slotta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
+                        slotta := TouchArea { clicked => { root.paste-slot(s.n); } }
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            spacing: 4px;
+                            Text { text: "⌘" + s.n; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+                            Text { text: s.title; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        }
+                    }
+                }
+
+                // Two-pane body.
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    // Scroll-follow: mirror `selected` locally so the `changed`
+                    // handler can reach `list` (an id inside this subtree).
+                    property <int> sel-follow: root.selected;
+                    changed sel-follow => {
+                        root.revealed = false;
+                        if root.selected * 52px < -list.viewport-y {
+                            list.viewport-y = -root.selected * 52px;
+                        } else if (root.selected + 1) * 52px > -list.viewport-y + list.visible-height {
+                            list.viewport-y = -((root.selected + 1) * 52px - list.visible-height);
+                        }
+                    }
+
+                    Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 340px;
+                    list := ListView {
+                        // Hide the native sliver; we draw our own scrollbar.
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                        for row[i] in entries: VerticalLayout {
+                            // Date group divider: a label with a full-width rule under it.
+                            if i == 0 || entries[i - 1].section != row.section: VerticalLayout {
+                                padding-top: 12px;
+                                padding-bottom: 2px;
+                                spacing: 5px;
+                                Text {
+                                    text: row.section;
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-sm;
+                                    font-weight: 600;
+                                }
+                                Rectangle { height: 1px; background: Theme.border; }
+                            }
+                            Rectangle {
+                            height: 52px;
+                            // Selection is a soft rounded fill only — no border/underline.
+                            background: (i == root.selected || rowta.has-hover) ? Theme.bg-elevated : transparent;
+                            border-radius: Theme.r-md;
+                            rowta := TouchArea {
+                                clicked => { root.selected = i; }
+                                double-clicked => { root.activate(i); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 10px;
+                                spacing: 8px;
+                                // 1-9 quick-paste number on the LEFT, aligned with the
+                                // top line of the copied text; brightens while ⌘/Ctrl held.
+                                Rectangle {
+                                    width: 20px;
+                                    if i < 9: Text {
+                                        y: 9px;
+                                        text: i + 1;
+                                        color: root.cmd-held ? Theme.accent : Theme.border-strong;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                // Leading visual, most content-specific first: the
+                                // image itself, then a colour swatch, then the
+                                // source-app icon (or the kind glyph). Showing the
+                                // app icon for an image entry told you where it came
+                                // from but never WHICH image it was.
+                                Rectangle {
+                                    width: 28px;
+                                    if row.has-thumb: Image {
+                                        source: row.thumb;
+                                        y: 8px;
+                                        width: 24px;
+                                        height: 20px;
+                                        image-fit: contain;
+                                    }
+                                    if !row.has-thumb && row.has-swatch: Rectangle {
+                                        y: 8px;
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 4px;
+                                        background: row.swatch;
+                                        border-width: 1px;
+                                        border-color: Theme.text-faint;
+                                    }
+                                    if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
+                                    if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: Theme.text-dim; }
+                                }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        if row.pinned: Image { source: Icons.act-pin; colorize: Theme.text-dim; width: 11px; height: 11px; image-fit: contain; }
+                                        Text { text: row.title; color: Theme.text; font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                                    }
+                                    Text { text: row.subtitle; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
+                                }
+                                // Merge checkmark only when this row is queued (via ⌘G / ⌘K).
+                                if row.merged: Rectangle {
+                                    width: 22px;
+                                    height: 22px;
+                                    background: Theme.accent;
+                                    border-radius: Theme.r-sm;
+                                    Text { text: "✓"; color: Theme.on-accent; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if row.slot > 0: Rectangle {
+                                    width: 24px;
+                                    height: 22px;
+                                    border-radius: Theme.r-sm;
+                                    background: Theme.bg-elevated;
+                                    Text { text: "⌘" + row.slot; color: Theme.text; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                            }
+                        }
+                    }
+                    // Empty state overlay. When a search or filter caused it, offer
+                    // the one click back out — otherwise it's a dead end.
+                    if entries.length == 0: VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            alignment: center;
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: (root.query != "" || root.filtered) ? "No matching items" : "No clipboard history yet";
+                                    color: Theme.text-dim;
+                                    font-size: Theme.fs-md;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: (root.query != "" || root.filtered)
+                                        ? "Nothing here matches your search and filters."
+                                        : "Copy something and it will show up here.";
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-sm;
+                                    horizontal-alignment: center;
+                                }
+                                if root.query != "" || root.filtered: HorizontalLayout {
+                                    alignment: center;
+                                    padding-top: 8px;
+                                    Rectangle {
+                                        height: 28px;
+                                        width: 168px;
+                                        background: resetta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                        border-radius: Theme.r-sm;
+                                        resetta := TouchArea {
+                                            clicked => {
+                                                root.query = "";
+                                                root.search-changed("");
+                                                root.clear-filters();
+                                            }
+                                        }
+                                        Text { text: "Clear search & filters"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Custom scrollbar (the native one is a barely-visible sliver).
+                    if list.viewport-height > list.visible-height + 1px: sb := Rectangle {
+                        x: parent.width - 6px;
+                        width: 5px;
+                        y: 0;
+                        height: parent.height;
+                        Rectangle {
+                            width: parent.width;
+                            border-radius: 3px;
+                            background: sbta.pressed ? Theme.border-strong.brighter(0.3) : (sbta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                            height: max(30px, sb.height * (list.visible-height / list.viewport-height));
+                            y: -list.viewport-y / list.viewport-height * sb.height;
+                        }
+                        sbta := TouchArea {
+                            property <length> anchor;
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    self.anchor = list.viewport-y;
+                                }
+                            }
+                            moved => {
+                                list.viewport-y = min(0px, max(-(list.viewport-height - list.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (list.viewport-height / sb.height)));
+                            }
+                        }
+                    }
+                    }
+
+                    // No entries → no detail to show. Dropping the pane entirely
+                    // (rather than leaving an empty dark slab) gives the empty-state
+                    // message the full width.
+                    if entries.length > 0: Rectangle {
+                        background: Theme.bg-panel;
+                        border-radius: Theme.r-md;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 10px;
+                            // Preview header: the pane's own label plus its actions.
+                            // These live ABOVE the text so they always sit in the same
+                            // place — previously they floated in the middle of the
+                            // empty space left by a short entry.
+                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Preview";
+                                    color: Theme.text-dim;
+                                    font-size: Theme.fs-body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                if entries[root.selected].masked && !root.revealed: Rectangle {
+                                    height: 26px;
+                                    width: 88px;
+                                    background: revta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    revta := TouchArea { clicked => { root.revealed = true; } }
+                                    Text { text: "Reveal"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                Rectangle {
+                                    height: 26px;
+                                    width: 116px;
+                                    background: oeta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
+                                    Text { text: "↗ Open in editor"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+
+                            // Detail preview — a VIRTUALIZED line list. Only the
+                            // visible lines are shaped, so huge entries are instant.
+                            // Rust pushes preview-lines (masked→bullets, else the
+                            // real lines, bounded) for the selected entry.
+                            Rectangle {
+                                min-height: 100px;
+                                vertical-stretch: 1;
+                                // Image entries: the bitmap itself, scaled to fit.
+                                if root.preview-has-image: Image {
+                                    source: root.preview-image;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    image-fit: contain;
+                                }
+                                // Colour entries: a large swatch above the value, so
+                                // "#333" is something you can actually see.
+                                if !root.preview-has-image && root.selected < entries.length && entries[root.selected].has-swatch: VerticalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Rectangle {
+                                        height: 72px;
+                                        border-radius: 8px;
+                                        background: entries[root.selected].swatch;
+                                        border-width: 1px;
+                                        border-color: Theme.text-faint;
+                                    }
+                                }
+                                // Normal-size entries: a selectable, scrollable,
+                                // zoomable read-only TextInput (drag to select, ⌘C).
+                                // Plain TextInput (not std TextEdit) so we control the
+                                // text color — the themed TextEdit rendered invisibly
+                                // on the dark pane.
+                                if !root.preview-has-image && root.preview-text != "": Flickable {
+                                    y: (root.selected < entries.length && entries[root.selected].has-swatch) ? 88px : 0px;
+                                    viewport-width: self.width;
+                                    viewport-height: pvtext.preferred-height;
+                                    pvtext := TextInput {
+                                        width: parent.width;
+                                        text: root.preview-text;
+                                        color: Theme.text;
+                                        font-size: root.preview-font-size;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                // Huge entries: fast virtualized line list (not
+                                // selectable) so selection stays instant. Wrapped so
+                                // `plist` stays in scope for its custom scrollbar.
+                                if !root.preview-has-image && root.preview-text == "": Rectangle {
+                                    plist := ListView {
+                                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                                        for ln in root.preview-lines: Rectangle {
+                                            height: root.preview-font-size * 1.5;
+                                            Text {
+                                                x: 0;
+                                                width: parent.width;
+                                                text: ln;
+                                                color: Theme.text;
+                                                font-size: root.preview-font-size;
+                                                overflow: elide;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    // Custom scrollbar for the preview (flush right).
+                                    if plist.viewport-height > plist.visible-height + 1px: pv := Rectangle {
+                                        x: parent.width - 6px;
+                                        width: 5px;
+                                        y: 0;
+                                        height: parent.height;
+                                        Rectangle {
+                                            width: parent.width;
+                                            border-radius: 3px;
+                                            background: pvta.pressed ? Theme.border-strong.brighter(0.3) : (pvta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                                            height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
+                                            y: -plist.viewport-y / plist.viewport-height * pv.height;
+                                        }
+                                        pvta := TouchArea {
+                                            property <length> anchor;
+                                            pointer-event(e) => {
+                                                if (e.kind == PointerEventKind.down) { self.anchor = plist.viewport-y; }
+                                            }
+                                            moved => {
+                                                plist.viewport-y = min(0px, max(-(plist.viewport-height - plist.visible-height), self.anchor - (self.mouse-y - self.pressed-y) * (plist.viewport-height / pv.height)));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.preview-truncated: Text {
+                                text: "Preview truncated — open in editor to see all";
+                                color: Theme.text-faint;
+                                font-size: Theme.fs-sm;
+                                wrap: word-wrap;
+                            }
+
+                            // Metadata "Information" block (Raycast-style; right-aligned values).
+                            // `vertical-stretch: 0` + fixed row heights: in a tall
+                            // window the block used to absorb the slack and its rows
+                            // drifted apart unevenly. All spare height belongs to the
+                            // preview area above.
+                            if entries.length > 0 && root.selected < entries.length: VerticalLayout {
+                                spacing: 5px;
+                                vertical-stretch: 0;
+                                alignment: start;
+                                Rectangle { height: 1px; background: Theme.border; }
+                                Text { text: "Information"; color: Theme.text-dim; font-size: Theme.fs-body; }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Source"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
+                                    Text { text: entries[root.selected].source; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
+                                }
+                                // spacing keeps the label and its right-aligned value from
+                                // touching once the pane is narrow.
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Content type"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].kind; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Size"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].size; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; overflow: elide; }
+                                }
+                                // Images and file lists have no words — a hard "0"
+                                // read as a bug rather than "not applicable".
+                                if entries[root.selected].words > 0: HorizontalLayout {
+                                    spacing: 12px;
+                                    Text { text: "Words"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].words; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Times copied"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Last used"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].when; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Copied"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied-date; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 12px;
+                                    Text { text: "Slot"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                }
+                            }
+
+                            // Tag chips for the selected entry (click to remove).
+                            if root.selected-tags.length > 0: HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                vertical-stretch: 0;
+                                for t in root.selected-tags: Rectangle {
+                                    height: 22px;
+                                    width: 74px;
+                                    background: chipta.has-hover ? Theme.border-strong : Theme.bg-elevated;
+                                    border-radius: 11px;
+                                    chipta := TouchArea { clicked => { root.remove-tag(root.selected, t); } }
+                                    Text {
+                                        text: "#" + t + " ✕";
+                                        color: Theme.text;
+                                        font-size: Theme.fs-sm;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+
+                            // Add-tag input. Enter commits, so the button is a fallback.
+                            if entries.length > 0 && root.selected < entries.length: HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                vertical-stretch: 0;
+                                tagfield := LineEdit {
+                                    placeholder-text: "Add tag…";
+                                    width: 140px;
+                                    text <=> root.add-tag-text;
+                                    accepted => { root.add-tag(root.selected, root.add-tag-text); }
+                                }
+                                Rectangle {
+                                    width: 48px;
+                                    height: 26px;
+                                    background: addta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    addta := TouchArea { clicked => { root.add-tag(root.selected, root.add-tag-text); } }
+                                    Text { text: "Add"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom action bar.
+                Rectangle {
+                    height: 34px;
+                    background: Theme.bg-sidebar;
+                    border-radius: Theme.r-md;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+                        // "From <app>" — a bare app name here read as a stray word.
+                        Text {
+                            text: (entries.length > 0 && root.selected < entries.length) ? "From " + entries[root.selected].source : "";
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        // With nothing selected these keys do nothing, so don't
+                        // advertise them — the bar used to promise "⏎ Paste to X"
+                        // over an empty list.
+                        if entries.length > 0 && root.target-has-icon: Rectangle {
+                            width: 14px;
+                            Image { source: root.target-icon; width: 14px; height: 14px; }
+                        }
+                        if entries.length > 0: Text {
+                            text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                        if entries.length > 0: Text { text: "⌘C Copy   ⌘K Actions"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        if entries.length == 0: Text { text: "⌘/ Shortcuts"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                    }
+                }
+            }

@@ -1,0 +1,88 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component EditorView inherits Rectangle {
+    callback cancel-edit();
+    in-out property <string> edit-mode;
+    in-out property <string> edit-text;
+    callback save-edit(string);
+            background: #000000cc;
+            TouchArea {} // swallow clicks behind the modal
+            Rectangle {
+                width: 540px;
+                height: 420px;
+                background: Theme.bg-app;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: root.edit-mode == "snippet" ? "New snippet" : "Edit entry";
+                        color: Theme.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.edit-mode == "snippet"
+                            ? "Snippets are saved alongside your history — search and paste them like any other entry."
+                            : "Saving replaces this entry’s text. The original is not kept.";
+                        color: Theme.text-dim;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    // FocusScope so Esc / ⌘⏎ still work while the editor has focus
+                    // (TextEdit rejects them, so they bubble up here).
+                    FocusScope {
+                        vertical-stretch: 1;
+                        key-pressed(event) => {
+                            if event.text == Key.Escape { root.cancel-edit(); return accept; }
+                            if event.modifiers.control && event.text == Key.Return {
+                                root.save-edit(root.edit-text);
+                                return accept;
+                            }
+                            return reject;
+                        }
+                        editor := TextEdit {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.edit-text;
+                            init => { editor.focus(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "⌘⏎ Save · Esc Cancel";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 74px;
+                            height: 30px;
+                            background: cancelta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                            border-radius: 6px;
+                            cancelta := TouchArea { clicked => { root.cancel-edit(); } }
+                            Text { text: "Cancel"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 74px;
+                            height: 30px;
+                            background: saveta.has-hover ? Theme.accent.brighter(0.25) : Pal.accent;
+                            border-radius: 6px;
+                            saveta := TouchArea { clicked => { root.save-edit(root.edit-text); } }
+                            Text { text: "Save"; color: Pal.on-accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+        }

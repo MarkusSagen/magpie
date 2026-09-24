@@ -1,0 +1,373 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+import { ClipboardView } from "clipboard.slint";
+import { StatsView } from "stats.slint";
+
+export component MainView inherits VerticalLayout {
+    in-out property <int> action-selected;
+    in property <[ActionItem]> actions;
+    callback actions-backspace();
+    callback actions-key-char(string);
+    callback activate(int);
+    callback activate-keep(int);
+    callback activate-nth(int);
+    callback add-tag(int, string);
+    in-out property <string> add-tag-text;
+    in property <[string]> all-tags;
+    callback assign-slot(int, int);
+    in-out property <bool> board-mode;
+    in-out property <bool> bookmarks-mode;
+    in property <[Bar]> by-type-bars;
+    callback clear-filters();
+    callback clear-merge();
+    in-out property <bool> cmd-held;
+    callback copy-only(int);
+    callback delete-entry(int);
+    callback delete-time-entry(int);
+    callback dismiss-accessibility();
+    in property <[EntryRow]> entries;
+    in property <bool> filtered;
+    in-out property <bool> graph-mode;
+    callback hide-window();
+    in-out property <bool> journal-mode;
+    in property <int> merge-count;
+    callback merge-paste();
+    in-out property <int> merge-sep;
+    in-out property <string> mode;
+    in property <[Bar]> most-copied-bars;
+    callback nav-back();
+    callback nav-cycle-view(int);
+    callback nav-forward();
+    in-out property <bool> nav-leader;
+    callback nav-previous();
+    callback nav-section(string);
+    in-out property <bool> needs-accessibility;
+    callback new-snippet();
+    callback note-from-entry(int);
+    in-out property <bool> notes-mode;
+    callback open-actions();
+    callback open-in-editor(int);
+    callback open-search();
+    callback open-slots();
+    in property <[Bar]> over-time-bars;
+    in property <string> over-time-caption;
+    callback paste-slot(int);
+    in property <[Bar]> per-app-bars;
+    in-out property <length> preview-font-size;
+    in property <bool> preview-has-image;
+    in property <image> preview-image;
+    in property <[string]> preview-lines;
+    in property <string> preview-text;
+    in property <bool> preview-truncated;
+    in-out property <string> query;
+    in-out property <int> range-index;
+    callback remove-tag(int, string);
+    in-out property <bool> revealed;
+    callback run-action(string);
+    callback run-unified-search(string);
+    in property <bool> screenshare;
+    callback search-changed(string);
+    in-out property <bool> search-mode;
+    in-out property <string> search-query;
+    in-out property <int> selected;
+    in property <[string]> selected-tags;
+    callback set-sort(int);
+    callback set-tag-filter(string);
+    callback set-type-filter(int);
+    in-out property <length> sidebar-w;
+    in property <[SlotItem]> slots;
+    in-out property <int> sort-index;
+    callback start-edit(int);
+    callback stats-range-changed(int);
+    in-out property <string> tag-filter;
+    in property <string> target-app;
+    in property <bool> target-has-icon;
+    in property <image> target-icon;
+    in-out property <bool> tasks-mode;
+    in property <[Bar]> time-by-day-bars;
+    in property <[Bar]> time-by-project-bars;
+    in property <[TimeEntryRow]> time-entries;
+    in property <string> time-week-total;
+    in-out property <bool> today-mode;
+    callback toggle-merge(int);
+    callback toggle-pin(int);
+    callback toggle-screenshare();
+    in property <string> totals-line;
+    in-out property <int> type-index;
+    in-out property <string> view;
+    callback zoom-preview(int);
+    forward-focus: searchinput;
+    public function focus-input() { searchinput.focus(); }
+            // Inset to the right of the sidebar via left padding (see the note
+            // by `sidebar-w` above for why this isn't an `x`/`width` override).
+            padding-left: root.sidebar-w + 8px;
+            padding-right: 8px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 8px;
+
+            // Command-bar search — a real TextInput (native cursor + editing
+            // shortcuts). It owns keyboard focus; nav/our ⌘-shortcuts are
+            // intercepted in key-pressed, everything else falls through to editing.
+            Rectangle {
+                height: 44px;
+                background: Theme.bg-panel;
+                border-radius: Theme.r-md;
+                border-width: 1px;
+                border-color: searchinput.has-focus ? Theme.border-strong : Theme.border;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 12px;
+                    spacing: Theme.sp2;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        if root.query == "": Text {
+                            x: 0;
+                            text: "Search clipboard…";
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-lg;
+                            vertical-alignment: center;
+                        }
+                        searchinput := TextInput {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.query;
+                            color: Theme.text;
+                            font-size: Theme.fs-lg;
+                            single-line: true;
+                            vertical-alignment: center;
+                            edited => {
+                                root.search-changed(self.text);
+                            }
+                            key-released(event) => {
+                                root.cmd-held = event.modifiers.control;
+                                return reject;
+                            }
+                            key-pressed(event) => {
+                                root.cmd-held = event.modifiers.control;
+                                // ---- overlays / non-list modes: swallow, route to overlay ----
+                                if root.mode == "help" {
+                                    if event.text == Key.Escape || event.text == "?" || (event.modifiers.control && event.text == "/") { root.mode = "list"; }
+                                    return accept;
+                                }
+                                if root.mode == "search" {
+                                    if event.text == Key.Escape { root.mode = "list"; }
+                                    return accept;
+                                }
+                                // Slot picker: 1–9 assigns (or clears, if the slot
+                                // already holds this entry) and returns to the list.
+                                if root.mode == "slots" {
+                                    if event.text == Key.Escape { root.mode = "list"; return accept; }
+                                    if event.text == "1" { root.assign-slot(root.selected, 1); root.mode = "list"; return accept; }
+                                    if event.text == "2" { root.assign-slot(root.selected, 2); root.mode = "list"; return accept; }
+                                    if event.text == "3" { root.assign-slot(root.selected, 3); root.mode = "list"; return accept; }
+                                    if event.text == "4" { root.assign-slot(root.selected, 4); root.mode = "list"; return accept; }
+                                    if event.text == "5" { root.assign-slot(root.selected, 5); root.mode = "list"; return accept; }
+                                    if event.text == "6" { root.assign-slot(root.selected, 6); root.mode = "list"; return accept; }
+                                    if event.text == "7" { root.assign-slot(root.selected, 7); root.mode = "list"; return accept; }
+                                    if event.text == "8" { root.assign-slot(root.selected, 8); root.mode = "list"; return accept; }
+                                    if event.text == "9" { root.assign-slot(root.selected, 9); root.mode = "list"; return accept; }
+                                    return accept;
+                                }
+                                if root.mode == "actions" {
+                                    if event.text == Key.UpArrow { if root.action-selected > 0 { root.action-selected -= 1; } return accept; }
+                                    if event.text == Key.DownArrow { if root.action-selected < root.actions.length - 1 { root.action-selected += 1; } return accept; }
+                                    if event.text == Key.Escape { root.mode = "list"; return accept; }
+                                    if event.text == Key.Return { if root.actions.length > 0 && root.action-selected < root.actions.length { root.run-action(root.actions[root.action-selected].id); } return accept; }
+                                    if event.text == Key.Backspace { root.actions-backspace(); return accept; }
+                                    if event.text == Key.Tab || event.text == Key.Delete || event.text == Key.Home
+                                        || event.text == Key.End || event.text == Key.PageUp || event.text == Key.PageDown
+                                        || event.text == Key.LeftArrow || event.text == Key.RightArrow
+                                        || event.text == Key.Shift || event.text == Key.Control
+                                        || event.text == Key.Alt || event.text == Key.Meta {
+                                        return accept;
+                                    }
+                                    if event.text.character-count == 1 { root.actions-key-char(event.text); }
+                                    return accept;
+                                }
+                                if root.view == "stats" {
+                                    if event.text == Key.Escape { root.view = "list"; return accept; }
+                                    // Type-to-search from Stats: a printable key drops back to
+                                    // the list and lands in the search field (so the field is
+                                    // never a dead control).
+                                    if event.text == Key.Return || event.text == Key.Backspace
+                                        || event.text == Key.Tab || event.text == Key.Delete
+                                        || event.text == Key.UpArrow || event.text == Key.DownArrow
+                                        || event.text == Key.LeftArrow || event.text == Key.RightArrow
+                                        || event.text == Key.Home || event.text == Key.End
+                                        || event.text == Key.PageUp || event.text == Key.PageDown
+                                        || event.text == Key.Shift || event.text == Key.Control
+                                        || event.text == Key.Alt || event.text == Key.Meta {
+                                        return accept;
+                                    }
+                                    if !event.modifiers.control && event.text.character-count == 1 {
+                                        root.view = "list";
+                                        return reject;
+                                    }
+                                    return accept;
+                                }
+                                // ---- vim-style g-leader: `g` (empty query) arms it, then
+                                // c/t/n/b/s jumps to a section. Consume-check MUST come
+                                // first so it intercepts the very next keypress, whatever
+                                // it is (including Esc, which just disarms).
+                                if root.nav-leader {
+                                    root.nav-leader = false;
+                                    if event.text == "c" { root.nav-section("clipboard"); return accept; }
+                                    if event.text == "t" { root.nav-section("tasks"); return accept; }
+                                    if event.text == "n" { root.nav-section("notes"); return accept; }
+                                    if event.text == "b" { root.nav-section("bookmarks"); return accept; }
+                                    if event.text == "s" { root.nav-section("stats"); return accept; }
+                                    return accept;
+                                }
+                                if !event.modifiers.control && event.text == "g" && root.query == "" {
+                                    root.nav-leader = true;
+                                    return accept;
+                                }
+                                // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
+                                if event.text == Key.UpArrow {
+                                    if root.selected > 0 { root.selected -= 1; }
+                                    return accept;
+                                }
+                                if event.text == Key.DownArrow {
+                                    if root.selected < root.entries.length - 1 { root.selected += 1; }
+                                    return accept;
+                                }
+                                if event.text == Key.Return {
+                                    if event.modifiers.control { root.activate-keep(root.selected); } else { root.activate(root.selected); }
+                                    return accept;
+                                }
+                                if event.text == Key.Escape {
+                                    if root.needs-accessibility { root.dismiss-accessibility(); return accept; }
+                                    if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
+                                    root.hide-window();
+                                    return accept;
+                                }
+                                if event.modifiers.control {
+                                    // ⌘⌫ deletes the selected entry (Finder's "move to trash"
+                                    // idiom). Esc still clears the whole query, ⌥⌫ a word.
+                                    if event.text == Key.Backspace { root.delete-entry(root.selected); return accept; }
+                                    if event.text == "c" { root.copy-only(root.selected); return accept; }
+                                    if event.text == "k" { root.open-actions(); return accept; }
+                                    if event.text == "s" { root.open-slots(); return accept; }
+                                    // ⌘⇧F — "Find everywhere": must be checked before the
+                                    // plain ⌘F filters shortcut below (some backends still
+                                    // report the unshifted "f" while shift is held).
+                                    if event.modifiers.shift && (event.text == "f" || event.text == "F") {
+                                        root.notes-mode = false;
+                                        root.tasks-mode = false;
+                                        root.bookmarks-mode = false;
+                                        root.today-mode = false;
+                                        root.journal-mode = false;
+                                        root.board-mode = false;
+                                        root.graph-mode = false;
+                                        root.search-query = "";
+                                        root.search-mode = true;
+                                        root.run-unified-search("");
+                                        return accept;
+                                    }
+                                    if event.text == "f" { root.open-search(); return accept; }
+                                    if event.text == "/" { root.mode = "help"; return accept; }
+                                    if event.text == "e" { root.start-edit(root.selected); return accept; }
+                                    if event.text == "n" { root.new-snippet(); return accept; }
+                                    if event.text == "g" { root.toggle-merge(root.selected); return accept; }
+                                    if event.text == "j" { root.note-from-entry(root.selected); return accept; }
+                                    if event.text == "p" { root.toggle-pin(root.selected); return accept; }
+                                    // Preview zoom: ⌘+ / ⌘= bigger, ⌘- smaller, ⌘0 reset.
+                                    if event.text == "=" || event.text == "+" { root.zoom-preview(1); return accept; }
+                                    if event.text == "-" { root.zoom-preview(-1); return accept; }
+                                    if event.text == "0" { root.zoom-preview(0); return accept; }
+                                    if event.text == "1" { root.activate-nth(1); return accept; }
+                                    if event.text == "2" { root.activate-nth(2); return accept; }
+                                    if event.text == "3" { root.activate-nth(3); return accept; }
+                                    if event.text == "4" { root.activate-nth(4); return accept; }
+                                    if event.text == "5" { root.activate-nth(5); return accept; }
+                                    if event.text == "6" { root.activate-nth(6); return accept; }
+                                    if event.text == "7" { root.activate-nth(7); return accept; }
+                                    if event.text == "8" { root.activate-nth(8); return accept; }
+                                    if event.text == "9" { root.activate-nth(9); return accept; }
+                                    // ---- keyboard-nav history / view cycling ----
+                                    if event.modifiers.alt && event.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                                    if event.modifiers.alt && event.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                                    if event.modifiers.alt && event.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                                    if event.text == "[" { root.nav-back(); return accept; }
+                                    if event.text == "]" { root.nav-forward(); return accept; }
+                                    // ⌘A / ⌘V / ⌘X / ⌘←→ / ⌘⌫ etc. → native editing
+                                    return reject;
+                                }
+                                // typing, ⌫, ⌥⌫, ⌥←→, Left/Right, etc. → native editing
+                                return reject;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- List view ----
+            if root.view == "list": ClipboardView {
+                activate(a0) => { root.activate(a0); }
+                add-tag(a0, a1) => { root.add-tag(a0, a1); }
+                add-tag-text <=> root.add-tag-text;
+                all-tags: root.all-tags;
+                clear-filters() => { root.clear-filters(); }
+                clear-merge() => { root.clear-merge(); }
+                cmd-held <=> root.cmd-held;
+                entries: root.entries;
+                filtered: root.filtered;
+                merge-count: root.merge-count;
+                merge-paste() => { root.merge-paste(); }
+                merge-sep <=> root.merge-sep;
+                mode <=> root.mode;
+                open-in-editor(a0) => { root.open-in-editor(a0); }
+                paste-slot(a0) => { root.paste-slot(a0); }
+                preview-font-size <=> root.preview-font-size;
+                preview-has-image: root.preview-has-image;
+                preview-image: root.preview-image;
+                preview-lines: root.preview-lines;
+                preview-text: root.preview-text;
+                preview-truncated: root.preview-truncated;
+                query <=> root.query;
+                remove-tag(a0, a1) => { root.remove-tag(a0, a1); }
+                revealed <=> root.revealed;
+                screenshare: root.screenshare;
+                search-changed(a0) => { root.search-changed(a0); }
+                selected <=> root.selected;
+                selected-tags: root.selected-tags;
+                set-sort(a0) => { root.set-sort(a0); }
+                set-tag-filter(a0) => { root.set-tag-filter(a0); }
+                set-type-filter(a0) => { root.set-type-filter(a0); }
+                slots: root.slots;
+                sort-index <=> root.sort-index;
+                tag-filter <=> root.tag-filter;
+                target-app: root.target-app;
+                target-has-icon: root.target-has-icon;
+                target-icon: root.target-icon;
+                toggle-screenshare() => { root.toggle-screenshare(); }
+                type-index <=> root.type-index;
+                view <=> root.view;
+            }
+
+            // ---- Stats view ----
+            if root.view == "stats": StatsView {
+                by-type-bars: root.by-type-bars;
+                delete-time-entry(a0) => { root.delete-time-entry(a0); }
+                most-copied-bars: root.most-copied-bars;
+                over-time-bars: root.over-time-bars;
+                over-time-caption: root.over-time-caption;
+                per-app-bars: root.per-app-bars;
+                range-index <=> root.range-index;
+                stats-range-changed(a0) => { root.stats-range-changed(a0); }
+                time-by-day-bars: root.time-by-day-bars;
+                time-by-project-bars: root.time-by-project-bars;
+                time-entries: root.time-entries;
+                time-week-total: root.time-week-total;
+                totals-line: root.totals-line;
+                view <=> root.view;
+            }
+
+        }

@@ -1,0 +1,458 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component BoardView inherits Rectangle {
+    callback focus-search();
+    in property <[BoardColumn]> board;
+    callback board-controls-changed();
+    in-out property <bool> board-drag-active;
+    in-out property <int> board-drag-line;
+    in-out property <int> board-drag-note;
+    in-out property <string> board-drag-title;
+    in-out property <length> board-drag-x;
+    in-out property <length> board-drag-y;
+    in-out property <int> board-group;
+    in-out property <bool> board-hide-done;
+    in-out property <int> board-layout;
+    in-out property <bool> board-mode;
+    callback board-open-task(int);
+    in-out property <string> board-project-filter;
+    in property <[string]> board-projects;
+    in-out property <string> board-query;
+    callback board-set-status(int, int, int);
+    in-out property <int> board-sort;
+    callback nav-back();
+    callback nav-cycle-view(int);
+    callback nav-forward();
+    in-out property <bool> nav-leader;
+    callback nav-previous();
+    callback nav-section(string);
+    callback set-mode-board(bool);
+    callback set-task-view(string);
+    in-out property <length> sidebar-w;
+    in-out property <string> tasks-view;
+            background: Theme.bg-app;
+            bfs := FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
+                    if e.text == Key.Escape {
+                        root.set-mode-board(false);
+                        root.focus-search();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                // Top bar: back to clipboard + title.
+                HorizontalLayout {
+                    spacing: 8px;
+                    // [Today · List · Board] — replaces the old "← Clipboard" back
+                    // button; the sidebar's Clipboard icon is the back button now.
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for tv in ["today", "list", "board"]: Rectangle {
+                            height: 30px;
+                            width: 56px;
+                            border-radius: 6px;
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw3.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            tvsw3 := TouchArea { clicked => { root.set-task-view(tv); } }
+                            Text {
+                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                // Controls row 1: Group / Layout / Sort chip groups + Hide done.
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text { text: "Group:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        for g[i] in ["Status", "Priority", "Project"]: Rectangle {
+                            height: 24px;
+                            width: 66px;
+                            border-radius: 6px;
+                            background: root.board-group == i ? Pal.accent : (bgta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            bgta := TouchArea { clicked => { root.board-group = i; root.board-controls-changed(); } }
+                            Text { text: g; color: root.board-group == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text { text: "Layout:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        for lo[i] in ["Kanban", "List", "Grid", "Table"]: Rectangle {
+                            height: 24px;
+                            width: 58px;
+                            border-radius: 6px;
+                            background: root.board-layout == i ? Pal.accent : (blta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            blta := TouchArea { clicked => { root.board-layout = i; root.board-controls-changed(); } }
+                            Text { text: lo; color: root.board-layout == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text { text: "Sort:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        for so[i] in ["Due", "Priority", "Title", "Status"]: Rectangle {
+                            height: 24px;
+                            width: 66px;
+                            border-radius: 6px;
+                            background: root.board-sort == i ? Pal.accent : (bsta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            bsta := TouchArea { clicked => { root.board-sort = i; root.board-controls-changed(); } }
+                            Text { text: so; color: root.board-sort == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    Rectangle {
+                        height: 24px;
+                        width: 84px;
+                        border-radius: 6px;
+                        background: root.board-hide-done ? Pal.accent : (bhdta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        bhdta := TouchArea { clicked => { root.board-hide-done = !root.board-hide-done; root.board-controls-changed(); } }
+                        Text { text: "Hide done"; color: root.board-hide-done ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // Controls row 2: project filter chips + title search.
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        // Flickable itself can't take `clip` (Rectangle/Path only) —
+                        // wrap it so an overflowing last chip doesn't bleed into the
+                        // search field instead of just being scrollable to.
+                        width: 240px;
+                        height: 26px;
+                        clip: true;
+                        Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: bprow.preferred-width;
+                            viewport-height: self.height;
+                            bprow := HorizontalLayout {
+                                height: 26px;
+                                spacing: 4px;
+                                alignment: start;
+                                Rectangle {
+                                    height: 24px;
+                                    width: 40px;
+                                    border-radius: 6px;
+                                    background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    bpallta := TouchArea { clicked => { root.board-project-filter = ""; root.board-controls-changed(); } }
+                                    Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                for p in root.board-projects: Rectangle {
+                                    height: 24px;
+                                    width: 76px;
+                                    border-radius: 6px;
+                                    background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    bpta := TouchArea { clicked => { root.board-project-filter = p; root.board-controls-changed(); } }
+                                    Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 26px;
+                        background: Theme.bg-panel;
+                        border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            if root.board-query == "": Text { text: "Search title…"; color: Theme.text-faint; font-size: 12px; vertical-alignment: center; }
+                            bqta := TextInput {
+                                text <=> root.board-query;
+                                color: Theme.text;
+                                font-size: 12px;
+                                single-line: true;
+                                vertical-alignment: center;
+                                edited => { root.board-controls-changed(); }
+                            }
+                        }
+                    }
+                }
+                // Body: Kanban scrolls columns horizontally; List/Grid/Table all
+                // stack per-column sections vertically (headers differ per layout).
+                if root.board-layout == 0: Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: kanbanrow.preferred-width;
+                    viewport-height: self.height;
+                    kanbanrow := HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        for col in root.board: Rectangle {
+                            width: 260px;
+                            background: (root.board-drag-active && root.board-group == 0
+                                && root.board-drag-x >= self.absolute-position.x
+                                && root.board-drag-x < self.absolute-position.x + self.width) ? Theme.bg-elevated : Theme.bg-panel;
+                            border-radius: 8px;
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 8px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: col.title; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                    Text { text: col.count; color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
+                                }
+                                ListView {
+                                    for t in col.tasks: BoardCard {
+                                        t: t;
+                                        draggable: root.board-group == 0;
+                                        open => { root.board-open-task(t.note_id); }
+                                        set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                                        drag-start(id, line, title) => {
+                                            root.board-drag-note = id;
+                                            root.board-drag-line = line;
+                                            root.board-drag-title = title;
+                                            root.board-drag-active = true;
+                                        }
+                                        drag-move(x, y) => {
+                                            root.board-drag-x = x;
+                                            root.board-drag-y = y;
+                                        }
+                                        drag-end(x, y) => {
+                                            root.board-drag-active = false;
+                                            if (root.board-group == 0 && root.board.length > 0) {
+                                                // Columns are 260px wide + 10px spacing = 270px pitch, laid
+                                                // out from kanbanrow's left edge (absolute-position already
+                                                // accounts for any horizontal scroll).
+                                                root.board-set-status(
+                                                    root.board-drag-note,
+                                                    root.board-drag-line,
+                                                    Math.clamp(Math.floor((x - kanbanrow.absolute-position.x) / 270px), 0, root.board.length - 1));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.board-layout == 1: ListView {
+                    vertical-stretch: 1;
+                    // Compact single-line rows (density of the classic Tasks view) —
+                    // a full BoardCard per row was far too tall/sparse here.
+                    for col in root.board: VerticalLayout {
+                        spacing: 2px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            height: 24px;
+                            alignment: start;
+                            Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                            Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
+                        }
+                        for t in col.tasks: Rectangle {
+                            height: 40px;
+                            background: lrta.has-hover ? Theme.bg-elevated : transparent;
+                            border-radius: 6px;
+                            lrta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                spacing: 8px;
+                                alignment: start;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    for i in [0, 1, 2]: Rectangle {
+                                        width: 11px;
+                                        height: 11px;
+                                        border-radius: 6px;
+                                        border-width: 1.5px;
+                                        background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
+                                        border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
+                                            : (i == 1 && t.doing) ? transparent
+                                            : (i == 2 && t.done) ? transparent
+                                            : (lsta.has-hover ? Theme.text : Theme.text-faint);
+                                        lsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
+                                    }
+                                }
+                                Text {
+                                    text: t.title;
+                                    color: t.done ? Theme.text-faint : Theme.text;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                if t.priority <= 2: Rectangle {
+                                    width: 16px;
+                                    height: 16px;
+                                    border-radius: 4px;
+                                    background: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
+                                    Text {
+                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                        color: #16161a;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; overflow: elide; width: 90px; }
+                            }
+                        }
+                    }
+                }
+                // Grid: per-column sections of wrapping tiles. Slint has no
+                // flow-wrap layout, so tiles are positioned with absolute x/y
+                // index math inside a full-width Rectangle whose height grows
+                // with however many rows the tile count needs.
+                if root.board-layout == 2: Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: gridcol.preferred-height;
+                    gridcol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        for col in root.board: VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 24px;
+                                Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
+                            }
+                            gridtiles := Rectangle {
+                                width: 100%;
+                                property <length> tile-w: 232px;
+                                property <length> tile-h: 84px;
+                                property <int> cols: max(1, Math.floor(gridtiles.width / gridtiles.tile-w));
+                                height: Math.ceil(col.tasks.length / gridtiles.cols) * gridtiles.tile-h;
+                                for t[i] in col.tasks: BoardCard {
+                                    width: gridtiles.tile-w - 8px;
+                                    height: gridtiles.tile-h - 8px;
+                                    x: Math.mod(i, gridtiles.cols) * gridtiles.tile-w;
+                                    y: Math.floor(i / gridtiles.cols) * gridtiles.tile-h;
+                                    t: t;
+                                    open => { root.board-open-task(t.note_id); }
+                                    set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Table: a compact spreadsheet view — one header row, then a
+                // group separator + fixed-column rows per board column.
+                if root.board-layout == 3: Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: tablecol.preferred-height;
+                    tablecol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 22px;
+                            HorizontalLayout {
+                                padding-left: 4px;
+                                padding-right: 4px;
+                                spacing: 8px;
+                                Text { text: "Title"; color: Theme.text-dim; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+                                Text { text: "Status"; color: Theme.text-dim; font-size: 11px; width: 64px; vertical-alignment: center; }
+                                Text { text: "Prio"; color: Theme.text-dim; font-size: 11px; width: 28px; vertical-alignment: center; }
+                                Text { text: "Due"; color: Theme.text-dim; font-size: 11px; width: 90px; vertical-alignment: center; }
+                                Text { text: "#Project"; color: Theme.text-dim; font-size: 11px; width: 120px; vertical-alignment: center; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: Theme.border; }
+                        }
+                        for col in root.board: VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 22px;
+                                Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
+                                Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
+                            }
+                            for t in col.tasks: Rectangle {
+                                height: 30px;
+                                background: trta.has-hover ? Theme.bg-elevated : transparent;
+                                trta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
+                                HorizontalLayout {
+                                    padding-left: 4px;
+                                    padding-right: 4px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: t.title;
+                                        color: t.done ? Theme.text-faint : Theme.text;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        width: 64px;
+                                        spacing: 8px;
+                                        alignment: center;
+                                        for i in [0, 1, 2]: Rectangle {
+                                            width: 13px;
+                                            height: 13px;
+                                            border-radius: 7px;
+                                            border-width: 1.5px;
+                                            background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
+                                            border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
+                                                : (i == 1 && t.doing) ? transparent
+                                                : (i == 2 && t.done) ? transparent
+                                                : (tsta.has-hover ? Theme.text : Theme.text-faint);
+                                            tsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 28px;
+                                        if t.priority <= 2: Text {
+                                            text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                            color: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; width: 90px; overflow: elide; vertical-alignment: center; }
+                                    Text { text: t.project != "" ? "#" + t.project : ""; color: Theme.link; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.board.length == 0: HorizontalLayout {
+                    alignment: center;
+                    Text { text: "No tasks match these filters."; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                }
+            }
+        }

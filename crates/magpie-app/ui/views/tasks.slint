@@ -1,0 +1,349 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component TasksView inherits Rectangle {
+    callback focus-search();
+    in-out property <int> active-elapsed-sec;
+    in property <string> active-title;
+    callback nav-back();
+    callback nav-cycle-view(int);
+    callback nav-forward();
+    in-out property <bool> nav-leader;
+    callback nav-previous();
+    callback nav-section(string);
+    callback open-task-note(int);
+    callback refresh-tasks();
+    callback set-mode-tasks(bool);
+    callback set-task-view(string);
+    in-out property <bool> show-done;
+    in-out property <length> sidebar-w;
+    in-out property <string> task-filter;
+    in-out property <int> task-selected;
+    in property <[TaskRow]> tasks;
+    in-out property <bool> tasks-mode;
+    in-out property <string> tasks-view;
+    callback toggle-bookmark(int, int);
+    callback toggle-task(int, int);
+    callback toggle-timer(int, string);
+            background: Theme.bg-app;
+            // Keyboard nav: ↑/↓ select, Space toggles, ⏎ opens the note, Esc exits.
+            // An empty FocusScope holds focus without affecting layout or mouse.
+            tfs := FocusScope {
+                init => {
+                    self.focus();
+                    root.task-selected = 0;
+                }
+                key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment). NOTE:
+                    // this takes priority over the bare "b"/"t" shortcuts
+                    // below when chained right after "g" — e.g. "g" then "b"
+                    // jumps to Bookmarks rather than toggling this row's
+                    // bookmark. Press "b"/"t" on their own (not after "g")
+                    // for the row actions.
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
+                    if e.text == Key.Escape {
+                        root.set-mode-tasks(false);
+                        root.focus-search();
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        if root.task-selected < root.tasks.length - 1 {
+                            root.task-selected += 1;
+                        }
+                        return accept;
+                    }
+                    if e.text == Key.UpArrow {
+                        if root.task-selected > 0 {
+                            root.task-selected -= 1;
+                        }
+                        return accept;
+                    }
+                    if e.text == " " {
+                        if root.tasks.length > 0 {
+                            root.toggle-task(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].line_index);
+                        }
+                        return accept;
+                    }
+                    if e.text == Key.Return {
+                        if root.tasks.length > 0 {
+                            root.open-task-note(root.tasks[root.task-selected].note_id);
+                        }
+                        return accept;
+                    }
+                    if e.text == "b" {
+                        if root.tasks.length > 0 {
+                            root.toggle-bookmark(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].line_index);
+                        }
+                        return accept;
+                    }
+                    if e.text == "t" {
+                        if root.tasks.length > 0 {
+                            root.toggle-timer(root.tasks[root.task-selected].note_id, root.tasks[root.task-selected].title);
+                        }
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                // Top bar: back to clipboard + a "Show done" toggle.
+                HorizontalLayout {
+                    spacing: 8px;
+                    // [Today · List · Board] — replaces the old "← Clipboard" back
+                    // button; the sidebar's Clipboard icon is the back button now.
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for tv in ["today", "list", "board"]: Rectangle {
+                            height: 30px;
+                            width: 56px;
+                            border-radius: 6px;
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw2.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            tvsw2 := TouchArea { clicked => { root.set-task-view(tv); } }
+                            Text {
+                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    // Live running-timer indicator (only while a timer runs).
+                    if root.active-title != "": Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: Theme.success.with-alpha(0.18);
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            Text {
+                                text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
+                                color: Theme.success;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 100px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.show-done ? Pal.accent : (tdone.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        tdone := TouchArea {
+                            clicked => {
+                                root.show-done = !root.show-done;
+                                root.refresh-tasks();
+                            }
+                        }
+                        Text { text: "Show done"; color: root.show-done ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // Tick the running-timer display once a second while active.
+                Timer {
+                    interval: 1s;
+                    running: root.active-title != "";
+                    triggered => {
+                        root.active-elapsed-sec += 1;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for f in [
+                        { id: "all", label: "All" },
+                        { id: "today", label: "Today" },
+                        { id: "recurring", label: "Recurring" },
+                        { id: "star", label: "★" },
+                    ]: Rectangle {
+                        height: 26px;
+                        width: f.id == "star" ? 34px : (f.id == "recurring" ? 96px : 60px);
+                        border-radius: 6px;
+                        background: root.task-filter == f.id ? Pal.accent : (chf.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        chf := TouchArea { clicked => { root.task-filter = f.id; root.refresh-tasks(); } }
+                        Text { text: f.label; color: root.task-filter == f.id ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // The list. `group_sort` already clusters by project + orders within,
+                // so a flat list reads correctly top-to-bottom.
+                ListView {
+                    for t[i] in root.tasks: VerticalLayout {
+                        spacing: 0px;
+                        // Project group header — shown once per project cluster so the
+                        // grouping is legible.
+                        if i == 0 || root.tasks[i - 1].project != t.project: Text {
+                            text: t.project == "" ? "No project" : "#" + t.project;
+                            color: Theme.text-dim;
+                            font-size: 11px;
+                            font-weight: 700;
+                            height: 26px;
+                            vertical-alignment: bottom;
+                        }
+                        Rectangle {
+                        height: 48px;
+                        background: i == root.task-selected ? Theme.bg-elevated : (trow.has-hover ? Theme.bg-elevated : transparent);
+                        border-radius: 6px;
+                        // Accent bar marks the keyboard-selected row.
+                        if i == root.task-selected: Rectangle {
+                            x: 0;
+                            y: 8px;
+                            width: 3px;
+                            height: 32px;
+                            border-radius: 1.5px;
+                            background: Pal.accent;
+                        }
+                        // Row click jumps to the note that owns this task. The checkbox
+                        // has its own TouchArea (declared later → higher z-order) so it
+                        // toggles instead of opening the note.
+                        trow := TouchArea { clicked => { root.open-task-note(t.note_id); } }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            // Checkbox column.
+                            Rectangle {
+                                width: 24px;
+                                Rectangle {
+                                    y: 13px;
+                                    width: 22px;
+                                    height: 22px;
+                                    border-radius: 5px;
+                                    border-width: 1px;
+                                    border-color: t.doing && !t.done ? Theme.warn : Theme.text-faint;
+                                    background: t.done ? Pal.accent : (t.doing ? Theme.warn.with-alpha(0.2) : transparent);
+                                    if t.done: Text {
+                                        text: "✓";
+                                        color: Pal.on-accent;
+                                        font-size: 13px;
+                                        width: 22px;
+                                        height: 22px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    if !t.done && t.doing: Text {
+                                        text: "◐";
+                                        color: Theme.warn;
+                                        font-size: 13px;
+                                        width: 22px;
+                                        height: 22px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                cbta := TouchArea { clicked => { root.toggle-task(t.note_id, t.line_index); } }
+                            }
+                            // Priority pill in the gutter: labeled H/M/L (0 red /
+                            // 1 amber / 2 blue) so the colour isn't a mystery; blank
+                            // for None.
+                            Rectangle {
+                                width: 20px;
+                                if t.priority <= 2: Rectangle {
+                                    y: 15px;
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 5px;
+                                    background: t.priority == 0 ? Theme.prio-high
+                                        : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
+                                    Text {
+                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                                        color: #16161a;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                padding-top: 6px;
+                                padding-bottom: 6px;
+                                Text {
+                                    text: t.title;
+                                    // Done tasks are dimmed (Slint Text has no strike).
+                                    color: t.done ? Theme.text-faint : Theme.text;
+                                    font-size: 14px;
+                                    overflow: elide;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                    if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; }
+                                    if t.recur != "": Text { text: t.recur; color: Theme.success; font-size: 11px; vertical-alignment: center; }
+                                    if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                    // (bookmark shown by the trailing ★ toggle, not a badge)
+                                    if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                            Rectangle {
+                                width: 30px;
+                                bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
+                                Text {
+                                    text: t.bookmarked ? "★" : "☆";
+                                    color: t.bookmarked ? Theme.warn : (bmk.has-hover ? Theme.text : Theme.text-faint);
+                                    font-size: 16px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: 30px;
+                                tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
+                                Text {
+                                    text: t.tracking ? "⏹" : "▶";
+                                    color: t.tracking ? Theme.success : (tmr.has-hover ? Theme.text : Theme.text-faint);
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        }
+                    }
+                }
+                // Empty state.
+                if root.tasks.length == 0: HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.show-done ? "No tasks yet." : "No open tasks. Add “- [ ] …” to a note.";
+                        color: Theme.text-faint;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }

@@ -1,0 +1,39 @@
+import { Theme } from "../theme.slint";
+
+// A labeled horizontal bar: [ label ][=== track ===][ value ]
+export component HBar inherits Rectangle {
+    in property <string> label;
+    in property <string> display;
+    in property <float> value_norm;
+    height: 22px;
+    HorizontalLayout {
+        spacing: Theme.sp2;
+        Text {
+            text: label;
+            color: Theme.text;
+            font-size: Theme.fs-sm;
+            width: 180px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        track := Rectangle {
+            background: Theme.bg-panel;
+            border-radius: 3px;
+            Rectangle {
+                x: 0;
+                y: 0;
+                height: parent.height;
+                width: track.width * value_norm;
+                background: Theme.accent;
+                border-radius: 3px;
+            }
+        }
+        Text {
+            text: display;
+            color: Theme.text-dim;
+            font-size: Theme.fs-sm;
+            width: 48px;
+            vertical-alignment: center;
+        }
+    }
+}

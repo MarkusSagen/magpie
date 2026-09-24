@@ -1,0 +1,158 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component StatsView inherits VerticalLayout {
+    in property <[Bar]> by-type-bars;
+    callback delete-time-entry(int);
+    in property <[Bar]> most-copied-bars;
+    in property <[Bar]> over-time-bars;
+    in property <string> over-time-caption;
+    in property <[Bar]> per-app-bars;
+    in-out property <int> range-index;
+    callback stats-range-changed(int);
+    in property <[Bar]> time-by-day-bars;
+    in property <[Bar]> time-by-project-bars;
+    in property <[TimeEntryRow]> time-entries;
+    in property <string> time-week-total;
+    in property <string> totals-line;
+    in-out property <string> view;
+                padding: 8px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
+                        width: 56px;
+                        height: 26px;
+                        background: i == root.range-index ? Theme.bg-elevated : Theme.bg-panel;
+                        border-radius: Theme.r-sm;
+                        TouchArea {
+                            clicked => {
+                                root.range-index = i;
+                                root.stats-range-changed(i);
+                            }
+                        }
+                        Text {
+                            text: label;
+                            color: Theme.text;
+                            font-size: Theme.fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: Theme.sp2;
+                        Text { text: root.totals-line; color: Theme.text; font-size: Theme.fs-body; }
+
+                        Text { text: "Copies over time"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        if root.over-time-bars.length >= 2: Rectangle {
+                            height: 64px;
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 3px;
+                                for bar in root.over-time-bars: Rectangle {
+                                    width: 10px;
+                                    // baseline track so empty days read as a bar, not a gap
+                                    Rectangle { width: parent.width; background: Theme.bg-panel; border-radius: 2px; }
+                                    Rectangle {
+                                        width: parent.width;
+                                        y: parent.height * (1.0 - bar.value_norm);
+                                        height: parent.height * bar.value_norm;
+                                        background: Theme.accent;
+                                        border-radius: 2px;
+                                    }
+                                }
+                            }
+                        }
+                        // Span + peak, so the bars aren't anonymous.
+                        if root.over-time-bars.length >= 2 && root.over-time-caption != "": Text {
+                            text: root.over-time-caption;
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-sm;
+                        }
+                        if root.over-time-bars.length < 2: Text {
+                            text: "Not enough data yet.";
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-sm;
+                        }
+
+                        Text { text: "Most copied"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for bar in root.most-copied-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "By app"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for bar in root.per-app-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "By type"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for bar in root.by-type-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        Text { text: "Time tracked · last 7 days: " + root.time-week-total; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for bar in root.time-by-day-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+                        if root.time-by-project-bars.length > 0: Text { text: "By project (30 days)"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for bar in root.time-by-project-bars: HBar {
+                            label: bar.label;
+                            display: bar.display;
+                            value_norm: bar.value_norm;
+                        }
+
+                        if root.time-entries.length > 0: Text { text: "Recent sessions"; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                        for e in root.time-entries: Rectangle {
+                            height: 30px;
+                            background: terow.has-hover ? Theme.bg-elevated : transparent;
+                            border-radius: Theme.r-sm;
+                            terow := TouchArea {}
+                            HorizontalLayout {
+                                padding-left: 6px; padding-right: 6px; spacing: 8px;
+                                Text {
+                                    text: e.title;
+                                    color: Theme.text;
+                                    font-size: Theme.fs-sm;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Text { text: e.when; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                if e.running: Rectangle {
+                                    height: 18px;
+                                    width: 52px;
+                                    border-radius: 9px;
+                                    background: Theme.link.with-alpha(0.25);
+                                    Text { text: "running"; color: Theme.link; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if !e.running: Text { text: e.duration; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Rectangle {
+                                    width: 22px;
+                                    tedel := TouchArea { clicked => { root.delete-time-entry(e.id); } }
+                                    Text { text: "×"; color: tedel.has-hover ? Theme.danger : Theme.text-faint; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }

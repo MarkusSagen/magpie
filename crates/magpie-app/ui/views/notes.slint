@@ -1,0 +1,449 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component NotesView inherits Rectangle {
+    callback focus-search();
+    callback accept-note-suggestion(string);
+    in property <[RefRow]> backlinks;
+    callback dismiss-note-suggestions();
+    callback edit-note-body-at(string, int);
+    callback filter-notes-by-tag(string);
+    callback link-mention(int, int);
+    callback nav-back();
+    callback nav-cycle-view(int);
+    callback nav-forward();
+    in-out property <bool> nav-leader;
+    callback nav-note(int);
+    callback nav-previous();
+    callback nav-section(string);
+    callback new-note();
+    in property <[string]> note-all-tags;
+    in property <string> note-body;
+    in-out property <int> note-caret;
+    in-out property <string> note-filter;
+    in-out property <int> note-id;
+    in property <[string]> note-links;
+    in property <string> note-provenance;
+    in property <[string]> note-suggestions;
+    in-out property <string> note-tag-filter;
+    in property <[NoteRow]> notes;
+    in-out property <bool> notes-mode;
+    in-out property <string> notes-view;
+    callback open-note(int);
+    callback open-page(string);
+    callback promote-line(int);
+    callback set-mode-notes(bool);
+    callback set-note-view(string);
+    in-out property <length> sidebar-w;
+    in property <[RefRow]> unlinked;
+            background: Theme.bg-app;
+            // Keyboard nav: the list is focused on entry; ↑/↓ switch notes (opening
+            // each), ⏎ dives into the editor, Esc exits. Empty FocusScope → no layout
+            // impact; mouse still works on the panes below.
+            nlistfs := FocusScope {
+                init => {
+                    self.focus();
+                }
+                key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
+                    if e.text == Key.Escape {
+                        root.set-mode-notes(false);
+                        root.focus-search();
+                        return accept;
+                    }
+                    if e.text == Key.DownArrow {
+                        root.nav-note(1);
+                        return accept;
+                    }
+                    if e.text == Key.UpArrow {
+                        root.nav-note(-1);
+                        return accept;
+                    }
+                    if e.text == Key.Return {
+                        ned.focus();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            HorizontalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                // Left: back + filter + new + list
+                VerticalLayout {
+                    width: 300px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        // [Notes · Journal · Graph] — replaces the old "← Clipboard"
+                        // back button; the sidebar's Clipboard icon is the back
+                        // button now. active = root.notes-view (remembered).
+                        HorizontalLayout {
+                            spacing: 4px;
+                            for nv in ["notes", "journal", "graph"]: Rectangle {
+                                height: 30px;
+                                width: 62px;
+                                border-radius: Theme.r-sm;
+                                background: root.notes-view == nv ? Pal.accent : (nvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                nvsw1 := TouchArea { clicked => { root.set-note-view(nv); } }
+                                Text {
+                                    text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
+                                    color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                    font-size: Theme.fs-sm;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 30px;
+                            background: Theme.bg-panel;
+                            border-radius: Theme.r-sm;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                if root.note-filter == "": Text {
+                                    text: "Filter notes…";
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-body;
+                                    vertical-alignment: center;
+                                }
+                                nfilter := TextInput {
+                                    text <=> root.note-filter;
+                                    color: Theme.text;
+                                    font-size: Theme.fs-body;
+                                    single-line: true;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        Rectangle {
+                            width: 60px;
+                            height: 30px;
+                            border-radius: Theme.r-sm;
+                            background: nnew.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                            nnew := TouchArea { clicked => { root.new-note(); } }
+                            Text { text: "New"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    // Tag-filter chip strip: "All" + one chip per distinct #tag across
+                    // all notes. Horizontally scrollable so many tags don't overflow
+                    // the narrow left column.
+                    if root.note-all-tags.length > 0: Rectangle {
+                        // Flickable itself can't take `clip` (Rectangle/Path only) —
+                        // wrap it so an overflowing last tag chip doesn't bleed past
+                        // the narrow left column instead of just being scrollable to.
+                        width: 100%;
+                        height: 30px;
+                        clip: true;
+                        Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: ntagrow.preferred-width;
+                            viewport-height: self.height;
+                            ntagrow := HorizontalLayout {
+                                height: 30px;
+                                spacing: 6px;
+                                alignment: start;
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    }
+                                }
+                                for tag in root.note-all-tags: Rectangle {
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ListView {
+                        for n in root.notes: Rectangle {
+                            height: 44px;
+                            background: n.id == root.note-id ? Theme.bg-elevated : (nrow.has-hover ? Theme.bg-elevated : transparent);
+                            border-radius: Theme.r-sm;
+                            nrow := TouchArea { clicked => { root.open-note(n.id); } }
+                            VerticalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 4px;
+                                padding-bottom: 4px;
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    if n.is_daily: Image { source: Icons.act-pin; colorize: Theme.text; width: 11px; height: 11px; image-fit: contain; }
+                                    Text { text: n.title; color: Theme.text; font-size: Theme.fs-body; overflow: elide; horizontal-stretch: 1; }
+                                }
+                                Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
+                                if n.tags != "": Text { text: n.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+                // Right: editor pane (editor body filled in Task 5)
+                Rectangle {
+                    background: Theme.bg-sidebar;
+                    border-radius: Theme.r-md;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: Theme.sp2;
+                        HorizontalLayout {
+                            spacing: Theme.sp2;
+                            Text { text: root.note-provenance; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                            // Promote the line the cursor is on to a `- [ ]` task
+                            // (same as ⌘⏎ in the editor).
+                            Rectangle {
+                                width: 100px;
+                                height: 26px;
+                                border-radius: Theme.r-sm;
+                                background: mktask.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                mktask := TouchArea { clicked => { root.promote-line(ned.cursor-position-byte-offset); } }
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Image { source: Icons.tab-tasks; colorize: Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                                    Text { text: "Make task"; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                        // Editor — a plain TextInput (not std TextEdit, which renders
+                        // invisibly on the dark pane) with an explicit text colour.
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            viewport-height: ned.preferred-height;
+                            ned := TextInput {
+                                width: parent.width;
+                                text: root.note-body;
+                                color: Theme.text;
+                                font-size: Theme.fs-body;
+                                single-line: false;
+                                wrap: word-wrap;
+                                edited => {
+                                    root.note-caret = self.cursor-position-byte-offset;
+                                    root.edit-note-body-at(self.text, self.cursor-position-byte-offset);
+                                }
+                                key-pressed(event) => {
+                                    // ⌘⏎ promotes the current line to a task; ⌘↑/⌘↓
+                                    // switch notes while editing; Esc returns focus to
+                                    // the note list. Everything else edits normally.
+                                    //
+                                    // Keyboard-nav layer: this is a live TextInput, so
+                                    // (unlike the other section FocusScopes) the bare
+                                    // `g`-leader is deliberately NOT wired here — it would
+                                    // eat every "g" typed into a note. ⌘-combos are safe
+                                    // (they don't collide with typing) so history/cycling
+                                    // still work while editing. Checked BEFORE the existing
+                                    // ⌘↑/⌘↓ below so ⌘⌥↑/↓ cycle views instead of switching
+                                    // notes.
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.LeftArrow {
+                                        root.nav-previous();
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.UpArrow {
+                                        root.nav-cycle-view(-1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.modifiers.alt && event.text == Key.DownArrow {
+                                        root.nav-cycle-view(1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "[" {
+                                        root.nav-back();
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "]" {
+                                        root.nav-forward();
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.Return {
+                                        root.promote-line(self.cursor-position-byte-offset);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.UpArrow {
+                                        root.nav-note(-1);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.DownArrow {
+                                        root.nav-note(1);
+                                        return accept;
+                                    }
+                                    if root.note-suggestions.length > 0 {
+                                        if event.text == Key.Tab {
+                                            root.accept-note-suggestion(root.note-suggestions[0]);
+                                            return accept;
+                                        }
+                                        if event.text == Key.Escape {
+                                            root.dismiss-note-suggestions();
+                                            return accept;
+                                        }
+                                    }
+                                    if event.text == Key.Escape {
+                                        nlistfs.focus();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                        // [[wiki-link]] autocomplete popup, shown just below the
+                        // editor while an open `[[…` query has matches.
+                        if root.note-suggestions.length > 0: Rectangle {
+                            max-height: 160px;
+                            background: Theme.bg-elevated;
+                            border-color: Theme.border-strong;
+                            border-width: 1px;
+                            border-radius: Theme.r-sm;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 2px;
+                                for name in root.note-suggestions: Rectangle {
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: srow.has-hover ? Theme.border-strong : transparent;
+                                    srow := TouchArea { clicked => { root.accept-note-suggestion(name); } }
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        Text { text: name; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                                    }
+                                }
+                                Text { text: "Tab to insert"; color: Theme.text-faint; font-size: 10px; }
+                            }
+                        }
+                        // Links strip: clickable [[page]] chips parsed from the body.
+                        if root.note-links.length > 0: HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            Text { text: "Links:"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                            for name in root.note-links: Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: chip.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: name; color: Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                }
+                                chip := TouchArea { clicked => { root.open-page(name); } }
+                            }
+                        }
+                        if root.backlinks.length > 0 || root.unlinked.length > 0: Rectangle {
+                            height: 176px;
+                            background: Theme.bg-app;
+                            border-radius: Theme.r-md;
+                            Flickable {
+                                viewport-width: self.width;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    padding: 8px;
+                                    spacing: 4px;
+                                    if root.backlinks.length > 0: Text {
+                                        text: "Linked references (" + root.backlinks.length + ")";
+                                        color: Theme.text-dim;
+                                        font-size: Theme.fs-sm;
+                                        font-weight: 700;
+                                    }
+                                    for r in root.backlinks: Rectangle {
+                                        height: 38px;
+                                        background: lrow.has-hover ? Theme.bg-elevated : transparent;
+                                        border-radius: Theme.r-sm;
+                                        lrow := TouchArea { clicked => { root.open-page(r.source); } }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-top: 4px;
+                                                padding-bottom: 4px;
+                                                Text { text: r.source; color: Theme.text-faint; font-size: 10px; }
+                                                Text { text: r.line; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
+                                            }
+                                        }
+                                    }
+                                    if root.unlinked.length > 0: Text {
+                                        text: "Unlinked references (" + root.unlinked.length + ")";
+                                        color: Theme.text-dim;
+                                        font-size: Theme.fs-sm;
+                                        font-weight: 700;
+                                    }
+                                    for r in root.unlinked: Rectangle {
+                                        height: 38px;
+                                        background: urow.has-hover ? Theme.bg-elevated : transparent;
+                                        border-radius: Theme.r-sm;
+                                        urow := TouchArea { clicked => { root.open-page(r.source); } }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                padding-top: 4px;
+                                                padding-bottom: 4px;
+                                                Text { text: r.source; color: Theme.text-faint; font-size: 10px; }
+                                                Text { text: r.line; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
+                                            }
+                                            Rectangle {
+                                                width: 48px;
+                                                height: 24px;
+                                                y: 7px;
+                                                border-radius: Theme.r-sm;
+                                                background: lk.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                                lk := TouchArea { clicked => { root.link-mention(r.note_id, r.line_index); } }
+                                                Text { text: "Link"; color: Theme.link; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }

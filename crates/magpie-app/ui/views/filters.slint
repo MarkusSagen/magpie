@@ -1,0 +1,134 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component FiltersView inherits Rectangle {
+    in-out property <int> app-index;
+    in property <[AppItem]> apps;
+    callback clear-filters();
+    in-out property <string> mode;
+    in-out property <bool> pinned-only;
+    callback set-app-filter(int);
+    callback set-pinned-only(bool);
+    callback set-sort(int);
+    callback set-time-filter(int);
+    in-out property <int> sort-index;
+    in-out property <int> time-index;
+            background: #000000aa;
+            TouchArea { clicked => { root.mode = "list"; } }
+            Rectangle {
+                width: 460px;
+                height: 520px;
+                background: Theme.bg-app;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 10px;
+                    Text { text: "Filters"; color: Theme.text; font-size: 14px; font-weight: 700; }
+
+                    Text { text: "Time range"; color: Theme.text-dim; font-size: 11px; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for label[i] in ["All", "Today", "Last 7 days", "Last 30 days"]: Rectangle {
+                            height: 28px;
+                            width: 100px;
+                            background: i == root.time-index ? Pal.accent : (tfta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            border-radius: 6px;
+                            tfta := TouchArea { clicked => { root.time-index = i; root.set-time-filter(i); } }
+                            Text { text: label; color: i == root.time-index ? Pal.on-accent : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+
+                    Text { text: "Show"; color: Theme.text-dim; font-size: 11px; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for label[i] in ["Everything", "Pinned only"]: Rectangle {
+                            height: 28px;
+                            width: 110px;
+                            background: (i == 1) == root.pinned-only ? Pal.accent : (pota.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            border-radius: 6px;
+                            pota := TouchArea {
+                                clicked => {
+                                    root.pinned-only = (i == 1);
+                                    root.set-pinned-only(i == 1);
+                                }
+                            }
+                            Text {
+                                text: label;
+                                color: (i == 1) == root.pinned-only ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Text { text: "Sort"; color: Theme.text-dim; font-size: 11px; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for label[i] in ["Recent", "Most copied"]: Rectangle {
+                            height: 28px;
+                            width: 110px;
+                            background: i == root.sort-index ? Theme.bg-elevated : (sota.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            border-radius: 6px;
+                            sota := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
+                            Text { text: label; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+
+                    Text { text: "Source app"; color: Theme.text-dim; font-size: 11px; }
+                    // Left-aligned rows with hover + a ✓ on the active filter — the
+                    // previous centred labels read as floating text, and there was no
+                    // way to tell which app was filtered.
+                    Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.app-index == -1 ? Theme.bg-elevated : (anyta.has-hover ? Theme.bg-panel : transparent);
+                        anyta := TouchArea { clicked => { root.set-app-filter(-1); } }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text { text: "Any app"; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: root.app-index == -1 ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for a in root.apps: Rectangle {
+                            height: 30px;
+                            border-radius: 6px;
+                            background: root.app-index == a.id ? Theme.bg-elevated : (apta.has-hover ? Theme.bg-panel : transparent);
+                            apta := TouchArea { clicked => { root.set-app-filter(a.id); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text { text: a.name; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Text { text: root.app-index == a.id ? "✓" : ""; color: Pal.accent; font-size: 12px; vertical-alignment: center; }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            height: 30px;
+                            width: 110px;
+                            background: cfta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                            border-radius: 6px;
+                            cfta := TouchArea { clicked => { root.clear-filters(); } }
+                            Text { text: "Clear filters"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Text { text: "Esc to close"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }

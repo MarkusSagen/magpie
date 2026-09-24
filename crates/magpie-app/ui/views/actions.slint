@@ -1,0 +1,92 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component ActionsView inherits Rectangle {
+    in-out property <int> action-selected;
+    in property <[ActionItem]> actions;
+    in-out property <string> actions-query;
+    in-out property <string> mode;
+    callback run-action(string);
+            background: #000000aa;
+            TouchArea { clicked => { root.mode = "list"; } }
+            Rectangle {
+                width: 440px;
+                height: 360px;
+                background: Theme.bg-app;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    // Search field on TOP, the way every command palette does it
+                    // (Spotlight / Raycast / ⌘K). Keys are fed in by the search
+                    // field's key handler while actions are open, so a drawn caret
+                    // stands in for the real one.
+                    Rectangle {
+                        height: 34px;
+                        background: Theme.bg-sidebar;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 2px;
+                            Image { source: Icons.search; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
+                            Rectangle { width: 4px; }
+                            Text {
+                                text: root.actions-query;
+                                color: Theme.text;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Rectangle { width: 2px; height: 17px; background: Pal.accent; }
+                            if root.actions-query == "": Text {
+                                text: "Search actions…";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for a[i] in root.actions: Rectangle {
+                            height: 34px;
+                            background: i == root.action-selected ? Theme.bg-elevated : (acta.has-hover ? Theme.bg-panel : transparent);
+                            border-radius: 6px;
+                            acta := TouchArea { clicked => { root.run-action(a.id); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 10px;
+                                ActionIcon { id: a.id; width: 22px; height: 18px; tint: a.id == "delete" ? Theme.danger : Theme.text; }
+                                Text { text: a.label; color: a.id == "delete" ? Theme.danger : Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: a.key; color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    if root.actions.length == 0: Text {
+                        text: "No matching action";
+                        color: Theme.text-faint;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "↑↓ Move · ⏎ Run · Esc Close";
+                        color: Theme.text-faint;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }

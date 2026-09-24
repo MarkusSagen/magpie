@@ -1,0 +1,78 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component JournalView inherits Rectangle {
+    callback edit-journal-entry(int, string);
+    in property <[JournalRow]> journal;
+    in-out property <bool> journal-mode;
+    in-out property <string> notes-view;
+    callback set-note-view(string);
+    in-out property <length> sidebar-w;
+            background: Theme.bg-app;
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    // [Notes · Journal · Graph] — replaces the old "← Clipboard"
+                    // back button; the sidebar's Clipboard icon is the back button now.
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for nv in ["notes", "journal", "graph"]: Rectangle {
+                            height: 30px;
+                            width: 62px;
+                            border-radius: 6px;
+                            background: root.notes-view == nv ? Pal.accent : (nvsw3.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            nvsw3 := TouchArea { clicked => { root.set-note-view(nv); } }
+                            Text {
+                                text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
+                                color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for j in root.journal: Rectangle {
+                        // Card height grows with content.
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 6px;
+                            Text { text: j.date; color: Theme.link; font-size: 13px; font-weight: 700; }
+                            Rectangle {
+                                background: Theme.bg-sidebar;
+                                border-radius: 8px;
+                                VerticalLayout {
+                                    padding: 8px;
+                                    jed := TextInput {
+                                        text: j.body;
+                                        color: Theme.text;
+                                        font-size: 13px;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        edited => { root.edit-journal-entry(j.note_id, self.text); }
+                                    }
+                                    if j.body == "": Text { text: "Empty — jot something…"; color: Theme.text-faint; font-size: 12px; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.journal.length == 0: Text { text: "No journal entries yet."; color: Theme.text-faint; font-size: 13px; }
+            }
+        }

@@ -1,0 +1,222 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component GraphView inherits Rectangle {
+    callback focus-search();
+    in property <[GraphEdge]> graph-edges;
+    in-out property <bool> graph-mode;
+    in property <[GraphNode]> graph-nodes;
+    callback graph-open(int);
+    in property <int> graph-total;
+    callback nav-back();
+    callback nav-cycle-view(int);
+    callback nav-forward();
+    in-out property <bool> nav-leader;
+    callback nav-previous();
+    callback nav-section(string);
+    in-out property <string> notes-view;
+    callback set-mode-graph(bool);
+    callback set-note-view(string);
+    in-out property <length> sidebar-w;
+            background: Theme.bg-app;
+            gfs := FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    // ---- keyboard-nav layer: g-leader, ⌘[/⌘] history, ⌘⌥ ----
+                    // (same block in every section FocusScope; see the main
+                    // searchinput handler for the canonical comment).
+                    if root.nav-leader {
+                        root.nav-leader = false;
+                        if e.text == "c" { root.nav-section("clipboard"); return accept; }
+                        if e.text == "t" { root.nav-section("tasks"); return accept; }
+                        if e.text == "n" { root.nav-section("notes"); return accept; }
+                        if e.text == "b" { root.nav-section("bookmarks"); return accept; }
+                        if e.text == "s" { root.nav-section("stats"); return accept; }
+                        return accept;
+                    }
+                    if !e.modifiers.control && e.text == "g" { root.nav-leader = true; return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.LeftArrow { root.nav-previous(); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.UpArrow { root.nav-cycle-view(-1); return accept; }
+                    if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
+                    if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
+                    if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
+                    if e.text == Key.Escape {
+                        root.set-mode-graph(false);
+                        root.focus-search();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                // Top bar: back to clipboard + title + count caption.
+                HorizontalLayout {
+                    spacing: 8px;
+                    // [Notes · Journal · Graph] — replaces the old "← Clipboard"
+                    // back button; the sidebar's Clipboard icon is the back button now.
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for nv in ["notes", "journal", "graph"]: Rectangle {
+                            height: 30px;
+                            width: 62px;
+                            border-radius: 6px;
+                            background: root.notes-view == nv ? Pal.accent : (nvsw2.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            nvsw2 := TouchArea { clicked => { root.set-note-view(nv); } }
+                            Text {
+                                text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
+                                color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.graph-total + (root.graph-total == 1 ? " linked note" : " linked notes")
+                            + (root.graph-total >= 150 ? " (showing top 150)" : "");
+                        color: Theme.text-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 84px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: gresetta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                        gresetta := TouchArea {
+                            clicked => {
+                                gcanvas.gzoom = 1.0;
+                                gcanvas.gpan-x = 0px;
+                                gcanvas.gpan-y = 0px;
+                            }
+                        }
+                        Text { text: "Reset view"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // Canvas: edges drawn first so node dots sit on top of them.
+                // Pan/zoom: gzoom/gpan-* map a normalized 0..1 point to canvas
+                // pixels via gpan + norm * gc{w,h} — the SAME transform is used
+                // by both edges and nodes below so they stay aligned. At the
+                // default gzoom=1, gpan=0 this reduces to the original mapping
+                // (gcw==width, gch==height), so today's layout is unchanged.
+                gcanvas := Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+                    background: Theme.bg-panel;
+                    border-radius: 8px;
+                    property <float> gzoom: 1.0;
+                    property <float> gnz: 1.0;
+                    property <length> gpan-x: 0px;
+                    property <length> gpan-y: 0px;
+                    property <length> gpan-start-x: 0px;
+                    property <length> gpan-start-y: 0px;
+                    property <length> gcw: self.width * gzoom;
+                    property <length> gch: self.height * gzoom;
+                    // Background drag-to-pan area. Declared first so it sits
+                    // BEHIND the edges/nodes drawn below (z-order follows
+                    // declaration order) — node TouchAreas stay clickable.
+                    gdrag := TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        moved => {
+                            if (self.pressed) {
+                                gcanvas.gpan-x = gcanvas.gpan-start-x + (self.mouse-x - self.pressed-x);
+                                gcanvas.gpan-y = gcanvas.gpan-start-y + (self.mouse-y - self.pressed-y);
+                            }
+                        }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                gcanvas.gpan-start-x = gcanvas.gpan-x;
+                                gcanvas.gpan-start-y = gcanvas.gpan-y;
+                            }
+                        }
+                        scroll-event(e) => {
+                            // Zoom, clamped, keeping the canvas centre fixed.
+                            gcanvas.gnz = max(0.4, min(4.0, gcanvas.gzoom * (1 + (e.delta-y / 1px) / 400)));
+                            gcanvas.gpan-x = (gcanvas.width / 2) - ((gcanvas.width / 2) - gcanvas.gpan-x) * (gcanvas.gnz / gcanvas.gzoom);
+                            gcanvas.gpan-y = (gcanvas.height / 2) - ((gcanvas.height / 2) - gcanvas.gpan-y) * (gcanvas.gnz / gcanvas.gzoom);
+                            gcanvas.gzoom = gcanvas.gnz;
+                            return accept;
+                        }
+                    }
+                    for e in root.graph-edges: Path {
+                        x: gcanvas.gpan-x;
+                        y: gcanvas.gpan-y;
+                        width: gcanvas.gcw;
+                        height: gcanvas.gch;
+                        stroke: Theme.border;
+                        stroke-width: 1.2px;
+                        viewbox-x: 0;
+                        viewbox-y: 0;
+                        viewbox-width: 1;
+                        viewbox-height: 1;
+                        fit: fill;
+                        MoveTo { x: e.x1; y: e.y1; }
+                        LineTo { x: e.x2; y: e.y2; }
+                    }
+                    for n in root.graph-nodes: Rectangle {
+                        // Size by degree (hubs read bigger), capped so a mega-hub
+                        // doesn't swallow the canvas. Hovering grows it a touch more.
+                        property <length> r: 6px + min(n.degree, 5) * 3px;
+                        property <length> er: nta.has-hover ? r + 2px : r;
+                        x: gcanvas.gpan-x + n.x * gcanvas.gcw - er;
+                        y: gcanvas.gpan-y + n.y * gcanvas.gch - er;
+                        width: 2 * er;
+                        height: 2 * er;
+                        border-radius: er;
+                        // Color by degree: hubs warmer/brighter than leaves.
+                        // Hovering brightens further so the target dot pops.
+                        background: nta.has-hover
+                            ? Theme.link.brighter(0.3)
+                            : (n.degree >= 3 ? Theme.link : (n.degree == 2 ? Pal.accent : Theme.text-faint));
+                        border-width: 1px;
+                        border-color: Theme.bg-app;
+                        Text {
+                            // Nodes near the right edge would otherwise push their
+                            // label off the canvas — flip it to the dot's left there.
+                            // Same idea near the bottom: nudge the label up so its
+                            // line doesn't run past the canvas edge. Offset scales
+                            // with the dot's radius so labels clear bigger hubs.
+                            x: n.x > 0.75 ? -(r + 4px + self.width) : r + 4px;
+                            y: n.y > 0.9 ? -16px : -3px;
+                            text: n.title;
+                            color: nta.has-hover ? Theme.text : Theme.text-dim;
+                            font-size: 10px;
+                            font-weight: nta.has-hover ? 600 : 400;
+                            overflow: elide;
+                            width: 140px;
+                            horizontal-alignment: n.x > 0.75 ? right : left;
+                        }
+                        nta := TouchArea { clicked => { root.graph-open(n.id); } }
+                    }
+                    if root.graph-nodes.length == 0: HorizontalLayout {
+                        alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "No linked notes yet — connect notes with [[links]] to see the graph.";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                                width: 320px;
+                            }
+                        }
+                    }
+                }
+            }
+        }

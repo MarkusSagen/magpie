@@ -1,0 +1,262 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component Popover inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    width: 360px;
+    height: 440px;
+    background: transparent;
+    forward-focus: fs;
+
+    // ---- Theme (light/dark) ----
+    // Mirrors `LauncherWindow`'s wiring: `global Theme` can't read the root
+    // directly, so the root pushes its own `theme-dark` into it. NOTE: this
+    // is a SEPARATE window/component instance from `LauncherWindow`, so it
+    // has its own independent copy of `global Theme` — Rust must call
+    // `popover.set_theme_dark(...)` (mirroring the existing `ui.set_theme_dark`
+    // call) for this popover to ever actually pick up the app's theme; until
+    // that Rust wiring exists, this popover keeps rendering with `Theme.dark`
+    // defaulted to `true` regardless of the toggle in the main window.
+    in-out property <int> theme-index: 0;
+    init => { Theme.index = root.theme-index; }
+    changed theme-index => { Theme.index = root.theme-index; }
+
+    in property <[TaskRow]> ptasks;
+    in-out property <string> quick-add;
+
+    in-out property <int> tab: 0;
+    in property <[TaskRow]> overdue-tasks;
+    in property <[TaskRow]> today-tasks;
+    in-out property <string> daily-body;
+    in property <[ClipRow]> clips;
+    callback edit-daily(string);
+    callback paste-clip(int);
+
+    callback add-task(string);
+    callback toggle-ptask(int, int);
+    callback open-task-note(int);
+    callback open-full();
+    callback dismiss();
+
+    // Rounded panel — the window itself is transparent + frameless, so this draws
+    // the visible chrome (border + fill + padding).
+    Rectangle {
+        background: Theme.bg-app;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+
+        fs := FocusScope {
+            width: 100%;
+            height: 100%;
+            // Esc closes the popover; ←/→ switch tabs; everything else falls through
+            // to the quick-add field.
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.dismiss();
+                    return accept;
+                }
+                if e.text == Key.RightArrow {
+                    if root.tab < 3 {
+                        root.tab += 1;
+                    }
+                    return accept;
+                }
+                if e.text == Key.LeftArrow {
+                    if root.tab > 0 {
+                        root.tab -= 1;
+                    }
+                    return accept;
+                }
+                return reject;
+            }
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                // Interactive 4-icon tab row: click a glyph to switch panels.
+                // Each tab is a FIXED-size Rectangle (so the row doesn't stretch and
+                // push the icons down) with the TouchArea as the last child, so it
+                // overlays the whole cell and the click lands on the icon.
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: start;
+                    for i in [0, 1, 2, 3]: Rectangle {
+                        width: 30px;
+                        height: 28px;
+                        VerticalLayout {
+                            spacing: 3px;
+                            alignment: center;
+                            Image {
+                                source: i == 0 ? Icons.tab-tasks
+                                    : i == 1 ? Icons.tab-today
+                                    : i == 2 ? Icons.tab-daily
+                                    : Icons.tab-clipboard;
+                                colorize: root.tab == i ? Pal.accent : Theme.text-faint;
+                                width: 22px;
+                                height: 22px;
+                                image-fit: contain;
+                            }
+                            Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
+                        }
+                        ta := TouchArea { clicked => { root.tab = i; } }
+                    }
+                }
+
+                if root.tab == 0: VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 10px;
+
+                    Text { text: "My tasks"; font-size: 16px; font-weight: 700; color: Theme.text; }
+
+                    // Quick-add: Enter appends "- [ ] <text>" to today's daily note
+                    // (wired in Task 3) and clears the field.
+                    Rectangle {
+                        height: 34px;
+                        background: Theme.bg-panel;
+                        border-radius: 8px;
+                        Rectangle {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            if root.quick-add == "": Text {
+                                x: 0;
+                                text: "Add a task…";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                            qa := TextInput {
+                                width: 100%;
+                                height: 100%;
+                                text <=> root.quick-add;
+                                color: Theme.text;
+                                font-size: 13px;
+                                single-line: true;
+                                vertical-alignment: center;
+                                key-pressed(e) => {
+                                    if e.text == Key.Return {
+                                        root.add-task(self.text);
+                                        self.text = "";
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+
+                    // Open tasks. Row click jumps to the owning note; the circle
+                    // toggle completes it.
+                    ListView {
+                        vertical-stretch: 1;
+                        for t in root.ptasks: PopoverTaskRow {
+                            t: t;
+                            toggle => { root.toggle-ptask(t.note_id, t.line_index); }
+                            open => { root.open-task-note(t.note_id); }
+                        }
+                    }
+                }
+
+                if root.tab == 1: VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 6px;
+                    Text { text: "Today"; font-size: 16px; font-weight: 700; color: Theme.text; }
+                    if root.overdue-tasks.length == 0 && root.today-tasks.length == 0: Text {
+                        text: "Nothing due today.";
+                        color: Theme.text-faint;
+                        font-size: 13px;
+                    }
+                    if root.overdue-tasks.length > 0: Text { text: "Overdue"; color: Theme.danger; font-size: 11px; font-weight: 700; }
+                    for t in root.overdue-tasks: PopoverTaskRow {
+                        t: t;
+                        toggle => { root.toggle-ptask(t.note_id, t.line_index); }
+                        open => { root.open-task-note(t.note_id); }
+                    }
+                    if root.today-tasks.length > 0: Text { text: "Due today"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
+                    for t in root.today-tasks: PopoverTaskRow {
+                        t: t;
+                        toggle => { root.toggle-ptask(t.note_id, t.line_index); }
+                        open => { root.open-task-note(t.note_id); }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+
+                if root.tab == 2: VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 8px;
+                    Text { text: "Daily"; font-size: 16px; font-weight: 700; color: Theme.text; }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: Theme.bg-panel;
+                        border-radius: 8px;
+                        Flickable {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            height: parent.height - 16px;
+                            TextInput {
+                                width: parent.width;
+                                text <=> root.daily-body;
+                                color: Theme.text;
+                                font-size: 13px;
+                                single-line: false;
+                                wrap: word-wrap;
+                                edited => { root.edit-daily(self.text); }
+                            }
+                        }
+                    }
+                }
+
+                if root.tab == 3: VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 6px;
+                    Text { text: "Clipboard"; font-size: 16px; font-weight: 700; color: Theme.text; }
+                    if root.clips.length == 0: Text { text: "No recent clips."; color: Theme.text-faint; font-size: 13px; }
+                    ListView {
+                        vertical-stretch: 1;
+                        for c[i] in root.clips: Rectangle {
+                            height: 34px;
+                            background: crow.has-hover ? Theme.bg-elevated : transparent;
+                            border-radius: 6px;
+                            crow := TouchArea { clicked => { root.paste-clip(i); } }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: Theme.text-dim; }
+                                Text {
+                                    text: c.title;
+                                    color: Theme.text;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Footer: jump to the full Magpie window.
+                foot := TouchArea {
+                    height: 24px;
+                    clicked => { root.open-full(); }
+                    Text {
+                        text: "Open Magpie ↗";
+                        color: foot.has-hover ? Theme.text : Theme.link;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,35 @@
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+
+// A type-kind glyph: picks the icon by `Kind::as_str()` value (rtf/html/text → text).
+export component TypeIcon inherits Image {
+    in property <string> kind;
+    in property <color> tint: Theme.text-dim;
+    image-fit: contain;
+    colorize: root.tint;
+    source: root.kind == "link" ? Icons.type-link
+        : root.kind == "color" ? Icons.type-color
+        : root.kind == "email" ? Icons.type-email
+        : root.kind == "image" ? Icons.type-image
+        : root.kind == "file" ? Icons.type-file
+        : Icons.type-text;
+}
+
+// A ⌘K action glyph: picks the icon by action id (unknown → paste).
+export component ActionIcon inherits Image {
+    in property <string> id;
+    in property <color> tint: Theme.text;
+    image-fit: contain;
+    colorize: root.tint;
+    source: root.id == "copy" ? Icons.act-copy
+        : root.id == "keep" ? Icons.act-keep
+        : root.id == "edit" ? Icons.act-edit
+        : root.id == "snippet" ? Icons.act-snippet
+        : root.id == "pin" ? Icons.act-pin
+        : root.id == "slot" ? Icons.act-slot
+        : root.id == "merge" ? Icons.act-merge
+        : root.id == "note" ? Icons.act-note
+        : root.id == "delete" ? Icons.act-delete
+        : root.id == "export" ? Icons.act-export
+        : Icons.act-paste;
+}

@@ -1,0 +1,106 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component BookmarksView inherits Rectangle {
+    callback add-bookmark(string);
+    in-out property <string> bookmark-add-url;
+    in-out property <string> bookmark-query;
+    callback bookmark-search(string);
+    in property <[BookmarkRow]> bookmarks;
+    in-out property <bool> bookmarks-mode;
+    callback delete-bookmark(int);
+    callback open-bookmark(string);
+    in-out property <length> sidebar-w;
+            background: Theme.bg-app;
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "Bookmarks"; color: Theme.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                // Search + add-url row.
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        horizontal-stretch: 1; height: 30px; background: Theme.bg-panel; border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            if root.bookmark-query == "": Text { text: "Search bookmarks…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                            bkq := TextInput {
+                                text <=> root.bookmark-query;
+                                color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
+                                edited => { root.bookmark-search(self.text); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1; height: 30px; background: Theme.bg-panel; border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            if root.bookmark-add-url == "": Text { text: "Add URL  (optionally  #tags)…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                            bkadd := TextInput {
+                                text <=> root.bookmark-add-url;
+                                color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
+                                key-pressed(e) => {
+                                    if e.text == Key.Return { root.add-bookmark(self.text); self.text = ""; return accept; }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+                }
+                ListView {
+                    for b in root.bookmarks: Rectangle {
+                        height: b.has-thumb ? 58px : 46px;
+                        background: bkrow.has-hover ? Theme.bg-elevated : transparent;
+                        border-radius: 6px;
+                        bkrow := TouchArea { clicked => { root.open-bookmark(b.url); } }
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px; spacing: 8px;
+                            if b.has-icon: Image { source: b.icon; width: 16px; height: 16px; }
+                            if !b.has-icon: Image { source: Icons.bookmark; colorize: Theme.text-dim; width: 15px; height: 15px; image-fit: contain; }
+                            VerticalLayout {
+                                horizontal-stretch: 1; padding-top: 5px; padding-bottom: 5px;
+                                Text { text: b.title == "" ? b.url : b.title; color: Theme.text; font-size: 13px; overflow: elide; }
+                                Text { text: b.domain; color: Theme.text-dim; font-size: 11px; overflow: elide; }
+                                if b.tags != "": Text { text: b.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
+                            }
+                            if b.has-thumb: Rectangle {
+                                width: 64px;
+                                height: 40px;
+                                border-radius: 6px;
+                                clip: true;
+                                Image {
+                                    source: b.thumb;
+                                    width: 64px;
+                                    height: 40px;
+                                    image-fit: cover;
+                                }
+                            }
+                            Rectangle {
+                                width: 28px;
+                                bkdel := TouchArea { clicked => { root.delete-bookmark(b.id); } }
+                                Text { text: "×"; color: bkdel.has-hover ? Theme.danger : Theme.text-faint; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+                if root.bookmarks.length == 0: HorizontalLayout {
+                    alignment: center;
+                    Text { text: "No bookmarks yet. Add a URL above, or ⌘K → Bookmark a copied link."; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                }
+            }
+        }

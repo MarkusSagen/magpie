@@ -1,0 +1,96 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component HelpView inherits Rectangle {
+    in-out property <string> mode;
+            background: #000000aa;
+            TouchArea { clicked => { root.mode = "list"; } }
+            Rectangle {
+                width: 460px;
+                // Tall enough for the whole table — at 460px the last row was clipped
+                // mid-line, which reads as a rendering bug rather than "scroll me".
+                // Bumped for the added "Sections" group (g-leader/history/cycling).
+                height: 620px;
+                background: Theme.bg-app;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+                    Text { text: "Keyboard Shortcuts"; color: Theme.text; font-size: 15px; font-weight: 700; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 6px;
+
+                            Text { text: "Navigation"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "↑ / ↓", d: "Move selection" },
+                                { k: "⏎", d: "Paste to the previous app + close" },
+                                { k: "⌘⏎", d: "Paste + keep Magpie open" },
+                                { k: "Esc", d: "Clear search, then close" },
+                                { k: "type", d: "Filter entries" },
+                                { k: "⌘1–9", d: "Paste the Nth entry" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
+                            }
+
+                            Text { text: "Sections"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "g then c/t/n/b/s", d: "Jump to a section (empty search)" },
+                                { k: "⌘[ / ⌘]", d: "Back / forward through visited screens" },
+                                { k: "⌘⌥←", d: "Jump to the previous screen (toggle)" },
+                                { k: "⌘⌥↑ / ⌘⌥↓", d: "Cycle the section's views (Tasks/Notes)" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
+                            }
+
+                            Text { text: "Actions"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "⌘K", d: "Open the actions menu" },
+                                { k: "⌘F", d: "Filters (source app / time)" },
+                                { k: "⌘⇧F", d: "Find everywhere (notes/tasks/bookmarks)" },
+                                { k: "⌘C", d: "Copy (no paste)" },
+                                { k: "⌘E", d: "Edit the entry" },
+                                { k: "⌘N", d: "New snippet" },
+                                { k: "⌘P", d: "Pin / unpin" },
+                                { k: "⌘S", d: "Assign to a ⌘1–9 slot" },
+                                { k: "⌘G", d: "Add to merge" },
+                                { k: "⌘J", d: "New note from this entry" },
+                                { k: "⌘V", d: "Paste clipboard into search" },
+                                { k: "⌘⌫", d: "Delete the entry" },
+                            ]: HorizontalLayout {
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
+                            }
+
+                            Text { text: "Views"; color: Pal.accent; font-size: 12px; }
+                            for row in [
+                                { k: "⌘/  or  ?", d: "This help" },
+                                { k: "⌘+ / ⌘− / ⌘0", d: "Preview text size" },
+                                { k: "Mask", d: "Screenshare mode (hide all content)" },
+                                { k: "Notes", d: "Notes & pages" },
+                                { k: "⌘⏎", d: "Make task (in a note)" },
+                                { k: "Tasks", d: "Task list from your notes" },
+                                { k: "Stats", d: "Copy analytics" },
+                            ]: HorizontalLayout {
+                                spacing: 4px;
+                                if row.k == "Mask": Image { source: Icons.lock; colorize: Theme.text; width: 12px; height: 12px; image-fit: contain; }
+                                Text { text: row.k; color: Theme.text; font-size: 12px; width: 130px; }
+                                Text { text: row.d; color: Theme.text-dim; font-size: 12px; }
+                            }
+                        }
+                    }
+                    Text { text: "Esc to close"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; }
+                }
+            }
+        }

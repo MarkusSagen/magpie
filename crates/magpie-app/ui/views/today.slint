@@ -1,0 +1,145 @@
+import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
+import { HBar } from "../components/hbar.slint";
+import { PopoverTaskRow } from "../components/task_row.slint";
+import { BoardCard } from "../components/board_card.slint";
+
+export component TodayView inherits Rectangle {
+    in-out property <int> active-elapsed-sec;
+    in property <string> active-title;
+    callback edit-today-journal(string);
+    callback open-task-note(int);
+    callback set-task-view(string);
+    in-out property <length> sidebar-w;
+    in-out property <string> tasks-view;
+    in property <[ClipRow]> today-clips;
+    in property <[TaskRow]> today-due;
+    in-out property <string> today-journal;
+    in-out property <bool> today-mode;
+    callback today-paste-clip(int);
+    callback toggle-task(int, int);
+            background: Theme.bg-app;
+            VerticalLayout {
+                // Inset to the right of the sidebar via left padding (see the
+                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+                padding-left: root.sidebar-w + 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                // Top bar: back to clipboard + the running-timer chip (copied
+                // from the Tasks-mode header).
+                HorizontalLayout {
+                    spacing: 8px;
+                    // [Today · List · Board] — replaces the old "← Clipboard" back
+                    // button; the sidebar's Clipboard icon is the back button now.
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for tv in ["today", "list", "board"]: Rectangle {
+                            height: 30px;
+                            width: 56px;
+                            border-radius: 6px;
+                            background: root.tasks-view == tv ? Pal.accent : (tvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            tvsw1 := TouchArea { clicked => { root.set-task-view(tv); } }
+                            Text {
+                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
+                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.active-title != "": Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: Theme.success.with-alpha(0.18);
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            Text {
+                                text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
+                                color: Theme.success;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                // Tick the running-timer display once a second while active.
+                Timer {
+                    interval: 1s;
+                    running: root.active-title != "";
+                    triggered => {
+                        root.active-elapsed-sec += 1;
+                    }
+                }
+                Flickable {
+                    vertical-stretch: 1;
+                    // Pin the viewport to the content's own preferred height —
+                    // otherwise Flickable stretches this VerticalLayout to fill
+                    // the whole remaining window height, and every unconstrained
+                    // Text/spacer in it grows to soak up the leftover space,
+                    // scattering the three sections across the whole window.
+                    viewport-width: self.width;
+                    viewport-height: todcol.preferred-height;
+                    todcol := VerticalLayout {
+                        width: parent.width;
+                        spacing: 10px;
+
+                        Text { text: "Due & overdue"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
+                        for t in root.today-due: PopoverTaskRow {
+                            t: t;
+                            toggle => { root.toggle-task(t.note_id, t.line_index); }
+                            open => { root.open-task-note(t.note_id); }
+                        }
+                        if root.today-due.length == 0: Text { text: "Nothing due — you're clear"; color: Theme.text-faint; font-size: 13px; }
+
+                        Text { text: "Journal"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
+                        Rectangle {
+                            height: 100px;
+                            background: Theme.bg-panel;
+                            border-radius: 8px;
+                            Flickable {
+                                x: 10px;
+                                y: 8px;
+                                width: parent.width - 20px;
+                                height: parent.height - 16px;
+                                TextInput {
+                                    width: parent.width;
+                                    text <=> root.today-journal;
+                                    color: Theme.text;
+                                    font-size: 13px;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    edited => { root.edit-today-journal(self.text); }
+                                }
+                            }
+                        }
+
+                        Text { text: "Recent clips"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
+                        for c[i] in root.today-clips: Rectangle {
+                            height: 34px;
+                            background: crow.has-hover ? Theme.bg-elevated : transparent;
+                            border-radius: 6px;
+                            crow := TouchArea { clicked => { root.today-paste-clip(i); } }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                TypeIcon { kind: c.kind; width: 16px; height: 16px; tint: Theme.text-dim; }
+                                Text { text: c.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
