@@ -11,8 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # System deps for arboard + Slint (winit/femtovg) and a headless X server
-      # so the Linux clipboard test can actually exercise instead of skipping.
+      # rust-toolchain.toml pins 1.97.1, but the runner auto-installs it WITHOUT the
+      # clippy/rustfmt components — install them explicitly. Keep the version in sync
+      # with rust-toolchain.toml.
+      - name: Install pinned Rust toolchain (+ clippy, rustfmt)
+        run: rustup toolchain install 1.97.1 --profile minimal -c clippy -c rustfmt
+
+      # System deps for arboard + Slint (winit/femtovg), tray-icon (GTK/glib +
+      # ayatana appindicator), enigo (libxdo), notify-rust (D-Bus), plus a headless
+      # X server so the Linux clipboard test can actually exercise instead of skipping.
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
@@ -20,6 +27,8 @@ jobs:
           sudo apt-get install -y \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libfontconfig1-dev \
+            libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev \
+            libxdo-dev libdbus-1-dev \
             xvfb xclip
 
       - name: Test (Linux, headless X)
