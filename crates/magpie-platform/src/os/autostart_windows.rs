@@ -1,5 +1,6 @@
 use crate::traits::Autostart;
 use windows::core::PCWSTR;
+use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
     HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_SAM_FLAGS, REG_SZ,
@@ -56,7 +57,14 @@ impl Autostart for WinAutostart {
                 unsafe { std::slice::from_raw_parts(val.as_ptr() as *const u8, val.len() * 2) };
             unsafe { RegSetValueExW(hkey, PCWSTR(name.as_ptr()), 0, REG_SZ, Some(bytes)) }.ok()
         } else {
-            unsafe { RegDeleteValueW(hkey, PCWSTR(name.as_ptr())) }.ok()
+            // Deleting an absent value returns ERROR_FILE_NOT_FOUND — treat that as
+            // success so disabling autostart is idempotent (it's already off).
+            let rc = unsafe { RegDeleteValueW(hkey, PCWSTR(name.as_ptr())) };
+            if rc == ERROR_FILE_NOT_FOUND {
+                Ok(())
+            } else {
+                rc.ok()
+            }
         };
         unsafe {
             let _ = RegCloseKey(hkey);
