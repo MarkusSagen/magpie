@@ -2003,6 +2003,26 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "today" => ui.invoke_set_mode_today(true),
                         "journal" => ui.invoke_set_mode_journal(true),
                         "graph" => ui.invoke_set_mode_graph(true),
+                        // First-class router targets, so a screenshot pass can
+                        // reach EVERY surface by name without temporary hooks:
+                        //   section:<clipboard|tasks|notes|bookmarks|stats>
+                        //   taskview:<today|list|board>  noteview:<notes|journal|graph>
+                        //   board  (shorthand for the tasks section's Kanban)
+                        "board" => {
+                            ui.invoke_set_section(SharedString::from("tasks"));
+                            ui.invoke_set_task_view(SharedString::from("board"));
+                        }
+                        s if s.starts_with("section:") => {
+                            ui.invoke_set_section(SharedString::from(&s["section:".len()..]));
+                        }
+                        s if s.starts_with("taskview:") => {
+                            ui.invoke_set_section(SharedString::from("tasks"));
+                            ui.invoke_set_task_view(SharedString::from(&s["taskview:".len()..]));
+                        }
+                        s if s.starts_with("noteview:") => {
+                            ui.invoke_set_section(SharedString::from("notes"));
+                            ui.invoke_set_note_view(SharedString::from(&s["noteview:".len()..]));
+                        }
                         // Toggle slot 1 on the selection, to see the speed-dial
                         // strip populated. Running it twice clears it again.
                         "slot1" => ui.invoke_assign_slot(ui.get_selected(), 1),
