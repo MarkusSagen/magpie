@@ -12,33 +12,6 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-// This module is only compiled on the Windows leg (`#[cfg(target_os =
-// "windows")]` on the `pub mod autostart_windows;` declaration in
-// `os/mod.rs`), so a plain `#[cfg(test)]` here already only runs there.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wide_encodes_ascii_with_trailing_nul() {
-        let expected: Vec<u16> = "Run".encode_utf16().chain(std::iter::once(0)).collect();
-        assert_eq!(wide("Run"), expected);
-        assert_eq!(wide("Run"), vec![b'R' as u16, b'u' as u16, b'n' as u16, 0]);
-    }
-
-    #[test]
-    fn wide_of_empty_string_is_just_a_nul() {
-        assert_eq!(wide(""), vec![0u16]);
-    }
-
-    #[test]
-    fn wide_encodes_non_ascii_correctly() {
-        let s = "café";
-        let expected: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-        assert_eq!(wide(s), expected);
-    }
-}
-
 pub struct WinAutostart {
     pub value_name: String,
     pub exe_path: String,
@@ -97,5 +70,32 @@ impl Autostart for WinAutostart {
             let _ = RegCloseKey(hkey);
         }
         result.map_err(|e| e.to_string())
+    }
+}
+
+// This module is only compiled on the Windows leg (`#[cfg(target_os =
+// "windows")]` on the `pub mod autostart_windows;` declaration in
+// `os/mod.rs`), so a plain `#[cfg(test)]` here already only runs there.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wide_encodes_ascii_with_trailing_nul() {
+        let expected: Vec<u16> = "Run".encode_utf16().chain(std::iter::once(0)).collect();
+        assert_eq!(wide("Run"), expected);
+        assert_eq!(wide("Run"), vec![b'R' as u16, b'u' as u16, b'n' as u16, 0]);
+    }
+
+    #[test]
+    fn wide_of_empty_string_is_just_a_nul() {
+        assert_eq!(wide(""), vec![0u16]);
+    }
+
+    #[test]
+    fn wide_encodes_non_ascii_correctly() {
+        let s = "café";
+        let expected: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+        assert_eq!(wide(s), expected);
     }
 }
