@@ -169,36 +169,74 @@ struct SearchBookmarkRow {
 // the core surfaces (sidebar, clipboard/list view) consume these tokens —
 // everything else keeps its hardcoded dark values until a later migration
 // pass, so default dark mode is visually unchanged.
-global Theme {
-    in property <bool> dark: true;
+// One named colour theme. Every colour token the UI consumes lives here, so a
+// new theme is just one more entry in `Theme.palettes` (order MUST match the
+// Rust registry in `themes.rs`). `dark` drives the native window chrome.
+struct Palette {
+    name: string,
+    dark: bool,
     // surfaces
-    out property <color> bg-app: dark ? #1a1a1d : #f6f6f8;
-    out property <color> bg-panel: dark ? #232328 : #ffffff; // cards, inputs, preview
-    out property <color> bg-elevated: dark ? #2c2c33 : #ececf0; // hover / selected
-    out property <color> bg-sidebar: dark ? #141416 : #edeef1;
-    out property <color> border: dark ? #33333c : #d8d8e0;
-    out property <color> border-strong: dark ? #45454f : #c2c2cc;
+    bg-app: color,
+    bg-panel: color,
+    bg-elevated: color,
+    bg-sidebar: color,
+    border: color,
+    border-strong: color,
     // text
-    out property <color> text: dark ? #e8e8ec : #1a1a1e;
-    out property <color> text-dim: dark ? #9a9aa2 : #55555f;
-    out property <color> text-faint: dark ? #6a6a72 : #8a8a92;
-    // brand + semantic (kept vivid in both, nudged for light contrast)
-    out property <color> accent: dark ? #6a8cff : #4a6cf0;
-    out property <color> on-accent: dark ? #0d0d12 : #ffffff;
-    out property <color> danger: dark ? #e06a6a : #d0483f; // overdue
-    out property <color> warn: dark ? #e0a44a : #b8791f;
-    out property <color> success: dark ? #6cc98a : #2e9e5b; // done
-    out property <color> link: dark ? #9ab0ff : #4a6cf0; // #tags, domains
+    text: color,
+    text-dim: color,
+    text-faint: color,
+    // brand + semantic
+    accent: color,
+    on-accent: color,
+    danger: color,
+    warn: color,
+    success: color,
+    link: color,
     // priority pills
-    out property <color> prio-high: dark ? #e05a5a : #d0483f;
-    out property <color> prio-med: dark ? #e0a44a : #b8791f;
-    out property <color> prio-low: dark ? #6a8cff : #4a6cf0;
-    // section accents (same hue both themes)
-    out property <color> sec-clip: #6a8cff;
-    out property <color> sec-tasks: #5ac77a;
-    out property <color> sec-notes: #c78a5a;
-    out property <color> sec-links: #b06ad0;
-    out property <color> sec-stats: #d0b04a;
+    prio-high: color,
+    prio-med: color,
+    prio-low: color,
+    // section accents
+    sec-clip: color,
+    sec-tasks: color,
+    sec-notes: color,
+    sec-links: color,
+    sec-stats: color,
+}
+
+global Theme {
+    // Selected palette index (wired from the root's `theme-index`; a global
+    // can't read the root directly). Kept in range even if pushed a bad value.
+    in property <int> index: 0;
+    out property <Palette> p: palettes[
+        Math.min(Math.max(index, 0), palettes.length - 1)];
+    // Re-exported tokens: every existing `Theme.<token>` reference keeps working,
+    // now sourced from the selected palette.
+    out property <bool> dark: p.dark;
+    out property <color> bg-app: p.bg-app;
+    out property <color> bg-panel: p.bg-panel;
+    out property <color> bg-elevated: p.bg-elevated;
+    out property <color> bg-sidebar: p.bg-sidebar;
+    out property <color> border: p.border;
+    out property <color> border-strong: p.border-strong;
+    out property <color> text: p.text;
+    out property <color> text-dim: p.text-dim;
+    out property <color> text-faint: p.text-faint;
+    out property <color> accent: p.accent;
+    out property <color> on-accent: p.on-accent;
+    out property <color> danger: p.danger;
+    out property <color> warn: p.warn;
+    out property <color> success: p.success;
+    out property <color> link: p.link;
+    out property <color> prio-high: p.prio-high;
+    out property <color> prio-med: p.prio-med;
+    out property <color> prio-low: p.prio-low;
+    out property <color> sec-clip: p.sec-clip;
+    out property <color> sec-tasks: p.sec-tasks;
+    out property <color> sec-notes: p.sec-notes;
+    out property <color> sec-links: p.sec-links;
+    out property <color> sec-stats: p.sec-stats;
     // spacing scale (theme-independent)
     out property <length> sp1: 4px;
     out property <length> sp2: 8px;
@@ -216,6 +254,109 @@ global Theme {
     out property <length> fs-md: 14px;
     out property <length> fs-lg: 15px;
     out property <length> fs-title: 20px;
+
+    // The theme catalogue. ORDER IS THE CONTRACT with `themes.rs` (index-based).
+    out property <[Palette]> palettes: [
+        // 0 — Dark (default)
+        {
+            name: "Dark", dark: true,
+            bg-app: #1a1a1d, bg-panel: #232328, bg-elevated: #2c2c33, bg-sidebar: #141416,
+            border: #33333c, border-strong: #45454f,
+            text: #e8e8ec, text-dim: #9a9aa2, text-faint: #6a6a72,
+            accent: #6a8cff, on-accent: #0d0d12, danger: #e06a6a, warn: #e0a44a,
+            success: #6cc98a, link: #9ab0ff,
+            prio-high: #e05a5a, prio-med: #e0a44a, prio-low: #6a8cff,
+            sec-clip: #6a8cff, sec-tasks: #5ac77a, sec-notes: #c78a5a, sec-links: #b06ad0, sec-stats: #d0b04a,
+        },
+        // 1 — Light (default)
+        {
+            name: "Light", dark: false,
+            bg-app: #f6f6f8, bg-panel: #ffffff, bg-elevated: #ececf0, bg-sidebar: #edeef1,
+            border: #d8d8e0, border-strong: #c2c2cc,
+            text: #1a1a1e, text-dim: #55555f, text-faint: #8a8a92,
+            accent: #4a6cf0, on-accent: #ffffff, danger: #d0483f, warn: #b8791f,
+            success: #2e9e5b, link: #4a6cf0,
+            prio-high: #d0483f, prio-med: #b8791f, prio-low: #4a6cf0,
+            sec-clip: #6a8cff, sec-tasks: #5ac77a, sec-notes: #c78a5a, sec-links: #b06ad0, sec-stats: #d0b04a,
+        },
+        // 2 — Catppuccin Mocha
+        {
+            name: "Catppuccin Mocha", dark: true,
+            bg-app: #1e1e2e, bg-panel: #313244, bg-elevated: #45475a, bg-sidebar: #181825,
+            border: #313244, border-strong: #45475a,
+            text: #cdd6f4, text-dim: #a6adc8, text-faint: #7f849c,
+            accent: #89b4fa, on-accent: #1e1e2e, danger: #f38ba8, warn: #f9e2af,
+            success: #a6e3a1, link: #b4befe,
+            prio-high: #f38ba8, prio-med: #fab387, prio-low: #89b4fa,
+            sec-clip: #89b4fa, sec-tasks: #a6e3a1, sec-notes: #fab387, sec-links: #cba6f7, sec-stats: #f9e2af,
+        },
+        // 3 — Catppuccin Latte
+        {
+            name: "Catppuccin Latte", dark: false,
+            bg-app: #eff1f5, bg-panel: #ffffff, bg-elevated: #dce0e8, bg-sidebar: #e6e9ef,
+            border: #ccd0da, border-strong: #bcc0cc,
+            text: #4c4f69, text-dim: #6c6f85, text-faint: #8c8fa1,
+            accent: #1e66f5, on-accent: #ffffff, danger: #d20f39, warn: #df8e1d,
+            success: #40a02b, link: #7287fd,
+            prio-high: #d20f39, prio-med: #fe640b, prio-low: #1e66f5,
+            sec-clip: #1e66f5, sec-tasks: #40a02b, sec-notes: #fe640b, sec-links: #8839ef, sec-stats: #df8e1d,
+        },
+        // 4 — Tokyo Night
+        {
+            name: "Tokyo Night", dark: true,
+            bg-app: #1a1b26, bg-panel: #24283b, bg-elevated: #292e42, bg-sidebar: #16161e,
+            border: #292e42, border-strong: #3b4261,
+            text: #c0caf5, text-dim: #a9b1d6, text-faint: #565f89,
+            accent: #7aa2f7, on-accent: #1a1b26, danger: #f7768e, warn: #e0af68,
+            success: #9ece6a, link: #7dcfff,
+            prio-high: #f7768e, prio-med: #ff9e64, prio-low: #7aa2f7,
+            sec-clip: #7aa2f7, sec-tasks: #9ece6a, sec-notes: #ff9e64, sec-links: #bb9af7, sec-stats: #e0af68,
+        },
+        // 5 — Atom One Dark
+        {
+            name: "Atom One Dark", dark: true,
+            bg-app: #282c34, bg-panel: #2f343d, bg-elevated: #3a3f4b, bg-sidebar: #21252b,
+            border: #3a3f4b, border-strong: #4b5263,
+            text: #abb2bf, text-dim: #828997, text-faint: #5c6370,
+            accent: #61afef, on-accent: #282c34, danger: #e06c75, warn: #d19a66,
+            success: #98c379, link: #56b6c2,
+            prio-high: #e06c75, prio-med: #d19a66, prio-low: #61afef,
+            sec-clip: #61afef, sec-tasks: #98c379, sec-notes: #d19a66, sec-links: #c678dd, sec-stats: #e5c07b,
+        },
+        // 6 — Dracula
+        {
+            name: "Dracula", dark: true,
+            bg-app: #282a36, bg-panel: #2f313f, bg-elevated: #44475a, bg-sidebar: #21222c,
+            border: #44475a, border-strong: #565872,
+            text: #f8f8f2, text-dim: #b8bcc8, text-faint: #6272a4,
+            accent: #bd93f9, on-accent: #282a36, danger: #ff5555, warn: #ffb86c,
+            success: #50fa7b, link: #8be9fd,
+            prio-high: #ff5555, prio-med: #ffb86c, prio-low: #bd93f9,
+            sec-clip: #8be9fd, sec-tasks: #50fa7b, sec-notes: #ffb86c, sec-links: #ff79c6, sec-stats: #f1fa8c,
+        },
+        // 7 — Nord
+        {
+            name: "Nord", dark: true,
+            bg-app: #2e3440, bg-panel: #3b4252, bg-elevated: #434c5e, bg-sidebar: #272c36,
+            border: #3b4252, border-strong: #4c566a,
+            text: #eceff4, text-dim: #d8dee9, text-faint: #7b8394,
+            accent: #88c0d0, on-accent: #2e3440, danger: #bf616a, warn: #ebcb8b,
+            success: #a3be8c, link: #81a1c1,
+            prio-high: #bf616a, prio-med: #d08770, prio-low: #81a1c1,
+            sec-clip: #88c0d0, sec-tasks: #a3be8c, sec-notes: #d08770, sec-links: #b48ead, sec-stats: #ebcb8b,
+        },
+        // 8 — Gruvbox Dark
+        {
+            name: "Gruvbox Dark", dark: true,
+            bg-app: #282828, bg-panel: #32302f, bg-elevated: #3c3836, bg-sidebar: #1d2021,
+            border: #3c3836, border-strong: #504945,
+            text: #ebdbb2, text-dim: #bdae93, text-faint: #928374,
+            accent: #fabd2f, on-accent: #282828, danger: #fb4934, warn: #fe8019,
+            success: #b8bb26, link: #83a598,
+            prio-high: #fb4934, prio-med: #fe8019, prio-low: #83a598,
+            sec-clip: #83a598, sec-tasks: #b8bb26, sec-notes: #fe8019, sec-links: #d3869b, sec-stats: #fabd2f,
+        },
+    ];
 }
 
 // Kept for existing call sites — mirrors `Theme.accent`/`Theme.on-accent` so
@@ -523,11 +664,12 @@ export component LauncherWindow inherits Window {
 
     // ---- Theme (light/dark) ----
     // `global Theme` can't read the root directly, so the root pushes its own
-    // `theme-dark` into it on init and on every change instead.
-    in-out property <bool> theme-dark: true;
-    callback toggle-theme();
-    init => { Theme.dark = root.theme-dark; }
-    changed theme-dark => { Theme.dark = root.theme-dark; }
+    // `theme-index` into it on init and on every change instead.
+    in-out property <int> theme-index: 0;
+    // Select a theme by catalogue index (see themes.rs / Theme.palettes).
+    callback set-theme(int);
+    init => { Theme.index = root.theme-index; }
+    changed theme-index => { Theme.index = root.theme-index; }
 
     // ---- Keyboard nav layer (history + g-leader + view cycling) ----
     // True right after a bare `g` (with an empty search query) is pressed —
@@ -3524,17 +3666,83 @@ export component LauncherWindow inherits Window {
                     }
                 }
                 Rectangle { vertical-stretch: 1; }
-                // ---- Theme toggle: sun/moon, bottom of the sidebar. ----
+                // ---- Theme picker: bottom of the sidebar. Opens a popup of all
+                // named themes; each row shows a swatch + name. ----
                 Rectangle {
                     height: 40px;
                     background: themeta.has-hover ? Theme.bg-elevated : transparent;
-                    themeta := TouchArea { clicked => { root.toggle-theme(); } }
+                    themeta := TouchArea { clicked => { themepop.show(); } }
                     Image {
                         source: Icons.theme;
                         width: 16px;
                         height: 16px;
                         image-fit: contain;
                         colorize: Theme.text-dim;
+                    }
+                    themepop := PopupWindow {
+                        x: parent.width + 6px;
+                        y: parent.height - self.height;
+                        width: 210px;
+                        height: min(Theme.palettes.length * 34px + 12px, 360px);
+                        Rectangle {
+                            background: Theme.bg-panel;
+                            border-color: Theme.border-strong;
+                            border-width: 1px;
+                            border-radius: 10px;
+                            Flickable {
+                                viewport-height: Theme.palettes.length * 34px + 12px;
+                                VerticalLayout {
+                                    padding: 6px;
+                                    spacing: 2px;
+                                    for pal[i] in Theme.palettes: Rectangle {
+                                        height: 30px;
+                                        border-radius: 6px;
+                                        background: root.theme-index == i
+                                            ? Theme.bg-elevated
+                                            : (themerowta.has-hover ? Theme.bg-elevated : transparent);
+                                        themerowta := TouchArea {
+                                            clicked => { root.set-theme(i); themepop.close(); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            spacing: 8px;
+                                            alignment: start;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                // Swatch: the palette's app bg with an accent ring.
+                                                Rectangle {
+                                                    width: 16px; height: 16px;
+                                                    border-radius: 4px;
+                                                    background: pal.bg-app;
+                                                    border-color: pal.accent;
+                                                    border-width: 2px;
+                                                }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Text {
+                                                    text: pal.name;
+                                                    color: Theme.text;
+                                                    font-size: Theme.fs-body;
+                                                    overflow: elide;
+                                                }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                // Selected marker: a drawn accent dot (no glyphs).
+                                                Rectangle {
+                                                    width: 8px; height: 8px;
+                                                    border-radius: 4px;
+                                                    background: root.theme-index == i ? Theme.accent : transparent;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -4255,9 +4463,9 @@ export component Popover inherits Window {
     // call) for this popover to ever actually pick up the app's theme; until
     // that Rust wiring exists, this popover keeps rendering with `Theme.dark`
     // defaulted to `true` regardless of the toggle in the main window.
-    in-out property <bool> theme-dark: true;
-    init => { Theme.dark = root.theme-dark; }
-    changed theme-dark => { Theme.dark = root.theme-dark; }
+    in-out property <int> theme-index: 0;
+    init => { Theme.index = root.theme-index; }
+    changed theme-index => { Theme.index = root.theme-index; }
 
     in property <[TaskRow]> ptasks;
     in-out property <string> quick-add;

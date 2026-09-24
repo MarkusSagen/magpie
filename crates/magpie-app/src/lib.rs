@@ -24,6 +24,7 @@ pub mod reminders;
 pub mod retention;
 pub mod stats_view;
 pub mod tasks;
+pub mod themes;
 pub mod unified_search;
 pub mod viewmodel;
 pub mod wiki_complete;

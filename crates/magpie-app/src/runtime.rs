@@ -68,7 +68,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         fetch_link_favicons: cfg.fetch_link_favicons,
         fetch_link_previews: cfg.fetch_link_previews,
         log_clock_entries: cfg.log_clock_entries,
-        theme_dark: cfg.theme_dark,
+        theme: cfg.theme.clone(),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
     })
@@ -589,11 +589,11 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
 /// Refresh results and show the launcher window. Shared by the launcher hotkey
 /// and the tray (left-click + "Show Magpie").
 fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
-    // Deliberately NOT `ui.set_theme_dark(state.theme_dark)` here: `ui` is a
+    // Deliberately NOT `ui.set_theme_index(...)` here: `ui` is a
     // single long-lived window (hidden via `NSApp.hide`, never recreated — see
-    // `hide_launcher`), so its `theme-dark` property already holds whatever the
-    // user last toggled it to. Re-pushing the config-load-time snapshot on every
-    // summon would silently revert an in-session toggle back to the stale value.
+    // `hide_launcher`), so its `theme-index` property already holds whatever the
+    // user last picked. Re-pushing the config-load-time snapshot on every
+    // summon would silently revert an in-session pick back to the stale value.
     // The snapshot is applied exactly once, right after window creation, in `start()`.
     refresh(ui, state);
     // Capture the paste target: whatever app is frontmost right before we show.
@@ -2177,7 +2177,8 @@ pub fn start() {
     let weak = ui.as_weak();
     // Apply the persisted theme once, at window creation — see the comment in
     // `show_window` for why this isn't repeated on every summon.
-    ui.set_theme_dark(state.theme_dark);
+    let theme_idx = magpie_app::themes::index_of(&state.theme);
+    ui.set_theme_index(theme_idx as i32);
 
     // The menubar popover: a second, chromeless, always-on-top window shown from
     // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
@@ -2185,11 +2186,11 @@ pub fn start() {
     // OWN `Theme` global, so its theme must be set + toggled independently of `ui`.
     // Created here (before the theme-toggle handler) so the toggle can update both.
     let popover = Popover::new().expect("create popover");
-    popover.set_theme_dark(state.theme_dark);
+    popover.set_theme_index(theme_idx as i32);
 
     // Match the native window chrome (titlebar / traffic-light strip) to the
-    // theme, so light mode isn't undercut by a dark OS titlebar.
-    magpie_platform::set_appearance(state.theme_dark);
+    // theme, so a light theme isn't undercut by a dark OS titlebar.
+    magpie_platform::set_appearance(magpie_app::themes::is_dark(theme_idx));
 
     {
         let w = weak.clone();
@@ -2202,19 +2203,20 @@ pub fn start() {
     {
         let w = weak.clone();
         let pw = popover.as_weak();
-        ui.on_toggle_theme(move || {
+        ui.on_set_theme(move |idx| {
+            let count = magpie_app::themes::THEMES.len() as i32;
+            let idx = idx.clamp(0, count - 1);
             if let Some(ui) = w.upgrade() {
-                let new_dark = !ui.get_theme_dark();
-                ui.set_theme_dark(new_dark);
-                if let Some(p) = pw.upgrade() {
-                    p.set_theme_dark(new_dark);
-                }
-                magpie_platform::set_appearance(new_dark);
-                let cfg_path = data_dir().join("config.toml");
-                let mut cfg = magpie_app::config::load_or_default(&cfg_path);
-                cfg.theme_dark = new_dark;
-                let _ = magpie_app::config::save(&cfg, &cfg_path);
+                ui.set_theme_index(idx);
             }
+            if let Some(p) = pw.upgrade() {
+                p.set_theme_index(idx);
+            }
+            magpie_platform::set_appearance(magpie_app::themes::is_dark(idx as usize));
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            cfg.theme = magpie_app::themes::id_of(idx as usize).to_string();
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
         });
     }
     {

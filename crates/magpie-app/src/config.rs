@@ -47,10 +47,16 @@ pub struct Config {
     /// note's `:LOGBOOK:` drawer, in addition to the `time_entries` DB row.
     #[serde(default = "default_true")]
     pub log_clock_entries: bool,
-    /// UI theme: dark (default) or light. Toggled from the sidebar's sun/moon
-    /// button; persisted here so it survives a restart.
+    /// Legacy dark/light flag. Superseded by `theme` (a named-theme id); kept
+    /// only so an older config's choice migrates into `theme` on load. Not read
+    /// once `theme` is set.
     #[serde(default = "default_true")]
     pub theme_dark: bool,
+    /// Selected colour-theme id (see `themes::THEMES`), e.g. "dark", "light",
+    /// "catppuccin-mocha". Empty in an older config → migrated from `theme_dark`
+    /// in `load_or_default`. Chosen from the sidebar theme picker.
+    #[serde(default)]
+    pub theme: String,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -81,15 +87,21 @@ impl Default for Config {
             vault_watch: false,
             log_clock_entries: true,
             theme_dark: true,
+            theme: "dark".into(),
         }
     }
 }
 
 pub fn load_or_default(path: &Path) -> Config {
-    match std::fs::read_to_string(path) {
+    let mut cfg = match std::fs::read_to_string(path) {
         Ok(s) => toml::from_str(&s).unwrap_or_default(),
         Err(_) => Config::default(),
+    };
+    // Migrate an older config that only had the dark/light bool.
+    if cfg.theme.is_empty() {
+        cfg.theme = if cfg.theme_dark { "dark" } else { "light" }.into();
     }
+    cfg
 }
 
 pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {

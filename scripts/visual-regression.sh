@@ -20,6 +20,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$REPO/target/screenshots}"
 BIN="$REPO/target/debug/magpie"
+# Theme ids to sweep (see themes.rs). Defaults to the two base themes; set e.g.
+# MAGPIE_VR_THEMES="catppuccin-mocha dracula" to capture others.
 THEMES="${MAGPIE_VR_THEMES:-dark light}"
 STEP_MS="${MAGPIE_UI_TOUR_MS:-500}"
 
@@ -50,7 +52,7 @@ export MAGPIE_SHOW_ON_LAUNCH=1
 export MAGPIE_UI_TOUR_MS="$STEP_MS"
 mkdir -p "$OUT"
 
-write_config() { # $1 = true|false for theme_dark
+write_config() { # $1 = theme id (see themes.rs: dark|light|catppuccin-mocha|…)
   cat > "$DATA/config.toml" <<EOF
 launcher_hotkey = "super+shift+space"
 quick_paste_hotkeys = ["super+ctrl+1","super+ctrl+2","super+ctrl+3","super+ctrl+4","super+ctrl+5","super+ctrl+6","super+ctrl+7","super+ctrl+8","super+ctrl+9"]
@@ -64,7 +66,7 @@ fetch_link_previews = false
 open_to_today = false
 vault_watch = false
 log_clock_entries = true
-theme_dark = $1
+theme = "$1"
 EOF
 }
 
@@ -101,11 +103,7 @@ capture() { # $1 = tour step, $2 = output png
 
 caffeinate -u -t 2 2>/dev/null || true
 for theme in $THEMES; do
-  case "$theme" in
-    dark)  write_config true ;;
-    light) write_config false ;;
-    *) echo "unknown theme '$theme' (use dark|light)" >&2; exit 1 ;;
-  esac
+  write_config "$theme"
   echo "== $theme =="
   for entry in "${SURFACES[@]}"; do
     read -r step stem <<<"$entry"
