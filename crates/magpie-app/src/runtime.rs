@@ -2131,6 +2131,14 @@ pub fn start() {
     // `show_window` for why this isn't repeated on every summon.
     ui.set_theme_dark(state.theme_dark);
 
+    // The menubar popover: a second, chromeless, always-on-top window shown from
+    // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
+    // early would tear the window down). It's a separate top-level component with its
+    // OWN `Theme` global, so its theme must be set + toggled independently of `ui`.
+    // Created here (before the theme-toggle handler) so the toggle can update both.
+    let popover = Popover::new().expect("create popover");
+    popover.set_theme_dark(state.theme_dark);
+
     {
         let w = weak.clone();
         ui.on_dismiss_welcome(move || {
@@ -2141,10 +2149,14 @@ pub fn start() {
     }
     {
         let w = weak.clone();
+        let pw = popover.as_weak();
         ui.on_toggle_theme(move || {
             if let Some(ui) = w.upgrade() {
                 let new_dark = !ui.get_theme_dark();
                 ui.set_theme_dark(new_dark);
+                if let Some(p) = pw.upgrade() {
+                    p.set_theme_dark(new_dark);
+                }
                 let cfg_path = data_dir().join("config.toml");
                 let mut cfg = magpie_app::config::load_or_default(&cfg_path);
                 cfg.theme_dark = new_dark;
@@ -2152,11 +2164,6 @@ pub fn start() {
             }
         });
     }
-
-    // The menubar popover: a second, chromeless, always-on-top window shown from
-    // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
-    // early would tear the window down).
-    let popover = Popover::new().expect("create popover");
     {
         let p = popover.as_weak();
         popover.on_dismiss(move || {
