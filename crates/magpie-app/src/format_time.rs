@@ -228,6 +228,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_due_weekday_tokens() {
+        const DAY: i64 = 86_400_000;
+        // Day 20000 is a Friday (weekday(20000) == 5, with 0 = Sunday).
+        let now = 20_000 * DAY + 5_000; // mid-day Friday
+        let today = 20_000 * DAY;
+        assert_eq!(
+            super::weekday(20_000),
+            5,
+            "precondition: day 20000 is Friday"
+        );
+        // Same weekday must roll to NEXT week (+7), not today — the delta==0 => 7 branch.
+        assert_eq!(super::parse_due("fri", now), Some(today + 7 * DAY));
+        // Case-insensitive, and forward within the same week.
+        assert_eq!(super::parse_due("SAT", now), Some(today + DAY));
+        assert_eq!(super::parse_due("sun", now), Some(today + 2 * DAY));
+        assert_eq!(super::parse_due("mon", now), Some(today + 3 * DAY));
+    }
+
+    #[test]
+    fn parse_due_rejects_malformed_absolute_dates() {
+        const DAY: i64 = 86_400_000;
+        let now = 20_000 * DAY;
+        assert_eq!(super::parse_due("2026-13-01", now), None); // month > 12
+        assert_eq!(super::parse_due("2026-02-32", now), None); // day > 31
+        assert_eq!(super::parse_due("2026-09-10-05", now), None); // extra component
+        assert_eq!(super::parse_due("2026-09", now), None); // missing day
+        assert_eq!(super::parse_due("2026-00-10", now), None); // month 0
+        assert_eq!(super::parse_due("2026-09-00", now), None); // day 0
+    }
+
+    #[test]
     fn parse_time_formats() {
         use super::parse_time;
         assert_eq!(parse_time("14:00"), Some(840));

@@ -101,4 +101,20 @@ mod tests {
         );
         assert_eq!(note_list_title("", "  first\nsecond"), "first");
     }
+
+    #[test]
+    fn title_truncates_long_first_line_to_60_chars() {
+        let long = "x".repeat(100);
+        let out = note_list_title("", &long);
+        assert_eq!(out.chars().count(), 60);
+        assert_eq!(out, "x".repeat(60));
+    }
+
+    #[test]
+    fn title_counts_chars_not_bytes_when_truncating() {
+        // 70 multi-byte chars: truncation must cut at 60 CHARS, not bytes.
+        let long = "é".repeat(70);
+        let out = note_list_title("Note 42", &long);
+        assert_eq!(out.chars().count(), 60);
+    }
 }

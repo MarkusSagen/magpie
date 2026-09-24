@@ -104,6 +104,23 @@ fn create_note_from_entry_copies_provenance() {
 }
 
 #[test]
+fn create_note_from_entry_blank_text_falls_back_to_timestamp_name() {
+    let s = store();
+    let ing = s
+        .ingest(
+            &CaptureEvent {
+                content: Content::Text("   \n\n\t  ".into()), // whitespace-only
+                source_app: None,
+                copied_at_ms: 42,
+            },
+            &NoopImg,
+        )
+        .unwrap();
+    let note = s.create_note_from_entry(ing.entry_id, 555).unwrap();
+    assert_eq!(note.name, "Note 555"); // no non-empty line -> timestamp fallback
+}
+
+#[test]
 fn reminder_fired_roundtrip() {
     let s = store();
     assert!(!s.reminder_fired("fp1").unwrap());

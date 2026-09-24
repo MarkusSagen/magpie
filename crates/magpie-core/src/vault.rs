@@ -416,6 +416,40 @@ mod tests {
     }
 
     #[test]
+    fn reconcile_heals_a_drifted_baseline_when_in_sync() {
+        let store = crate::open_in_memory().unwrap();
+        let dir = reconcile_tmp_dir("heal-baseline");
+        let n = store.upsert_note_by_name("H", 10).unwrap();
+        store.update_note_body(n.id, "content", 20).unwrap();
+
+        let now = 1_000_000_000_000i64;
+        reconcile_vault(&store, &dir, now).unwrap(); // correct baseline + H.md
+
+        // Corrupt ONLY the stored baseline; note body and file stay in sync.
+        store.set_vault_hash(n.id, "deadbeef").unwrap();
+
+        // In-sync content + drifted baseline => unchanged, and the baseline heals.
+        let r = reconcile_vault(&store, &dir, now + 1).unwrap();
+        assert_eq!(
+            r,
+            ReconcileReport {
+                unchanged: 1,
+                ..Default::default()
+            }
+        );
+        let baseline = store
+            .notes_for_sync()
+            .unwrap()
+            .into_iter()
+            .find(|(note, _)| note.id == n.id)
+            .map(|(_, b)| b)
+            .unwrap();
+        assert_ne!(baseline, "deadbeef", "drifted baseline should be re-healed");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn reconcile_pushes_note_edit_to_file() {
         let store = crate::open_in_memory().unwrap();
         let dir = reconcile_tmp_dir("push");

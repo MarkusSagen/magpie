@@ -495,6 +495,14 @@ fn on_nav_forward(ui: &LauncherWindow, state: &Arc<AppState>) {
 
 /// Cycle the current section's views by `dir` (+1/-1), wrapping. No-op for
 /// single-view sections (clipboard, bookmarks, stats).
+/// Step through `views` from `cur` by `dir` (+1/-1), wrapping around. An unknown
+/// `cur` is treated as index 0. Pure so the wrap-around math is unit-testable.
+fn cycle_view<'a>(views: &[&'a str], cur: &str, dir: i32) -> &'a str {
+    let n = views.len() as i32;
+    let i = views.iter().position(|v| *v == cur).unwrap_or(0) as i32;
+    views[(i + dir).rem_euclid(n) as usize]
+}
+
 fn on_nav_cycle_view(ui: &LauncherWindow, state: &Arc<AppState>, dir: i32) {
     let section = ui.get_section().to_string();
     let (views, cur): (&[&str], String) = match section.as_str() {
@@ -505,9 +513,7 @@ fn on_nav_cycle_view(ui: &LauncherWindow, state: &Arc<AppState>, dir: i32) {
         ),
         _ => return,
     };
-    let n = views.len() as i32;
-    let i = views.iter().position(|v| *v == cur).unwrap_or(0) as i32;
-    let next = views[(i + dir).rem_euclid(n) as usize];
+    let next = cycle_view(views, &cur, dir);
     nav_to(ui, state, &section, next);
 }
 
@@ -1351,13 +1357,36 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("task-from-link", "", "Create task from link", ""),
 ];
 
+/// The ⌘K rows whose label matches `query` (case-insensitive substring; "" =
+/// all), in declaration order. Pure, so the match logic is unit-testable.
+#[allow(clippy::type_complexity)]
+fn filter_actions(
+    query: &str,
+) -> Vec<&'static (&'static str, &'static str, &'static str, &'static str)> {
+    let q = query.to_lowercase();
+    ACTIONS
+        .iter()
+        .filter(|(_, _, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
+        .collect()
+}
+
+/// Keep a list selection index in range: clamp to the last row when it would
+/// point past the end, and to 0 when the list is empty.
+fn clamp_selection(sel: i32, len: i32) -> i32 {
+    if sel >= len {
+        (len - 1).max(0)
+    } else {
+        sel
+    }
+}
+
 /// Push the ⌘K action list filtered by `query` (case-insensitive label match)
 /// and keep `action-selected` in range.
 fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
-    let q = query.to_lowercase();
-    let items: Vec<ActionItem> = ACTIONS
-        .iter()
-        .filter(|(_, _, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
+    let rows = filter_actions(query);
+    let len = rows.len() as i32;
+    let items: Vec<ActionItem> = rows
+        .into_iter()
         .map(|(id, icon, label, key)| ActionItem {
             icon: SharedString::from(*icon),
             label: SharedString::from(*label),
@@ -1365,10 +1394,9 @@ fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
             id: SharedString::from(*id),
         })
         .collect();
-    let len = items.len() as i32;
     ui.set_actions(ModelRc::new(VecModel::from(items)));
     if ui.get_action_selected() >= len {
-        ui.set_action_selected((len - 1).max(0));
+        ui.set_action_selected(clamp_selection(ui.get_action_selected(), len));
     }
 }
 
@@ -3729,11 +3757,7 @@ pub fn start() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
                 };
-                let status = match status {
-                    1 => magpie_app::tasks::Status::Doing,
-                    2 => magpie_app::tasks::Status::Done,
-                    _ => magpie_app::tasks::Status::Todo,
-                };
+                let status = magpie_app::tasks::status_from_column(status);
                 magpie_app::tasks::set_task_status(
                     &store,
                     note_id as i64,
@@ -4162,5 +4186,48 @@ mod round1_tests {
         assert_eq!(line_badge("one line"), "");
         assert_eq!(line_badge(""), "");
         assert_eq!(line_badge("   \n  "), ""); // only blank lines
+    }
+}
+
+#[cfg(test)]
+mod nav_tests {
+    use super::{clamp_selection, cycle_view, filter_actions};
+
+    #[test]
+    fn cycle_view_wraps_both_directions() {
+        let views = ["today", "list", "board"];
+        assert_eq!(cycle_view(&views, "list", 1), "board");
+        assert_eq!(cycle_view(&views, "board", 1), "today"); // wrap forward
+        assert_eq!(cycle_view(&views, "today", -1), "board"); // wrap backward
+        assert_eq!(cycle_view(&views, "list", -1), "today");
+    }
+
+    #[test]
+    fn cycle_view_treats_unknown_current_as_index_zero() {
+        let views = ["notes", "journal", "graph"];
+        assert_eq!(cycle_view(&views, "nonsense", 1), "journal");
+        assert_eq!(cycle_view(&views, "nonsense", -1), "graph");
+    }
+
+    #[test]
+    fn clamp_selection_bounds_index() {
+        assert_eq!(clamp_selection(0, 3), 0);
+        assert_eq!(clamp_selection(2, 3), 2); // in range: unchanged
+        assert_eq!(clamp_selection(5, 3), 2); // past end: last row
+        assert_eq!(clamp_selection(5, 0), 0); // empty list: 0, never negative
+    }
+
+    #[test]
+    fn filter_actions_matches_labels_case_insensitively() {
+        // No query: the full set.
+        assert_eq!(filter_actions("").len(), super::ACTIONS.len());
+        // "paste" matches "Paste" and "Paste & keep open".
+        let ids: Vec<&str> = filter_actions("paste").iter().map(|r| r.0).collect();
+        assert_eq!(ids, vec!["paste", "keep"]);
+        // Case-insensitive, single match.
+        let ids: Vec<&str> = filter_actions("PIN").iter().map(|r| r.0).collect();
+        assert_eq!(ids, vec!["pin"]);
+        // No match: empty.
+        assert!(filter_actions("zzzznomatch").is_empty());
     }
 }

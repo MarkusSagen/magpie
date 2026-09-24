@@ -109,6 +109,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_slot_or_recent_prefers_assigned_slot() {
+        let recent = vec![entry("r1"), entry("r2")];
+        // An assigned slot entry wins regardless of what's in `recent`.
+        assert_eq!(
+            resolve_slot_or_recent(Some(entry("pinned")), &recent, 1)
+                .unwrap()
+                .full_text,
+            "pinned"
+        );
+        // No slot entry: fall through to the slot-th most-recent (1-based).
+        assert_eq!(
+            resolve_slot_or_recent(None, &recent, 2).unwrap().full_text,
+            "r2"
+        );
+        // No slot entry and out-of-range / zero slot: nothing.
+        assert!(resolve_slot_or_recent(None, &recent, 0).is_none());
+        assert!(resolve_slot_or_recent(None, &recent, 3).is_none());
+    }
+
+    #[test]
     fn perform_paste_sets_clipboard_and_auto_pastes() {
         let mut clip = FakeClip {
             last: std::cell::RefCell::new(String::new()),

@@ -380,6 +380,17 @@ pub struct BoardColumn {
     pub tasks: Vec<Task>,
 }
 
+/// Map a Kanban board column index to the status a card dropped there takes:
+/// 0 = To do, 1 = Doing, 2 = Done; anything else falls back to Todo. Inverse of
+/// the column order produced by `board_columns(.., GroupBy::Status, ..)`.
+pub fn status_from_column(col: i32) -> Status {
+    match col {
+        1 => Status::Doing,
+        2 => Status::Done,
+        _ => Status::Todo,
+    }
+}
+
 /// Todo < Doing < Done, for `SortBy::Status`.
 fn status_rank(s: Status) -> u8 {
     match s {
@@ -1068,6 +1079,110 @@ mod tests {
         assert_eq!(cols[3].tasks[0].title, "n");
     }
 
+    // Group by project so every task lands in one "No project" column, letting
+    // the within-column sort (the piece under test) show its full order.
+    #[test]
+    fn board_columns_sort_by_priority_orders_high_to_none() {
+        let tasks = vec![
+            bt("n", Status::Todo, Priority::None, None, None),
+            bt("h", Status::Todo, Priority::High, None, None),
+            bt("l", Status::Todo, Priority::Low, None, None),
+            bt("m", Status::Todo, Priority::Medium, None, None),
+        ];
+        let cols = board_columns(
+            tasks,
+            GroupBy::Project,
+            SortBy::Priority,
+            &BoardFilter::default(),
+        );
+        let titles: Vec<&str> = cols[0].tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["h", "m", "l", "n"]);
+    }
+
+    #[test]
+    fn board_columns_sort_by_title_is_case_insensitive() {
+        let tasks = vec![
+            bt("banana", Status::Todo, Priority::None, None, None),
+            bt("Apple", Status::Todo, Priority::None, None, None),
+            bt("cherry", Status::Todo, Priority::None, None, None),
+        ];
+        let cols = board_columns(
+            tasks,
+            GroupBy::Project,
+            SortBy::Title,
+            &BoardFilter::default(),
+        );
+        let titles: Vec<&str> = cols[0].tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["Apple", "banana", "cherry"]);
+    }
+
+    #[test]
+    fn board_columns_sort_by_status_orders_todo_doing_done() {
+        let tasks = vec![
+            bt("d", Status::Done, Priority::None, None, None),
+            bt("t", Status::Todo, Priority::None, None, None),
+            bt("g", Status::Doing, Priority::None, None, None),
+        ];
+        let cols = board_columns(
+            tasks,
+            GroupBy::Project,
+            SortBy::Status,
+            &BoardFilter::default(),
+        );
+        let titles: Vec<&str> = cols[0].tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["t", "g", "d"]);
+    }
+
+    #[test]
+    fn board_columns_group_by_project_orders_alpha_with_no_project_last() {
+        let tasks = vec![
+            bt("w", Status::Todo, Priority::None, None, Some("work")),
+            bt("x", Status::Todo, Priority::None, None, None),
+            bt("h", Status::Todo, Priority::None, None, Some("home")),
+        ];
+        let cols = board_columns(
+            tasks,
+            GroupBy::Project,
+            SortBy::Due,
+            &BoardFilter::default(),
+        );
+        let titles: Vec<&str> = cols.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["home", "work", "No project"]);
+    }
+
+    #[test]
+    fn status_from_column_maps_kanban_drop_targets() {
+        assert_eq!(status_from_column(0), Status::Todo);
+        assert_eq!(status_from_column(1), Status::Doing);
+        assert_eq!(status_from_column(2), Status::Done);
+        assert_eq!(status_from_column(99), Status::Todo); // out of range -> Todo
+        assert_eq!(status_from_column(-1), Status::Todo);
+    }
+
+    #[test]
+    fn parse_priority_aliases_and_first_token_wins() {
+        let cases = [
+            ("!hi", Priority::High),
+            ("!h", Priority::High),
+            ("!1", Priority::High),
+            ("!med", Priority::Medium),
+            ("!m", Priority::Medium),
+            ("!2", Priority::Medium),
+            ("!lo", Priority::Low),
+            ("!l", Priority::Low),
+            ("!3", Priority::Low),
+        ];
+        for (tok, want) in cases {
+            let n = note(&format!("- [ ] task {tok}"));
+            assert_eq!(parse_tasks_in(&n, 0)[0].priority, want, "token {tok}");
+        }
+        // The first priority token wins; a second one is left in the title.
+        let n = note("- [ ] task !low !high");
+        let t = &parse_tasks_in(&n, 0)[0];
+        assert_eq!(t.priority, Priority::Low);
+        assert_eq!(t.title, "task !high");
+    }
+
     #[test]
     fn partition_due_splits_overdue_and_today() {
         const DAY: i64 = 86_400_000;
@@ -1209,6 +1324,59 @@ mod tests {
                 today
             ),
             super::days_from_civil(2026, 1, 22)
+        );
+    }
+
+    #[test]
+    fn add_recur_day_adds_n_days() {
+        let d = super::days_from_civil(2026, 1, 10);
+        assert_eq!(
+            add_recur(
+                d,
+                Recur {
+                    n: 3,
+                    unit: RecurUnit::Day
+                }
+            ),
+            d + 3
+        );
+    }
+
+    #[test]
+    fn next_occurrence_steps_once_when_due_is_already_future() {
+        let due = super::days_from_civil(2026, 2, 1);
+        let today = super::days_from_civil(2026, 1, 20);
+        // `due` is after `today`, so the catch-up loop never runs — a single step.
+        assert_eq!(
+            next_occurrence(
+                due,
+                Recur {
+                    n: 1,
+                    unit: RecurUnit::Week
+                },
+                today
+            ),
+            super::days_from_civil(2026, 2, 8)
+        );
+    }
+
+    #[test]
+    fn promote_line_preserves_indentation() {
+        let out = promote_line("  indented item", 3);
+        assert_eq!(out, "  - [ ] indented item");
+    }
+
+    #[test]
+    fn log_clock_applies_timezone_offset_across_day_boundary() {
+        const DAY_MS: i64 = 86_400_000;
+        let day = super::days_from_civil(2026, 1, 20) * DAY_MS;
+        let start = day + 3_600_000; // 01:00 UTC
+        let end = start + 2 * 3_600_000; // 03:00 UTC
+        let offset = -8 * 3600; // UTC-8: local time is the previous evening
+        let new = log_clock("- [ ] Ship it", "Ship it", start, end, offset);
+        assert!(
+            new.contains("CLOCK: [2026-01-19 17:00]--[2026-01-19 19:00] => 2:00"),
+            "expected offset-shifted local stamps, got: {new}"
         );
     }
 
