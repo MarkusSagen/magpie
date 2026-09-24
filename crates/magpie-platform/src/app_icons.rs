@@ -97,7 +97,7 @@ mod windows_icon {
     use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
         DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
     };
     use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
@@ -157,8 +157,10 @@ mod windows_icon {
         // SAFETY: GetIconInfo allocated both bitmaps for us; its docs require
         // the caller to delete them once done.
         unsafe {
-            let _ = DeleteObject(hbm_color.into());
-            let _ = DeleteObject(hbm_mask.into());
+            // `.into()` is ambiguous (E0283) — construct HGDIOBJ from the handle's
+            // raw pointer explicitly (windows-rs handles are `struct H..(pub *mut c_void)`).
+            let _ = DeleteObject(HGDIOBJ(hbm_color.0));
+            let _ = DeleteObject(HGDIOBJ(hbm_mask.0));
         }
 
         png
