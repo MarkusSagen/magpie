@@ -3436,6 +3436,7 @@ dependencies = [
  "block2 0.6.2",
  "enigo",
  "freedesktop-icons",
+ "getrandom 0.2.17",
  "global-hotkey",
  "image",
  "magpie-core",

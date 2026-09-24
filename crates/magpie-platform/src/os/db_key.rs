@@ -26,12 +26,11 @@ pub fn db_key(data_dir: &Path) -> Result<String, String> {
     }
 }
 
-/// 32 random bytes from /dev/urandom → 64 lowercase hex chars.
+/// 32 bytes from the OS CSPRNG → 64 lowercase hex chars. `getrandom` is used so
+/// this works on every platform (Windows has no `/dev/urandom`).
 fn generate_hex_key() -> Result<String, String> {
-    use std::io::Read;
-    let mut f = std::fs::File::open("/dev/urandom").map_err(|e| e.to_string())?;
     let mut bytes = [0u8; 32];
-    f.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+    getrandom::getrandom(&mut bytes).map_err(|e| e.to_string())?;
     let mut hex = String::with_capacity(64);
     for b in bytes {
         hex.push_str(&format!("{b:02x}"));
