@@ -47,6 +47,10 @@ pub struct Config {
     /// note's `:LOGBOOK:` drawer, in addition to the `time_entries` DB row.
     #[serde(default = "default_true")]
     pub log_clock_entries: bool,
+    /// UI theme: dark (default) or light. Toggled from the sidebar's sun/moon
+    /// button; persisted here so it survives a restart.
+    #[serde(default = "default_true")]
+    pub theme_dark: bool,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -76,6 +80,7 @@ impl Default for Config {
             vault_path: None,
             vault_watch: false,
             log_clock_entries: true,
+            theme_dark: true,
         }
     }
 }

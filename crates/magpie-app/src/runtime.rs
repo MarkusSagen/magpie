@@ -68,6 +68,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         fetch_link_favicons: cfg.fetch_link_favicons,
         fetch_link_previews: cfg.fetch_link_previews,
         log_clock_entries: cfg.log_clock_entries,
+        theme_dark: cfg.theme_dark,
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
     })
@@ -582,6 +583,12 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
 /// Refresh results and show the launcher window. Shared by the launcher hotkey
 /// and the tray (left-click + "Show Magpie").
 fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
+    // Deliberately NOT `ui.set_theme_dark(state.theme_dark)` here: `ui` is a
+    // single long-lived window (hidden via `NSApp.hide`, never recreated — see
+    // `hide_launcher`), so its `theme-dark` property already holds whatever the
+    // user last toggled it to. Re-pushing the config-load-time snapshot on every
+    // summon would silently revert an in-session toggle back to the stale value.
+    // The snapshot is applied exactly once, right after window creation, in `start()`.
     refresh(ui, state);
     // Capture the paste target: whatever app is frontmost right before we show.
     match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
@@ -2120,12 +2127,28 @@ pub fn start() {
     let state = build_state(&cfg);
     let ui = LauncherWindow::new().expect("create window");
     let weak = ui.as_weak();
+    // Apply the persisted theme once, at window creation — see the comment in
+    // `show_window` for why this isn't repeated on every summon.
+    ui.set_theme_dark(state.theme_dark);
 
     {
         let w = weak.clone();
         ui.on_dismiss_welcome(move || {
             if let Some(ui) = w.upgrade() {
                 ui.set_show_welcome(false);
+            }
+        });
+    }
+    {
+        let w = weak.clone();
+        ui.on_toggle_theme(move || {
+            if let Some(ui) = w.upgrade() {
+                let new_dark = !ui.get_theme_dark();
+                ui.set_theme_dark(new_dark);
+                let cfg_path = data_dir().join("config.toml");
+                let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+                cfg.theme_dark = new_dark;
+                let _ = magpie_app::config::save(&cfg, &cfg_path);
             }
         });
     }

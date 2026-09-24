@@ -163,9 +163,66 @@ struct SearchBookmarkRow {
 
 // Accent + the text colour that is legible ON the accent. White-on-accent only
 // reaches ~2.9:1, so filled controls use `on-accent` for their label.
+// Theme tokens (light + dark). `dark` is wired from the `LauncherWindow` root
+// (a global can't read the root directly — see `theme-dark` on the root and
+// its `init`/`changed` handler that push the value in here). Phase 1: only
+// the core surfaces (sidebar, clipboard/list view) consume these tokens —
+// everything else keeps its hardcoded dark values until a later migration
+// pass, so default dark mode is visually unchanged.
+global Theme {
+    in property <bool> dark: true;
+    // surfaces
+    out property <color> bg-app: dark ? #1a1a1d : #f6f6f8;
+    out property <color> bg-panel: dark ? #232328 : #ffffff; // cards, inputs, preview
+    out property <color> bg-elevated: dark ? #2c2c33 : #ececf0; // hover / selected
+    out property <color> bg-sidebar: dark ? #141416 : #edeef1;
+    out property <color> border: dark ? #33333c : #d8d8e0;
+    out property <color> border-strong: dark ? #45454f : #c2c2cc;
+    // text
+    out property <color> text: dark ? #e8e8ec : #1a1a1e;
+    out property <color> text-dim: dark ? #9a9aa2 : #55555f;
+    out property <color> text-faint: dark ? #6a6a72 : #8a8a92;
+    // brand + semantic (kept vivid in both, nudged for light contrast)
+    out property <color> accent: dark ? #6a8cff : #4a6cf0;
+    out property <color> on-accent: dark ? #0d0d12 : #ffffff;
+    out property <color> danger: dark ? #e06a6a : #d0483f; // overdue
+    out property <color> warn: dark ? #e0a44a : #b8791f;
+    out property <color> success: dark ? #6cc98a : #2e9e5b; // done
+    out property <color> link: dark ? #9ab0ff : #4a6cf0; // #tags, domains
+    // priority pills
+    out property <color> prio-high: dark ? #e05a5a : #d0483f;
+    out property <color> prio-med: dark ? #e0a44a : #b8791f;
+    out property <color> prio-low: dark ? #6a8cff : #4a6cf0;
+    // section accents (same hue both themes)
+    out property <color> sec-clip: #6a8cff;
+    out property <color> sec-tasks: #5ac77a;
+    out property <color> sec-notes: #c78a5a;
+    out property <color> sec-links: #b06ad0;
+    out property <color> sec-stats: #d0b04a;
+    // spacing scale (theme-independent)
+    out property <length> sp1: 4px;
+    out property <length> sp2: 8px;
+    out property <length> sp3: 12px;
+    out property <length> sp4: 16px;
+    out property <length> sp5: 24px;
+    // radii
+    out property <length> r-sm: 6px;
+    out property <length> r-md: 8px;
+    out property <length> r-lg: 12px;
+    // type scale
+    out property <length> fs-xs: 10px;
+    out property <length> fs-sm: 11px;
+    out property <length> fs-body: 13px;
+    out property <length> fs-md: 14px;
+    out property <length> fs-lg: 15px;
+    out property <length> fs-title: 20px;
+}
+
+// Kept for existing call sites — mirrors `Theme.accent`/`Theme.on-accent` so
+// every ref via `Pal.*` still tracks the active theme.
 global Pal {
-    out property <color> accent: #6a8cff;
-    out property <color> on-accent: #101426;
+    out property <color> accent: Theme.accent;
+    out property <color> on-accent: Theme.on-accent;
 }
 
 // Custom monochrome line icons (replace emoji glyphs). Each is a single-colour SVG
@@ -197,6 +254,7 @@ global Icons {
     out property <image> lock: @image-url("../../../assets/icons/icon-lock.svg");
     out property <image> bookmark: @image-url("../../../assets/icons/icon-bookmark.svg");
     out property <image> search: @image-url("../../../assets/icons/icon-search.svg");
+    out property <image> theme: @image-url("../../../assets/icons/icon-theme.svg");
 }
 
 // A type-kind glyph: picks the icon by `Kind::as_str()` value (rtf/html/text → text).
@@ -436,7 +494,7 @@ export component LauncherWindow inherits Window {
     preferred-width: 960px;
     min-width: 960px;
     preferred-height: 560px;
-    background: #1e1e21;
+    background: Theme.bg-app;
     forward-focus: searchinput;
 
     // ---- Sidebar navigation (5 sections, Rust-driven router) ----
@@ -462,6 +520,14 @@ export component LauncherWindow inherits Window {
     callback set-section(string);
     callback set-task-view(string);
     callback set-note-view(string);
+
+    // ---- Theme (light/dark) ----
+    // `global Theme` can't read the root directly, so the root pushes its own
+    // `theme-dark` into it on init and on every change instead.
+    in-out property <bool> theme-dark: true;
+    callback toggle-theme();
+    init => { Theme.dark = root.theme-dark; }
+    changed theme-dark => { Theme.dark = root.theme-dark; }
 
     // ---- Keyboard nav layer (history + g-leader + view cycling) ----
     // True right after a bare `g` (with an empty search query) is pressed —
@@ -804,29 +870,29 @@ export component LauncherWindow inherits Window {
             // intercepted in key-pressed, everything else falls through to editing.
             Rectangle {
                 height: 44px;
-                background: #161618;
-                border-radius: 10px;
+                background: Theme.bg-panel;
+                border-radius: Theme.r-md;
                 border-width: 1px;
-                border-color: searchinput.has-focus ? #4a4a58 : #33333c;
+                border-color: searchinput.has-focus ? Theme.border-strong : Theme.border;
                 HorizontalLayout {
                     padding-left: 14px;
                     padding-right: 12px;
-                    spacing: 8px;
+                    spacing: Theme.sp2;
                     Rectangle {
                         horizontal-stretch: 1;
                         if root.query == "": Text {
                             x: 0;
                             text: "Search clipboard…";
-                            color: #6a6a70;
-                            font-size: 15px;
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-lg;
                             vertical-alignment: center;
                         }
                         searchinput := TextInput {
                             width: 100%;
                             height: 100%;
                             text <=> root.query;
-                            color: white;
-                            font-size: 15px;
+                            color: Theme.text;
+                            font-size: Theme.fs-lg;
                             single-line: true;
                             vertical-alignment: center;
                             edited => {
@@ -1007,10 +1073,10 @@ export component LauncherWindow inherits Window {
                     for label[i] in ["All", "Text", "Link", "Email", "Color", "Image", "File"]: Rectangle {
                         height: 26px;
                         width: 52px;
-                        background: i == root.type-index ? Pal.accent : (fta.has-hover ? #35353d : #2a2a30);
-                        border-radius: 6px;
+                        background: i == root.type-index ? Theme.accent : (fta.has-hover ? Theme.border-strong : Theme.bg-elevated);
+                        border-radius: Theme.r-sm;
                         fta := TouchArea { clicked => { root.type-index = i; root.set-type-filter(i); } }
-                        Text { text: label; color: i == root.type-index ? Pal.on-accent : white; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: i == root.type-index ? Theme.on-accent : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     for label[i] in ["Recent", "Most copied"]: Rectangle {
@@ -1189,17 +1255,17 @@ export component LauncherWindow inherits Window {
                                 spacing: 5px;
                                 Text {
                                     text: row.section;
-                                    color: #8a8a92;
-                                    font-size: 11px;
+                                    color: Theme.text-faint;
+                                    font-size: Theme.fs-sm;
                                     font-weight: 600;
                                 }
-                                Rectangle { height: 1px; background: #2e2e35; }
+                                Rectangle { height: 1px; background: Theme.border; }
                             }
                             Rectangle {
                             height: 52px;
                             // Selection is a soft rounded fill only — no border/underline.
-                            background: i == root.selected ? #2f2f37 : (rowta.has-hover ? #232329 : transparent);
-                            border-radius: 8px;
+                            background: (i == root.selected || rowta.has-hover) ? Theme.bg-elevated : transparent;
+                            border-radius: Theme.r-md;
                             rowta := TouchArea {
                                 clicked => { root.selected = i; }
                                 double-clicked => { root.activate(i); }
@@ -1253,10 +1319,10 @@ export component LauncherWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 6px;
                                         if row.pinned: Image { source: Icons.act-pin; colorize: #c2c2c8; width: 11px; height: 11px; image-fit: contain; }
-                                        Text { text: row.title; color: white; font-size: 14px; overflow: elide; horizontal-stretch: 1; }
-                                        if row.badge != "": Text { text: row.badge; color: #9a9aa0; font-size: 10px; vertical-alignment: center; }
+                                        Text { text: row.title; color: Theme.text; font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     }
-                                    Text { text: row.subtitle; color: #9a9aa0; font-size: 11px; overflow: elide; }
+                                    Text { text: row.subtitle; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
                                 }
                                 // Merge checkmark only when this row is queued (via ⌘G / ⌘K).
                                 if row.merged: Rectangle {
@@ -1351,8 +1417,8 @@ export component LauncherWindow inherits Window {
                     // (rather than leaving an empty dark slab) gives the empty-state
                     // message the full width.
                     if entries.length > 0: Rectangle {
-                        background: #161618;
-                        border-radius: 8px;
+                        background: Theme.bg-panel;
+                        border-radius: Theme.r-md;
                         VerticalLayout {
                             padding: 12px;
                             spacing: 10px;
@@ -1364,8 +1430,8 @@ export component LauncherWindow inherits Window {
                                 spacing: 8px;
                                 Text {
                                     text: "Preview";
-                                    color: #8a8a92;
-                                    font-size: 12px;
+                                    color: Theme.text-dim;
+                                    font-size: Theme.fs-body;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
@@ -1426,7 +1492,7 @@ export component LauncherWindow inherits Window {
                                     pvtext := TextInput {
                                         width: parent.width;
                                         text: root.preview-text;
-                                        color: #d0d0d4;
+                                        color: Theme.text;
                                         font-size: root.preview-font-size;
                                         read-only: true;
                                         single-line: false;
@@ -1445,7 +1511,7 @@ export component LauncherWindow inherits Window {
                                                 x: 0;
                                                 width: parent.width;
                                                 text: ln;
-                                                color: #d0d0d4;
+                                                color: Theme.text;
                                                 font-size: root.preview-font-size;
                                                 overflow: elide;
                                                 vertical-alignment: center;
@@ -1494,59 +1560,59 @@ export component LauncherWindow inherits Window {
                                 spacing: 5px;
                                 vertical-stretch: 0;
                                 alignment: start;
-                                Rectangle { height: 1px; background: #2a2a30; }
-                                Text { text: "Information"; color: #8a8a92; font-size: 12px; }
+                                Rectangle { height: 1px; background: Theme.border; }
+                                Text { text: "Information"; color: Theme.text-dim; font-size: Theme.fs-body; }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Source"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
+                                    Text { text: "Source"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
                                     if entries[root.selected].has-icon: Image { source: entries[root.selected].icon; width: 14px; height: 14px; }
-                                    Text { text: entries[root.selected].source; color: #d0d0d4; font-size: 11px; overflow: elide; }
+                                    Text { text: entries[root.selected].source; color: Theme.text; font-size: Theme.fs-sm; overflow: elide; }
                                 }
                                 // spacing keeps the label and its right-aligned value from
                                 // touching once the pane is narrow.
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Content type"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].kind; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Content type"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].kind; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Size"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].size; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; overflow: elide; }
+                                    Text { text: "Size"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].size; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; overflow: elide; }
                                 }
                                 // Images and file lists have no words — a hard "0"
                                 // read as a bug rather than "not applicable".
                                 if entries[root.selected].words > 0: HorizontalLayout {
                                     spacing: 12px;
-                                    Text { text: "Words"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].words; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Words"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].words; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Times copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].copied; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Times copied"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Last used"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].when; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Last used"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].when; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Copied"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].copied-date; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Copied"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].copied-date; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 12px;
-                                    Text { text: "Slot"; color: #85858d; font-size: 11px; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: #d0d0d4; font-size: 11px; horizontal-alignment: right; }
+                                    Text { text: "Slot"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
+                                    Text { text: entries[root.selected].slot > 0 ? "⌘" + entries[root.selected].slot : "—"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
                                 }
                             }
 
@@ -3414,23 +3480,27 @@ export component LauncherWindow inherits Window {
             y: 0;
             width: root.sidebar-w;
             height: root.height;
-            background: #17171a;
+            background: Theme.bg-sidebar;
             VerticalLayout {
                 padding-top: 12px;
+                padding-bottom: 12px;
                 spacing: 2px;
-                alignment: start;
                 for s in [
-                    { id: "clipboard", label: "Clip", icon: Icons.tab-clipboard, accent: #6a8cff },
-                    { id: "tasks", label: "Tasks", icon: Icons.tab-tasks, accent: #5ac77a },
-                    { id: "notes", label: "Notes", icon: Icons.tab-notes, accent: #c78a5a },
-                    { id: "bookmarks", label: "Links", icon: Icons.type-link, accent: #b06ad0 },
-                    { id: "stats", label: "Stats", icon: Icons.tab-stats, accent: #d0b04a },
+                    { id: "clipboard", label: "Clip", icon: Icons.tab-clipboard, accent: Theme.sec-clip },
+                    { id: "tasks", label: "Tasks", icon: Icons.tab-tasks, accent: Theme.sec-tasks },
+                    { id: "notes", label: "Notes", icon: Icons.tab-notes, accent: Theme.sec-notes },
+                    { id: "bookmarks", label: "Links", icon: Icons.type-link, accent: Theme.sec-links },
+                    { id: "stats", label: "Stats", icon: Icons.tab-stats, accent: Theme.sec-stats },
                 ]: Rectangle {
                     height: 54px;
                     // Active section = a solid fill in the section's accent color
                     // (not a tint) with dark icon/label for contrast; inactive is
                     // transparent with a subtle hover fill and muted gray icon/label.
-                    background: root.section == s.id ? s.accent : (sbnav.has-hover ? #26262c : transparent);
+                    // The section accents are the SAME hue in both themes, so a
+                    // fixed near-black active label reads well against them either
+                    // way (Theme.on-accent flips to white in light mode, which is
+                    // too low-contrast against these mid-brightness fills).
+                    background: root.section == s.id ? s.accent : (sbnav.has-hover ? Theme.bg-elevated : transparent);
                     sbnav := TouchArea { clicked => { root.set-section(s.id); } }
                     VerticalLayout {
                         alignment: center;
@@ -3442,15 +3512,29 @@ export component LauncherWindow inherits Window {
                                 width: 18px;
                                 height: 18px;
                                 image-fit: contain;
-                                colorize: root.section == s.id ? #16161a : #8a8a92;
+                                colorize: root.section == s.id ? #16161a : Theme.text-dim;
                             }
                         }
                         Text {
                             text: s.label;
                             font-size: 9px;
                             horizontal-alignment: center;
-                            color: root.section == s.id ? #16161a : #8a8a92;
+                            color: root.section == s.id ? #16161a : Theme.text-dim;
                         }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                // ---- Theme toggle: sun/moon, bottom of the sidebar. ----
+                Rectangle {
+                    height: 40px;
+                    background: themeta.has-hover ? Theme.bg-elevated : transparent;
+                    themeta := TouchArea { clicked => { root.toggle-theme(); } }
+                    Image {
+                        source: Icons.theme;
+                        width: 16px;
+                        height: 16px;
+                        image-fit: contain;
+                        colorize: Theme.text-dim;
                     }
                 }
             }

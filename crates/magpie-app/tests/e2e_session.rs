@@ -60,6 +60,7 @@ fn state() -> AppState {
         fetch_link_favicons: true,
         fetch_link_previews: true,
         log_clock_entries: true,
+        theme_dark: true,
         nav_back: Mutex::new(Vec::new()),
         nav_fwd: Mutex::new(Vec::new()),
     }

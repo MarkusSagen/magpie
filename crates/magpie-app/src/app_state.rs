@@ -27,6 +27,10 @@ pub struct AppState {
     /// Log a completed task-timer session as an org CLOCK entry in the note's
     /// `:LOGBOOK:` drawer (from `Config::log_clock_entries`).
     pub log_clock_entries: bool,
+    /// UI theme at startup (from `Config::theme_dark`); pushed into the window
+    /// on build/show. The in-session source of truth after that is the window's
+    /// own `theme-dark` property — the toggle callback persists it back out.
+    pub theme_dark: bool,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -76,6 +80,7 @@ mod tests {
             fetch_link_favicons: true,
             fetch_link_previews: true,
             log_clock_entries: true,
+            theme_dark: true,
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
         }
