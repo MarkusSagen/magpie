@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Magpie
+GenericName=Clipboard & Notes Manager
+Comment=Local-first clipboard history, notes, tasks and bookmarks
+Exec=magpie
+Icon=magpie
+Terminal=false
+Categories=Utility;Office;TextEditor;
+Keywords=clipboard;notes;tasks;bookmarks;todo;
+StartupNotify=false

@@ -1,0 +1,80 @@
+name: release
+
+# Cut a release by pushing a tag, e.g.:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # needed to create the GitHub Release + upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            asset: Magpie-macos-arm64.zip
+          - os: ubuntu-latest
+            asset: magpie-linux-x86_64.tar.gz
+          - os: windows-latest
+            asset: magpie-windows-x86_64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the version; ensure it's installed (release builds
+      # need neither clippy nor rustfmt). Keep in sync with rust-toolchain.toml.
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libfontconfig1-dev \
+            libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev \
+            libxdo-dev libdbus-1-dev
+
+      - name: Build release
+        run: cargo build --release -p magpie-app
+
+      # ---- package (inline, not via justfile: the justfile pins a macOS-arm
+      #      toolchain path for local dev and isn't portable to CI runners) ----
+
+      - name: Package (macOS .app → zip)
+        if: runner.os == 'macOS'
+        run: |
+          APP="target/Magpie.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/magpie "$APP/Contents/MacOS/magpie"
+          cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
+          cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
+          codesign --force --deep --sign - --identifier io.magpie "$APP" || echo "ad-hoc sign skipped"
+          ditto -c -k --keepParent "$APP" "${{ matrix.asset }}"
+
+      - name: Package (Linux binary + .desktop → tar.gz)
+        if: runner.os == 'Linux'
+        run: |
+          STAGE="magpie-linux"
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          cp target/release/magpie "$STAGE/magpie"
+          cp packaging/linux/magpie.desktop "$STAGE/magpie.desktop" 2>/dev/null || true
+          cp README.md "$STAGE/README.md" 2>/dev/null || true
+          tar -czf "${{ matrix.asset }}" "$STAGE"
+
+      - name: Package (Windows .exe → zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/magpie.exe -DestinationPath "${{ matrix.asset }}"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+          fail_on_unmatched_files: true
+          draft: true   # review + publish manually; flip to false to auto-publish
