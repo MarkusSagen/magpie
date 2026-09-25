@@ -62,6 +62,7 @@ fn state() -> AppState {
         fetch_link_previews: true,
         log_clock_entries: true,
         theme: "dark".into(),
+        holiday_region: "SE".into(),
         nav_back: Mutex::new(Vec::new()),
         nav_fwd: Mutex::new(Vec::new()),
         data_input: Mutex::new(String::new()),

@@ -16,7 +16,7 @@ fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-fn days_in_month(y: i64, m: i64) -> i64 {
+pub(crate) fn days_in_month(y: i64, m: i64) -> i64 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -32,7 +32,7 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 }
 
 /// Howard Hinnant's days-from-epoch → civil (y, m, d), proleptic Gregorian.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097;
@@ -46,7 +46,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Inverse of `civil_from_days`.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub(crate) fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = (if y >= 0 { y } else { y - 399 }) / 400;
     let yoe = y - era * 400;
@@ -56,11 +56,11 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 }
 
 /// Day-of-week for a day number, 0 = Sunday (1970-01-01 was a Thursday).
-fn weekday(days: i64) -> i64 {
+pub(crate) fn weekday(days: i64) -> i64 {
     (days.rem_euclid(7) + 4) % 7
 }
 
-fn month_name(m: u32, long: bool) -> &'static str {
+pub(crate) fn month_name(m: u32, long: bool) -> &'static str {
     const LONG: [&str; 12] = [
         "January",
         "February",
@@ -86,7 +86,7 @@ fn month_name(m: u32, long: bool) -> &'static str {
     }
 }
 
-fn weekday_name(wd: i64, long: bool) -> &'static str {
+pub(crate) fn weekday_name(wd: i64, long: bool) -> &'static str {
     const LONG: [&str; 7] = [
         "Sunday",
         "Monday",
@@ -106,7 +106,7 @@ fn weekday_name(wd: i64, long: bool) -> &'static str {
 }
 
 /// ISO-8601 week number (Monday-start, week 1 contains the first Thursday).
-fn iso_week(day: i64) -> u32 {
+pub(crate) fn iso_week(day: i64) -> u32 {
     let (y, m, d) = civil_from_days(day);
     // Thursday of this week determines the ISO year.
     let wd_mon0 = (weekday(day) + 6) % 7; // 0=Mon..6=Sun
@@ -1657,7 +1657,15 @@ enum TermOutcome {
 enum DateResult {
     Point(Anchor),
     Range(i64, i64, String),
-    Duration(i64),
+    /// A countdown to a specific date: `days` is signed (+future / −past), and
+    /// `target` is the day so the card can draw a calendar. `weeks` picks the
+    /// headline unit. (Supersedes a bare duration — "days until X" now carries the
+    /// target so the answer card can render its calendar.)
+    Countdown {
+        target: i64,
+        days: i64,
+        weeks: bool,
+    },
 }
 
 struct DParser<'a> {
@@ -1682,6 +1690,30 @@ impl<'a> DParser<'a> {
         } else {
             false
         }
+    }
+    /// Consume a computed-holiday name (multi-word aware) and return its canonical
+    /// key: `easter`, `black friday`, or `new year`. (Christmas is handled inline.)
+    fn eat_holiday(&mut self) -> Option<String> {
+        if self.eat_word("easter") {
+            return Some("easter".into());
+        }
+        if self.word() == Some("black") {
+            if let Some(TokKind::Word(w)) = self.t.get(self.pos + 1).map(|t| &t.kind) {
+                if w == "friday" {
+                    self.pos += 2;
+                    return Some("black friday".into());
+                }
+            }
+        }
+        if self.word() == Some("new") {
+            if let Some(TokKind::Word(w)) = self.t.get(self.pos + 1).map(|t| &t.kind) {
+                if w == "year" || w == "years" {
+                    self.pos += 2;
+                    return Some("new year".into());
+                }
+            }
+        }
+        None
     }
     /// Parse a NUMBER count, or a `(` math-expr `)` count (paren-expr, spec §1.2).
     fn parse_count(&mut self) -> Option<i64> {
@@ -1840,6 +1872,27 @@ fn nth_weekday_of_year(y: i64, target_wd: i64, n: i64) -> i64 {
     }
 }
 
+/// The next occurrence of a computed holiday on or after `from_day`. `name` is a
+/// key from `DParser::eat_holiday` (`easter` / `black friday` / `new year`).
+fn holiday_next_day(name: &str, from_day: i64) -> i64 {
+    let (mut y, _, _) = civil_from_days(from_day);
+    // Try this year then next — every one of these recurs annually.
+    for _ in 0..2 {
+        let (m, d) = match name {
+            "easter" => crate::holidays::easter(y),
+            "black friday" => crate::holidays::black_friday(y),
+            "new year" => (1, 1),
+            _ => (1, 1),
+        };
+        let day = days_from_civil(y, m as i64, d as i64);
+        if day >= from_day {
+            return day;
+        }
+        y += 1;
+    }
+    days_from_civil(y, 1, 1)
+}
+
 fn parse_one_term(p: &mut DParser, now_anchor: Anchor, anchor: Anchor) -> Option<TermOutcome> {
     // absolute keywords
     if p.eat_word("now") {
@@ -1870,6 +1923,16 @@ fn parse_one_term(p: &mut DParser, now_anchor: Anchor, anchor: Anchor) -> Option
         let (y, _, _) = civil_from_days(now_anchor.day);
         return Some(TermOutcome::Point(Anchor {
             day: days_from_civil(y, 12, 25),
+            secs: 0,
+            has_time: false,
+        }));
+    }
+    // Holidays with a computed date → the next occurrence on/after today
+    // (easter, black friday, new year). An optional leading `next` is consumed by
+    // the directional handler, which also lands here.
+    if let Some(name) = p.eat_holiday() {
+        return Some(TermOutcome::Point(Anchor {
+            day: holiday_next_day(&name, now_anchor.day),
             secs: 0,
             has_time: false,
         }));
@@ -1937,10 +2000,33 @@ fn parse_one_term(p: &mut DParser, now_anchor: Anchor, anchor: Anchor) -> Option
     }
 
     // directional / range: (next|last|this) X
-    if matches!(p.word(), Some("next") | Some("last") | Some("this")) {
+    if matches!(
+        p.word(),
+        Some("next") | Some("last") | Some("this") | Some("current")
+    ) {
         let dir = p.word().unwrap().to_string();
         let save = p.pos;
         p.pos += 1;
+        // "next/this <holiday>" (easter, black friday, new year).
+        {
+            let hsave = p.pos;
+            if let Some(name) = p.eat_holiday() {
+                let from = if dir == "next" {
+                    now_anchor.day + 1
+                } else {
+                    // "this"/"current": this calendar year's occurrence.
+                    days_from_civil(civil_from_days(now_anchor.day).0, 1, 1)
+                };
+                if dir != "last" {
+                    return Some(TermOutcome::Point(Anchor {
+                        day: holiday_next_day(&name, from),
+                        secs: 0,
+                        has_time: false,
+                    }));
+                }
+            }
+            p.pos = hsave;
+        }
         if let Some(w) = p.word() {
             if let Some(target_wd) = weekday_from_word(w) {
                 p.pos += 1;
@@ -2012,7 +2098,7 @@ fn parse_one_term(p: &mut DParser, now_anchor: Anchor, anchor: Anchor) -> Option
                                 "last" => -7 - wd_mon0,
                                 _ => -wd_mon0,
                             };
-                        (monday, monday + 6, "week".to_string())
+                        (monday, monday + 6, format!("week {}", iso_week(monday)))
                     }
                 };
                 return Some(TermOutcome::Range(start, end, label));
@@ -2220,24 +2306,32 @@ fn parse_one_term(p: &mut DParser, now_anchor: Anchor, anchor: Anchor) -> Option
 }
 
 fn parse_date_expr(toks: &[Token], now_anchor: Anchor) -> Option<DateResult> {
-    // query: "days" ("until"|"since") term
+    // query: ("days"|"weeks") ("until"|"since"|"til"|"till"|"to") term
+    // Carries the TARGET date (not just the count) so the answer card can draw the
+    // calendar and offer a region/holiday label — a date-countdown, not a bare
+    // duration.
     if toks.len() >= 3 {
         if let TokKind::Word(w0) = &toks[0].kind {
-            if w0 == "days" {
+            let weeks = w0 == "weeks";
+            if w0 == "days" || weeks {
                 if let TokKind::Word(w1) = &toks[1].kind {
-                    if w1 == "until" || w1 == "since" {
+                    if matches!(w1.as_str(), "until" | "since" | "til" | "till" | "to") {
                         let mut p = DParser { t: toks, pos: 2 };
                         let outcome = parse_one_term(&mut p, now_anchor, now_anchor)?;
                         if p.pos != toks.len() {
                             return None;
                         }
                         if let TermOutcome::Point(a) = outcome {
-                            let diff = if w1 == "until" {
-                                a.day - now_anchor.day
-                            } else {
+                            let signed = if w1 == "since" {
                                 now_anchor.day - a.day
+                            } else {
+                                a.day - now_anchor.day
                             };
-                            return Some(DateResult::Duration(diff));
+                            return Some(DateResult::Countdown {
+                                target: a.day,
+                                days: signed,
+                                weeks,
+                            });
                         }
                         return None;
                     }
@@ -2430,6 +2524,54 @@ fn date_answer(day: i64, explanation: String, utc_offset: i32) -> Answer {
     }
 }
 
+/// A "days/weeks until X" answer: a **Date** answer (so the card draws a calendar
+/// for `target`), but with a countdown headline (`91 days`) and a count chip. The
+/// app enriches it with a holiday/region label from `magpie_core::holidays`.
+fn countdown_answer(target: i64, days: i64, weeks: bool, now_day: i64, utc_offset: i32) -> Answer {
+    let n = days.abs();
+    let display = if weeks {
+        let w = (n + 3) / 7; // nearest week
+        format!("{w} week{}", if w == 1 { "" } else { "s" })
+    } else {
+        format!("{n} day{}", if n == 1 { "" } else { "s" })
+    };
+    let count = if weeks { (n + 3) / 7 } else { n };
+    let explanation = format!(
+        "today = {} \u{2192} {}",
+        full_date(now_day),
+        medium_date(target)
+    );
+    let formats = vec![
+        FormatChip {
+            label: "Count".into(),
+            text: count.to_string(),
+        },
+        FormatChip {
+            label: "ISO".into(),
+            text: iso_date(target),
+        },
+        FormatChip {
+            label: "Full".into(),
+            text: full_date(target),
+        },
+        FormatChip {
+            label: "Week".into(),
+            text: format!("week {}", iso_week(target)),
+        },
+        FormatChip {
+            label: "Epoch".into(),
+            text: epoch_of(target, 0, utc_offset).to_string(),
+        },
+    ];
+    Answer {
+        kind: AnswerKind::Date,
+        value: AnswerValue::Date { day_epoch: target },
+        display,
+        explanation,
+        formats,
+    }
+}
+
 fn datetime_answer(day: i64, secs: i32, explanation: String, utc_offset: i32) -> Answer {
     let mut formats = vec![
         FormatChip {
@@ -2483,39 +2625,6 @@ fn range_answer(start: i64, end: i64, label: String, explanation: String) -> Ans
             FormatChip {
                 label: "End".into(),
                 text: iso_date(end),
-            },
-        ],
-    }
-}
-
-fn duration_answer(days: i64, explanation: String) -> Answer {
-    let weeks = days.abs() / 7;
-    let rem = days.abs() % 7;
-    let sign = if days < 0 { "-" } else { "" };
-    Answer {
-        kind: AnswerKind::Duration,
-        value: AnswerValue::Duration {
-            days,
-            secs: days * 86_400,
-        },
-        display: format!("{days} days"),
-        explanation,
-        formats: vec![
-            FormatChip {
-                label: "Days".into(),
-                text: format!("{days} days"),
-            },
-            FormatChip {
-                label: "Decomposed".into(),
-                text: format!("{sign}{weeks} weeks, {rem} days"),
-            },
-            FormatChip {
-                label: "Hours".into(),
-                text: format!("{}", days * 24),
-            },
-            FormatChip {
-                label: "Seconds".into(),
-                text: format!("{}", days * 86_400),
             },
         ],
     }
@@ -2703,10 +2812,19 @@ const KEYWORDS: &[&str] = &[
     "of",
     "until",
     "since",
+    "til",
+    "till",
+    "to",
     "end",
     "start",
+    "current",
     "christmas",
+    "easter",
+    "black",
+    "friday",
     "days",
+    "weeks",
+    "week",
     "is",
     "what",
 ];
@@ -2790,7 +2908,11 @@ pub fn evaluate(input: &str, now: ReferenceNow) -> Option<Answer> {
                 format!("{label} ({} \u{2013} {})", iso_date(s), iso_date(e)),
                 format!("parsed as {trimmed}"),
             ),
-            DateResult::Duration(days) => duration_answer(days, format!("parsed as {trimmed}")),
+            DateResult::Countdown {
+                target,
+                days,
+                weeks,
+            } => countdown_answer(target, days, weeks, now_anchor.day, now.utc_offset_secs),
         });
     }
 
@@ -2957,15 +3079,82 @@ mod tests {
 
     #[test]
     fn date_days_until_christmas() {
+        // Phase 11: a countdown is now a DATE answer (carries the target so the
+        // card can draw a calendar) with a "N days" headline.
         let a = ans("days until christmas");
-        assert_eq!(a.kind, AnswerKind::Duration);
+        assert_eq!(a.kind, AnswerKind::Date);
         assert_eq!(
             a.value,
-            AnswerValue::Duration {
-                days: 92,
-                secs: 92 * 86_400
+            AnswerValue::Date {
+                day_epoch: days_from_civil(2026, 12, 25)
             }
         );
+        assert_eq!(a.display, "92 days");
+        // First format chip is the count, for pasting.
+        assert_eq!(a.formats[0].text, "92");
+    }
+
+    #[test]
+    fn date_next_easter_and_days_until_easter() {
+        // Easter 2027 = 28 Mar (2026's already passed by our fixed now? No —
+        // Easter 2026 was 5 Apr, before 24 Sep, so "next easter" rolls to 2027).
+        let e = ans("next easter");
+        assert_eq!(e.kind, AnswerKind::Date);
+        assert_eq!(
+            e.value,
+            AnswerValue::Date {
+                day_epoch: days_from_civil(2027, 3, 28)
+            }
+        );
+        // "days until easter" counts to that same day.
+        let d = ans("days until easter");
+        assert_eq!(d.kind, AnswerKind::Date);
+        assert_eq!(
+            d.value,
+            AnswerValue::Date {
+                day_epoch: days_from_civil(2027, 3, 28)
+            }
+        );
+    }
+
+    #[test]
+    fn date_next_black_friday() {
+        // Black Friday 2026 = 27 Nov, still ahead of 24 Sep.
+        let a = ans("next black friday");
+        assert_eq!(
+            a.value,
+            AnswerValue::Date {
+                day_epoch: days_from_civil(2026, 11, 27)
+            }
+        );
+    }
+
+    #[test]
+    fn date_this_week_is_a_range_with_iso_label() {
+        let a = ans("this week");
+        assert_eq!(a.kind, AnswerKind::DateRange);
+        // 24 Sep 2026 is a Thursday → week runs Mon 21 – Sun 27 Sep, ISO week 39.
+        match &a.value {
+            AnswerValue::DateRange {
+                start_day_epoch,
+                end_day_epoch,
+                label,
+            } => {
+                assert_eq!(*start_day_epoch, days_from_civil(2026, 9, 21));
+                assert_eq!(*end_day_epoch, days_from_civil(2026, 9, 27));
+                assert!(label.starts_with("week 39"), "label was {label:?}");
+            }
+            other => panic!("expected a date range, got {other:?}"),
+        }
+        // "current week" is an alias.
+        assert_eq!(ans("current week").value, a.value);
+    }
+
+    #[test]
+    fn date_weeks_until_christmas() {
+        let a = ans("weeks until christmas");
+        assert_eq!(a.kind, AnswerKind::Date);
+        assert_eq!(a.display, "13 weeks"); // 92 days ≈ 13 weeks
     }
 
     #[test]

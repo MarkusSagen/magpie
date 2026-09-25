@@ -7,6 +7,8 @@ import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { AnswerCard } from "../components/answer_card.slint";
+import { DateAnswerCard } from "../components/date_answer_card.slint";
+import { DateStore } from "../date_store.slint";
 
 export component ClipboardView inherits VerticalLayout {
     callback activate(int);
@@ -68,8 +70,16 @@ export component ClipboardView inherits VerticalLayout {
     in property <bool> answer-random;
                 spacing: Theme.sp2;
 
+                // Full date answer + calendar (screen 15) — replaces the list when
+                // the query resolves to a date/range.
+                if DateStore.has-date: DateAnswerCard {
+                    formats: root.answer-formats;
+                    format-index: root.answer-format-index;
+                    vertical-stretch: 1;
+                }
+
                 // Inline answer card (dates / math / units) above the results.
-                if root.has-answer: AnswerCard {
+                if root.has-answer && !DateStore.has-date: AnswerCard {
                     kind: root.answer-kind;
                     display: root.answer-display;
                     explanation: root.answer-explanation;
@@ -79,7 +89,7 @@ export component ClipboardView inherits VerticalLayout {
                 }
 
                 // Row 1 — filter + sort the clipboard list.
-                HorizontalLayout {
+                if !DateStore.has-date: HorizontalLayout {
                     spacing: 6px;
                     // Order must match `viewmodel::type_filter_from_index` /
                     // `runtime::TYPE_CHIPS`.
@@ -129,7 +139,7 @@ export component ClipboardView inherits VerticalLayout {
 
                 // Screenshare mode is a big, silent change to every row — say so,
                 // otherwise a wall of dots reads as broken data.
-                if root.screenshare: Rectangle {
+                if root.screenshare && !DateStore.has-date: Rectangle {
                     height: 26px;
                     background: Theme.danger.with-alpha(0.16);
                     border-radius: Theme.r-sm;
@@ -148,7 +158,7 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                if root.all-tags.length > 0: HorizontalLayout {
+                if root.all-tags.length > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
                     for t in root.all-tags: Rectangle {
@@ -168,7 +178,7 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                if root.merge-count > 0: HorizontalLayout {
+                if root.merge-count > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
                     Text {
@@ -213,7 +223,7 @@ export component ClipboardView inherits VerticalLayout {
                 }
 
                 // Speed-dial: assigned slots (⌘1-9). Shown only when any is filled.
-                if root.slots.length > 0: HorizontalLayout {
+                if root.slots.length > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
                     Text { text: "Slots ⌘S"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
@@ -234,7 +244,7 @@ export component ClipboardView inherits VerticalLayout {
                 }
 
                 // Two-pane body.
-                HorizontalLayout {
+                if !DateStore.has-date: HorizontalLayout {
                     spacing: 12px;
 
                     // Scroll-follow: mirror `selected` locally so the `changed`

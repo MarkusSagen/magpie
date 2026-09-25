@@ -1,8 +1,9 @@
 use crate::{
-    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalcRow, CalcStore, ChartPoint, ClipRow,
-    DataColumn, DataStore, EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow,
-    NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow,
-    SlotItem, TaskRow, TimeEntryRow,
+    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
+    CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
+    EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, NoteRow, Popover,
+    RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
+    TimeEntryRow,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -72,6 +73,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         fetch_link_previews: cfg.fetch_link_previews,
         log_clock_entries: cfg.log_clock_entries,
         theme: cfg.theme.clone(),
+        holiday_region: cfg.holiday_region.clone(),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -463,6 +465,8 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     // Inline answer card (dates / math / units) for the current query.
     let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
     set_answer_card(ui, &query);
+    // Full date answer + calendar (screen 15) when the query resolves to a date.
+    populate_date_card(ui, state, 0);
     set_quicklink_hint(ui, state, &query);
     refresh_favorites(ui, state);
 }
@@ -687,6 +691,239 @@ fn set_random_answer(ui: &LauncherWindow, query: &str) -> bool {
     ui.set_answer_random(true);
     ui.set_has_answer(n > 0);
     n > 0
+}
+
+/// Populate the DateStore (screen 15: date tile, countdown headline, region eve
+/// switch, month grids + year heatmap) when the current query resolves to a date
+/// or range. `eve_selected` retargets the calendar to the eve (Christmas 24 Dec)
+/// when the region observes it. Clears `has-date` for non-date queries.
+fn populate_date_card(ui: &LauncherWindow, state: &AppState, eve_selected: i32) {
+    use magpie_core::{calendar, eval, holidays};
+    let ds = ui.global::<DateStore>();
+    let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
+    let now_day = (now_ms() / 1000 + local_offset_seconds()).div_euclid(86_400);
+    let ans = if eval::is_answer_like(&query) {
+        eval::evaluate(
+            &query,
+            eval::ReferenceNow {
+                epoch_secs: now_ms() / 1000,
+                utc_offset_secs: local_offset_seconds() as i32,
+            },
+        )
+    } else {
+        None
+    };
+    // Only date/range answers get the calendar.
+    let (primary_target, range, is_range, range_label) = match ans.as_ref().map(|a| &a.value) {
+        Some(eval::AnswerValue::Date { day_epoch }) => {
+            (*day_epoch, (now_day, *day_epoch), false, String::new())
+        }
+        Some(eval::AnswerValue::DateRange {
+            start_day_epoch,
+            end_day_epoch,
+            label,
+        }) => (
+            *end_day_epoch,
+            (*start_day_epoch, *end_day_epoch),
+            true,
+            label.clone(),
+        ),
+        _ => {
+            ds.set_has_date(false);
+            return;
+        }
+    };
+    let region = holidays::Region::from_id(&state.holiday_region).unwrap_or(holidays::Region::Se);
+    // Eve switch is only meaningful for single-date holidays (Christmas).
+    let primary_hol = if is_range {
+        None
+    } else {
+        holidays::label_for_day(region, primary_target)
+    };
+    let eve = primary_hol.as_ref().and_then(|h| h.eve.clone());
+    let shown_target = if eve_selected == 1 {
+        eve.as_ref().map(|(d, _)| *d).unwrap_or(primary_target)
+    } else {
+        primary_target
+    };
+
+    // Header label.
+    let kind_label = if is_range {
+        format!("Date range · {range_label}")
+    } else if eve_selected == 1 {
+        // The eve label is "24 Dec · Julafton" → take the name after "· ".
+        let name = eve
+            .as_ref()
+            .map(|(_, l)| l.rsplit('·').next().unwrap_or(l).trim().to_string())
+            .unwrap_or_else(|| "Christmas Eve".into());
+        format!("Date · {name}")
+    } else if let Some(h) = &primary_hol {
+        format!("Date · {}", h.label)
+    } else {
+        "Date".into()
+    };
+
+    // Tile + headline + sub.
+    ds.set_kind_label(kind_label.into());
+    ds.set_tile_month(calendar::month_abbrev_upper(shown_target).into());
+    let (_, _, dom) = calendar::ymd(shown_target);
+    ds.set_tile_day(dom.to_string().into());
+    ds.set_tile_weekday(calendar::weekday_long(shown_target).into());
+
+    let diff = shown_target - now_day;
+    let display = ans.as_ref().map(|a| a.display.clone()).unwrap_or_default();
+    let is_countdown_display = display
+        .split(' ')
+        .next()
+        .map(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false);
+    let headline = if is_range {
+        range_label.clone()
+    } else if is_countdown_display {
+        display.clone()
+    } else if diff == 0 {
+        "Today".into()
+    } else if diff > 0 {
+        format!("{diff} days")
+    } else {
+        format!("{} days ago", -diff)
+    };
+    ds.set_headline(headline.into());
+
+    let subline = if is_range {
+        format!(
+            "{} \u{2013} {}",
+            calendar::full_date(range.0),
+            calendar::full_date(range.1)
+        )
+    } else {
+        let weeks = (diff.abs() + 3) / 7;
+        format!(
+            "{weeks} week{} \u{00b7} {} \u{00b7} week {}",
+            if weeks == 1 { "" } else { "s" },
+            calendar::full_date(shown_target),
+            calendar::iso_week(shown_target)
+        )
+    };
+    ds.set_subline(subline.into());
+    ds.set_readline(
+        ans.as_ref()
+            .map(|a| a.explanation.clone())
+            .unwrap_or_default()
+            .into(),
+    );
+
+    // Eve switch.
+    ds.set_eve_has(eve.is_some());
+    if let Some((_, eve_label)) = &eve {
+        ds.set_primary_label(calendar::short_date(primary_target).into());
+        ds.set_eve_label(eve_label.clone().into());
+    }
+    ds.set_eve_selected(eve_selected);
+
+    // Calendar layout → Slint models.
+    let lay = calendar::layout(
+        range.0.min(range.1),
+        range.0.max(range.1),
+        shown_target,
+        now_day,
+    );
+    let months: Vec<CalMonth> = lay
+        .months
+        .iter()
+        .map(|mg| {
+            let cells: Vec<CalDay> = mg
+                .cells
+                .iter()
+                .map(|c| match c {
+                    Some(d) => CalDay {
+                        dom: d.dom.to_string().into(),
+                        blank: false,
+                        in_range: d.in_range,
+                        is_target: d.is_target,
+                        is_today: d.is_today,
+                        is_weekend: d.is_weekend,
+                    },
+                    None => CalDay {
+                        dom: SharedString::new(),
+                        blank: true,
+                        in_range: false,
+                        is_target: false,
+                        is_today: false,
+                        is_weekend: false,
+                    },
+                })
+                .collect();
+            CalMonth {
+                title: format!("{} {}", month_name_long(mg.month), mg.year).into(),
+                cells: ModelRc::new(VecModel::from(cells)),
+            }
+        })
+        .collect();
+    ds.set_months(ModelRc::new(VecModel::from(months)));
+
+    // Year strip.
+    ds.set_year_title(lay.year_strip.year.to_string().into());
+    ds.set_year_cols(lay.year_strip.cols as i32);
+    let ycells: Vec<CalYearCell> = lay
+        .year_strip
+        .cells
+        .iter()
+        .map(|c| match c {
+            Some(y) => CalYearCell {
+                blank: false,
+                in_range: y.in_range,
+                is_target: y.is_target,
+                is_today: y.is_today,
+            },
+            None => CalYearCell {
+                blank: true,
+                in_range: false,
+                is_target: false,
+                is_today: false,
+            },
+        })
+        .collect();
+    ds.set_year_cells(ModelRc::new(VecModel::from(ycells)));
+    let labels: Vec<CalMonthLabel> = lay
+        .year_strip
+        .month_label_cols
+        .iter()
+        .map(|(m, col)| CalMonthLabel {
+            label: month_name_short(*m).into(),
+            col: *col as i32,
+        })
+        .collect();
+    ds.set_year_month_labels(ModelRc::new(VecModel::from(labels)));
+
+    ds.set_has_date(true);
+}
+
+/// Long month name for the month-grid titles (Rust-side, mirrors core's private one).
+fn month_name_long(m: u32) -> &'static str {
+    const N: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    N[(m.clamp(1, 12) - 1) as usize]
+}
+
+/// Short month name for the year-strip labels.
+fn month_name_short(m: u32) -> &'static str {
+    const N: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    N[(m.clamp(1, 12) - 1) as usize]
 }
 
 /// A built-in sample dataset (NASA planetary fact sheet) shown the first time the
@@ -3147,6 +3384,12 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Date answer + calendar (Phase 11): a holiday countdown.
+                        "calendar" => {
+                            let q = SharedString::from("days until christmas");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
                         // Data view: the typed grid (13), optionally with the chart (14).
                         "data" => {
                             ui.invoke_set_section(SharedString::from("data"));
@@ -3381,6 +3624,16 @@ pub fn start() {
     {
         ui.on_transform_input_summary(move |input| {
             SharedString::from(magpie_core::transforms::input_summary(input.as_str()))
+        });
+    }
+    // ---- Date answer card (screen 15): Christmas eve/day region switch ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DateStore>().on_set_eve(move |i| {
+            if let Some(ui) = w.upgrade() {
+                populate_date_card(&ui, &s, i);
+            }
         });
     }
     // ---- Data view (screens 13/14) ----

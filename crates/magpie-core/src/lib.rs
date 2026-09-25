@@ -15,6 +15,7 @@
 
 pub mod bookmarks;
 pub mod calc_history;
+pub mod calendar;
 pub mod case;
 pub mod color;
 pub mod delete;
@@ -23,6 +24,7 @@ pub mod edit;
 pub mod eval;
 pub mod export;
 pub mod favorites;
+pub mod holidays;
 pub mod mask_support;
 pub mod mathsvg;
 pub mod merge;

@@ -34,6 +34,9 @@ pub struct AppState {
     /// in-session source of truth is the window's `theme-index`; the picker
     /// callback persists the chosen id back out.
     pub theme: String,
+    /// Region for locale-dependent holiday answers (from `Config::holiday_region`);
+    /// parsed to `magpie_core::holidays::Region` when building the date card.
+    pub holiday_region: String,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -130,6 +133,7 @@ mod tests {
             fetch_link_previews: true,
             log_clock_entries: true,
             theme: "dark".into(),
+            holiday_region: "SE".into(),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

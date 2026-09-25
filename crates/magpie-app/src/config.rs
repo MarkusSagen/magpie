@@ -57,6 +57,11 @@ pub struct Config {
     /// in `load_or_default`. Chosen from the sidebar theme picker.
     #[serde(default)]
     pub theme: String,
+    /// Region for locale-dependent holiday answers (`SE`/`US`/`UK`/`DE`). Empty →
+    /// detected from the OS locale on load (Sweden fallback). Controls the
+    /// Christmas eve switch and holiday labels in the date answer card.
+    #[serde(default)]
+    pub holiday_region: String,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -88,8 +93,22 @@ impl Default for Config {
             log_clock_entries: true,
             theme_dark: true,
             theme: "dark".into(),
+            holiday_region: String::new(),
         }
     }
+}
+
+/// Detect the OS locale for a first-run `holiday_region` default. Reads the usual
+/// POSIX env vars; `magpie_core::holidays::Region::from_locale` falls back to SE.
+fn detect_locale() -> String {
+    for key in ["LC_ALL", "LC_TIME", "LANG", "LANGUAGE"] {
+        if let Ok(v) = std::env::var(key) {
+            if !v.is_empty() {
+                return v;
+            }
+        }
+    }
+    String::new()
 }
 
 pub fn load_or_default(path: &Path) -> Config {
@@ -100,6 +119,12 @@ pub fn load_or_default(path: &Path) -> Config {
     // Migrate an older config that only had the dark/light bool.
     if cfg.theme.is_empty() {
         cfg.theme = if cfg.theme_dark { "dark" } else { "light" }.into();
+    }
+    // First run (or older config): default the holiday region from the OS locale.
+    if cfg.holiday_region.is_empty() {
+        cfg.holiday_region = magpie_core::holidays::Region::from_locale(&detect_locale())
+            .id()
+            .to_string();
     }
     cfg
 }

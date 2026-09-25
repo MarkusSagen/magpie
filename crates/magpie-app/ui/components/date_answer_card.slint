@@ -1,0 +1,259 @@
+import { Theme } from "../theme.slint";
+import { DateStore } from "../date_store.slint";
+import { CalMonth, CalDay, CalYearCell, CalMonthLabel } from "../types.slint";
+
+// Full date answer + calendar (screen 15). Shown in place of the clipboard list
+// when the query resolves to a date/range. Rendering only — Tab cycles the copy
+// chips and ↵ pastes, handled by the shared search key handler (uses the same
+// answer-formats the inline card does). Reads DateStore for the calendar layout.
+export component DateAnswerCard inherits Flickable {
+    // The launcher's answer chips (Count / ISO / Full / …) + selection, so the
+    // Tab/↵ behaviour matches the inline answer card exactly.
+    in property <[string]> formats;
+    in property <int> format-index;
+
+    // Constrain content to the viewport width (a bare Flickable leaves children
+    // unbounded, which pushes right-aligned content off-screen); scroll only
+    // vertically, sized to the content's natural height.
+    viewport-width: self.width;
+    viewport-height: content.preferred-height;
+
+    content := VerticalLayout {
+        width: parent.width;
+        padding: 4px;
+        spacing: 16px;
+
+        // ---- Answer card ----
+        Rectangle {
+            background: Theme.bg-panel;
+            border-radius: Theme.r-lg;
+            border-width: 1px;
+            border-color: Theme.line;
+            vertical-stretch: 0;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+                // Header row: kind label · region eve switch.
+                HorizontalLayout {
+                    Text {
+                        text: DateStore.kind-label;
+                        color: Theme.text-dim;
+                        font-size: Theme.fs-xs;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if DateStore.eve-has: Rectangle {
+                        background: Theme.bg-sidebar;
+                        border-radius: Theme.r-sm;
+                        width: 272px;
+                        height: 34px;
+                        HorizontalLayout {
+                            padding: 3px;
+                            spacing: 2px;
+                            for opt[i] in [DateStore.primary-label, DateStore.eve-label]: Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: Theme.r-xs;
+                                background: i == DateStore.eve-selected ? Theme.bg-elevated : (evta.has-hover ? Theme.bg-elevated : transparent);
+                                Text {
+                                    text: opt;
+                                    color: i == DateStore.eve-selected ? Theme.text : Theme.text-dim;
+                                    font-size: Theme.fs-sm;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                evta := TouchArea { clicked => { DateStore.set-eve(i); } }
+                            }
+                        }
+                    }
+                }
+                // Body row: date tile · headline/sub/read · copy chips.
+                HorizontalLayout {
+                    spacing: 20px;
+                    // Date tile.
+                    Rectangle {
+                        width: 128px;
+                        height: 128px;
+                        background: Theme.bg-elevated;
+                        border-radius: Theme.r-md;
+                        VerticalLayout {
+                            padding: 12px;
+                            alignment: center;
+                            Text {
+                                text: DateStore.tile-month;
+                                color: Theme.text-dim;
+                                font-size: Theme.fs-xs;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: DateStore.tile-day;
+                                color: Theme.text;
+                                font-size: 46px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: DateStore.tile-weekday;
+                                color: Theme.text-dim;
+                                font-size: Theme.fs-sm;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                    // Headline + sub + read.
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: DateStore.headline;
+                            color: Theme.text;
+                            font-size: 34px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: DateStore.subline;
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-sm;
+                        }
+                        Text {
+                            text: DateStore.readline;
+                            color: Theme.text-faint;
+                            font-family: "Geist Mono";
+                            font-size: Theme.fs-sm;
+                        }
+                    }
+                    // Copy chips (selected = accent ring).
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        for chip[i] in root.formats: Rectangle {
+                            height: 34px;
+                            min-width: 96px;
+                            max-width: 220px;
+                            background: Theme.bg-elevated;
+                            border-radius: Theme.r-sm;
+                            border-width: 1px;
+                            border-color: root.format-index == i ? Theme.accent : Theme.line;
+                            clip: true;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                Text {
+                                    text: chip;
+                                    color: root.format-index == i ? Theme.text : Theme.text-dim;
+                                    font-family: "Geist Mono";
+                                    font-size: Theme.fs-sm;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Month grids ----
+        if DateStore.months.length > 0: HorizontalLayout {
+            spacing: 18px;
+            alignment: start;
+            vertical-stretch: 0;
+            for m[mi] in DateStore.months: VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: m.title;
+                    color: Theme.text-dim;
+                    font-size: Theme.fs-sm;
+                    font-weight: 600;
+                }
+                // Weekday header.
+                HorizontalLayout {
+                    spacing: 2px;
+                    for wd in ["M", "T", "W", "T", "F", "S", "S"]: Rectangle {
+                        width: 36px;
+                        height: 20px;
+                        Text {
+                            text: wd;
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                // 6 rows × 7 day cells.
+                for ri in 6: HorizontalLayout {
+                    spacing: 2px;
+                    for ci in 7: Rectangle {
+                        property <CalDay> cell: m.cells[ri * 7 + ci];
+                        width: 36px;
+                        height: 34px;
+                        border-radius: Theme.r-xs;
+                        background: cell.blank
+                            ? transparent
+                            : (cell.is-target
+                                ? Theme.accent
+                                : (cell.in-range ? Theme.accent.with-alpha(0.16) : transparent));
+                        border-width: cell.is-today ? 1px : 0px;
+                        border-color: Theme.text;
+                        Text {
+                            text: cell.dom;
+                            color: cell.is-target
+                                ? Theme.on-accent
+                                : (cell.is-weekend ? Theme.text-faint : Theme.text-dim);
+                            font-size: Theme.fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Year heatmap strip ----
+        VerticalLayout {
+            spacing: 4px;
+            vertical-stretch: 0;
+            Text {
+                text: DateStore.year-title;
+                color: Theme.text-dim;
+                font-size: Theme.fs-sm;
+                font-weight: 600;
+            }
+            // Columns of 7 (Mon-first) tiny cells.
+            HorizontalLayout {
+                spacing: 2px;
+                alignment: start;
+                for col in DateStore.year-cols: VerticalLayout {
+                    spacing: 2px;
+                    for row in 7: Rectangle {
+                        property <CalYearCell> yc: DateStore.year-cells[col * 7 + row];
+                        width: 9px;
+                        height: 9px;
+                        border-radius: 1px;
+                        background: yc.blank
+                            ? transparent
+                            : (yc.is-target
+                                ? Theme.accent
+                                : (yc.in-range ? Theme.accent.with-alpha(0.40) : Theme.bg-elevated));
+                        border-width: yc.is-today ? 1px : 0px;
+                        border-color: Theme.text;
+                    }
+                }
+            }
+            // Month labels row (absolute-positioned under each month's column).
+            Rectangle {
+                height: 16px;
+                for lbl[i] in DateStore.year-month-labels: Text {
+                    x: lbl.col * 11px;            // 9px cell + 2px gap
+                    text: lbl.label;
+                    color: Theme.text-faint;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

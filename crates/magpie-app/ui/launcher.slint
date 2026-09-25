@@ -11,8 +11,10 @@ import { Sidebar } from "components/sidebar.slint";
 // Re-export the Data/Calculator globals so Rust can reach them via `ui.global::<…>()`.
 import { DataStore } from "data_store.slint";
 import { CalcStore } from "calc_store.slint";
+import { DateStore } from "date_store.slint";
 export { DataStore }
 export { CalcStore }
+export { DateStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { BoardView } from "views/board.slint";

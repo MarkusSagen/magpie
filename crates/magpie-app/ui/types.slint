@@ -242,3 +242,29 @@ export struct Palette {
     on-accent: color,
     danger: color,
 }
+
+// ---- Date answers v2 / calendar (Phase 11, PNG 15) ----
+// One day cell in a month grid. `blank` cells pad the Mon-first grid.
+export struct CalDay {
+    dom: string,
+    blank: bool,
+    in-range: bool,
+    is-target: bool,
+    is-today: bool,
+    is-weekend: bool,
+}
+export struct CalMonth {
+    title: string,      // "September"
+    cells: [CalDay],    // 42 (6×7), Mon-first, row-major
+}
+// One cell of the 53×7 year heatmap.
+export struct CalYearCell {
+    blank: bool,
+    in-range: bool,
+    is-target: bool,
+    is-today: bool,
+}
+export struct CalMonthLabel {
+    label: string,      // "Jan"
+    col: int,           // heatmap column the month starts in
+}
