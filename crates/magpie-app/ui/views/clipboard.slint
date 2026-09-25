@@ -23,6 +23,8 @@ export component ClipboardView inherits VerticalLayout {
     in-out property <int> merge-sep;
     in-out property <string> mode;
     callback open-in-editor(int);
+    callback open-selected-url();
+    callback bookmark-selected();
     callback paste-slot(int);
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
@@ -420,13 +422,31 @@ export component ClipboardView inherits VerticalLayout {
                                     revta := TouchArea { clicked => { root.revealed = true; } }
                                     Text { text: "Reveal"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
-                                Rectangle {
+                                // Non-link entries open in the editor; links get browser + bookmark.
+                                if !(root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link"): Rectangle {
                                     height: 26px;
                                     width: 116px;
                                     background: oeta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                     border-radius: Theme.r-sm;
                                     oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
                                     Text { text: "↗ Open in editor"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                // Web-link entries (screen 04): open in the browser + bookmark.
+                                if root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link": Rectangle {
+                                    height: 26px;
+                                    width: 148px;
+                                    background: obwa.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    obwa := TouchArea { clicked => { root.open-selected-url(); } }
+                                    Text { text: "↗ Open in browser  ⌘O"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link": Rectangle {
+                                    height: 26px;
+                                    width: 96px;
+                                    background: obma.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    obma := TouchArea { clicked => { root.bookmark-selected(); } }
+                                    Text { text: "Bookmark"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
 

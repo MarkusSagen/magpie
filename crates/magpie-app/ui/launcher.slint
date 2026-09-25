@@ -172,6 +172,7 @@ export component LauncherWindow inherits Window {
         else if id == "export" { root.export-data(); }
         else if id == "bookmark" { root.bookmark-selected(); }
         else if id == "task-from-link" { root.task-from-link(); }
+        else if id == "transform" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; }
     }
     callback export-data();
 
@@ -281,6 +282,7 @@ export component LauncherWindow inherits Window {
     callback open-bookmark(string);
     callback delete-bookmark(int);
     callback bookmark-selected();
+    callback open-selected-url();
     // ⌘K "Create task from link": add the currently-selected entry as a task on
     callback task-from-link();
 
@@ -424,6 +426,8 @@ export component LauncherWindow inherits Window {
             notes-mode <=> root.notes-mode;
             open-actions() => { root.open-actions(); }
             open-in-editor(a0) => { root.open-in-editor(a0); }
+            open-selected-url() => { root.open-selected-url(); }
+            bookmark-selected() => { root.bookmark-selected(); }
             open-search() => { root.open-search(); }
             open-slots() => { root.open-slots(); }
             over-time-bars: root.over-time-bars;
@@ -713,6 +717,7 @@ export component LauncherWindow inherits Window {
             actions: root.actions;
             actions-query <=> root.actions-query;
             mode <=> root.mode;
+            entry-preview: root.preview-text;
             run-action(a0) => { root.run-action(a0); }
         }
 

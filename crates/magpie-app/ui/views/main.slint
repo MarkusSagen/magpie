@@ -57,6 +57,8 @@ export component MainView inherits VerticalLayout {
     in-out property <bool> notes-mode;
     callback open-actions();
     callback open-in-editor(int);
+    callback open-selected-url();
+    callback bookmark-selected();
     callback open-search();
     callback open-slots();
     in property <[Bar]> over-time-bars;
@@ -343,6 +345,7 @@ export component MainView inherits VerticalLayout {
                                     // idiom). Esc still clears the whole query, ⌥⌫ a word.
                                     if event.text == Key.Backspace { root.delete-entry(root.selected); return accept; }
                                     if event.text == "c" { root.copy-only(root.selected); return accept; }
+                                    if event.text == "o" { root.open-selected-url(); return accept; }
                                     if event.text == "k" { root.open-actions(); return accept; }
                                     if event.text == "s" { root.open-slots(); return accept; }
                                     // ⌘⇧F — "Find everywhere": must be checked before the
@@ -440,6 +443,8 @@ export component MainView inherits VerticalLayout {
                 merge-sep <=> root.merge-sep;
                 mode <=> root.mode;
                 open-in-editor(a0) => { root.open-in-editor(a0); }
+                open-selected-url() => { root.open-selected-url(); }
+                bookmark-selected() => { root.bookmark-selected(); }
                 paste-slot(a0) => { root.paste-slot(a0); }
                 preview-font-size <=> root.preview-font-size;
                 preview-has-image: root.preview-has-image;

@@ -2049,20 +2049,21 @@ fn refresh_today(ui: &LauncherWindow, state: &AppState) {
 /// Shortcut labels must match the real bindings in `launcher.slint` — a wrong
 /// hint is worse than none. The icon field is unused (Slint's `ActionIcon`
 /// renders a monochrome SVG by `id` instead) — left empty, not emoji.
-const ACTIONS: &[(&str, &str, &str, &str)] = &[
-    ("paste", "", "Paste", "⏎"),
-    ("copy", "", "Copy", "⌘C"),
-    ("keep", "", "Paste & keep open", "⌘⏎"),
-    ("edit", "", "Edit", "⌘E"),
-    ("snippet", "", "New snippet", "⌘N"),
-    ("pin", "", "Pin / Unpin", "⌘P"),
-    ("slot", "", "Assign to slot…", "⌘S"),
-    ("merge", "", "Add to merge", "⌘G"),
-    ("note", "", "New note from this entry", "⌘J"),
-    ("delete", "", "Delete", "⌘⌫"),
-    ("export", "", "Export data…", ""),
-    ("bookmark", "", "Bookmark this link", ""),
-    ("task-from-link", "", "Create task from link", ""),
+const ACTIONS: &[(&str, &str, &str, &str, &str)] = &[
+    ("paste", "", "Paste", "⏎", "Entry"),
+    ("keep", "", "Paste & keep open", "⌘⏎", "Entry"),
+    ("copy", "", "Copy without pasting", "⌘C", "Entry"),
+    ("edit", "", "Edit", "⌘E", "Entry"),
+    ("pin", "", "Pin / Unpin", "⌘P", "Entry"),
+    ("slot", "", "Assign quick-paste slot…", "⌘S", "Entry"),
+    ("merge", "", "Add to merge", "⌘G", "Entry"),
+    ("note", "", "New note from this entry", "⌘J", "Entry"),
+    ("snippet", "", "New snippet", "⌘N", "Entry"),
+    ("transform", "", "Transform…", "⌘T", "Convert"),
+    ("bookmark", "", "Bookmark this link", "", "Convert"),
+    ("task-from-link", "", "Create task from link", "", "Convert"),
+    ("export", "", "Export data…", "", "Convert"),
+    ("delete", "", "Delete entry", "⌘⌫", ""),
 ];
 
 /// The ⌘K rows whose label matches `query` (case-insensitive substring; "" =
@@ -2070,11 +2071,17 @@ const ACTIONS: &[(&str, &str, &str, &str)] = &[
 #[allow(clippy::type_complexity)]
 fn filter_actions(
     query: &str,
-) -> Vec<&'static (&'static str, &'static str, &'static str, &'static str)> {
+) -> Vec<&'static (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+)> {
     let q = query.to_lowercase();
     ACTIONS
         .iter()
-        .filter(|(_, _, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
+        .filter(|(_, _, label, _, _)| q.is_empty() || label.to_lowercase().contains(&q))
         .collect()
 }
 
@@ -2095,11 +2102,12 @@ fn set_actions_filtered(ui: &LauncherWindow, query: &str) {
     let len = rows.len() as i32;
     let items: Vec<ActionItem> = rows
         .into_iter()
-        .map(|(id, icon, label, key)| ActionItem {
+        .map(|(id, icon, label, key, group)| ActionItem {
             icon: SharedString::from(*icon),
             label: SharedString::from(*label),
             key: SharedString::from(*key),
             id: SharedString::from(*id),
+            group: SharedString::from(*group),
         })
         .collect();
     ui.set_actions(ModelRc::new(VecModel::from(items)));
@@ -4717,6 +4725,23 @@ pub fn start() {
         });
     }
     {
+        // ⌘O — open the selected web-link entry in the default browser (screen 04).
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_selected_url(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let url = e.full_text.trim().to_string();
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        open_url_and_hide(&ui, &url);
+                    }
+                }
+            }
+        });
+    }
+    {
         // ⌘K "Create task from link": any selected entry (not just URLs) becomes
         // a task on today's daily note.
         let s = state.clone();
@@ -5309,9 +5334,9 @@ mod nav_tests {
     fn filter_actions_matches_labels_case_insensitively() {
         // No query: the full set.
         assert_eq!(filter_actions("").len(), super::ACTIONS.len());
-        // "paste" matches "Paste" and "Paste & keep open".
+        // "paste" matches "Paste", "Paste & keep open" and "Assign quick-paste slot".
         let ids: Vec<&str> = filter_actions("paste").iter().map(|r| r.0).collect();
-        assert_eq!(ids, vec!["paste", "keep"]);
+        assert_eq!(ids, vec!["paste", "keep", "slot"]);
         // Case-insensitive, single match.
         let ids: Vec<&str> = filter_actions("PIN").iter().map(|r| r.0).collect();
         assert_eq!(ids, vec!["pin"]);
