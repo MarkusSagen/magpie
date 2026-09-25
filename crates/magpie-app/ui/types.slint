@@ -16,6 +16,9 @@ export struct EntryRow {
     section: string,
     copied_date: string,
     pinned: bool,
+    // For web-link entries: the bare domain (e.g. "github.com"), "" otherwise.
+    // Drives the accent "domain ↗" suffix + chain badge on link rows (screen 04).
+    domain: string,
     // The entry's OWN content preview, as opposed to `icon` (the source app):
     // a thumbnail for image entries, a swatch colour for colour entries.
     thumb: image,

@@ -73,6 +73,10 @@ export component MainView inherits VerticalLayout {
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-link;
+    in property <string> preview-domain;
+    in property <image> preview-link-image;
+    in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
     in property <string> preview-text;
     in property <bool> preview-truncated;
@@ -497,6 +501,10 @@ export component MainView inherits VerticalLayout {
                 preview-font-size <=> root.preview-font-size;
                 preview-has-image: root.preview-has-image;
                 preview-image: root.preview-image;
+                preview-is-link: root.preview-is-link;
+                preview-domain: root.preview-domain;
+                preview-link-image: root.preview-link-image;
+                preview-has-link-image: root.preview-has-link-image;
                 preview-lines: root.preview-lines;
                 preview-text: root.preview-text;
                 preview-truncated: root.preview-truncated;

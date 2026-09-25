@@ -29,6 +29,10 @@ export component ClipboardView inherits VerticalLayout {
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-link;
+    in property <string> preview-domain;
+    in property <image> preview-link-image;
+    in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
     in property <string> preview-text;
     in property <bool> preview-truncated;
@@ -287,6 +291,12 @@ export component ClipboardView inherits VerticalLayout {
                                     }
                                     if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
                                     if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: Theme.text-dim; }
+                                    // Chain badge marks a web link (screen 04), bottom-right of the tile.
+                                    if row.domain != "": Rectangle {
+                                        x: 13px; y: 19px; width: 14px; height: 14px; border-radius: 4px;
+                                        background: Theme.bg-app; border-width: 1px; border-color: Theme.line-strong;
+                                        Image { source: Icons.type-link; colorize: Theme.accent; width: 9px; height: 9px; image-fit: contain; }
+                                    }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -299,6 +309,9 @@ export component ClipboardView inherits VerticalLayout {
                                             // Links light up in the accent colour on hover.
                                             color: (row.kind == "link" && rowta.has-hover) ? Theme.accent : Theme.text;
                                             font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        // Web links: an accent "domain ↗" so links stand out.
+                                        if row.domain != "": Text { text: row.domain + " ↗"; color: Theme.accent;
+                                            font-size: Theme.fs-sm; vertical-alignment: center; }
                                         if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     }
                                     Text { text: row.subtitle; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
@@ -450,11 +463,42 @@ export component ClipboardView inherits VerticalLayout {
                                 }
                             }
 
+                            // Web-link card (screen 04): a page-preview thumbnail
+                            // (cached OG image if bookmarked, else a placeholder),
+                            // the accent domain, and the full URL.
+                            if root.preview-is-link: VerticalLayout {
+                                vertical-stretch: 1;
+                                spacing: 10px;
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    min-height: 140px;
+                                    border-radius: Theme.r-md;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    background: Theme.bg-elevated;
+                                    clip: true;
+                                    if root.preview-has-link-image: Image {
+                                        source: root.preview-link-image;
+                                        width: parent.width; height: parent.height; image-fit: contain;
+                                    }
+                                    if !root.preview-has-link-image: Text {
+                                        text: "Page preview";
+                                        color: Theme.text-faint; font-size: Theme.fs-body;
+                                        horizontal-alignment: center; vertical-alignment: center;
+                                    }
+                                }
+                                Text { text: root.preview-domain; color: Theme.accent;
+                                    font-size: Theme.fs-md; font-weight: 600; overflow: elide; }
+                                Text { text: root.preview-text; color: Theme.text-dim;
+                                    font-family: "Geist Mono"; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+
                             // Detail preview — a VIRTUALIZED line list. Only the
                             // visible lines are shaped, so huge entries are instant.
                             // Rust pushes preview-lines (masked→bullets, else the
                             // real lines, bounded) for the selected entry.
-                            Rectangle {
+                            if !root.preview-is-link: Rectangle {
                                 min-height: 100px;
                                 vertical-stretch: 1;
                                 // Image entries: the bitmap itself, scaled to fit.

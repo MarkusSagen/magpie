@@ -261,6 +261,11 @@ fn to_rows(
                 )),
                 copied_date: SharedString::from(abs_date(e.last_copied_at_ms)),
                 pinned: e.pinned,
+                domain: SharedString::from(if matches!(e.kind, Kind::Link) {
+                    favicon::domain_of(&e.full_text).unwrap_or_default()
+                } else {
+                    String::new()
+                }),
                 thumb,
                 has_thumb,
                 swatch: match swatch_rgb {
@@ -1341,6 +1346,8 @@ fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
     // summon would silently revert an in-session pick back to the stale value.
     // The snapshot is applied exactly once, right after window creation, in `start()`.
     refresh(ui, state);
+    // Backfill site favicons for the visible web-link clips (background).
+    spawn_clip_favicons(ui, state);
     // Capture the paste target: whatever app is frontmost right before we show.
     match magpie_platform::SourceApp::frontmost(&ActiveWinSource {
         cache_dir: data_dir().join("app_icons"),
@@ -1611,6 +1618,49 @@ fn spawn_bookmark_favicons(ui: &LauncherWindow, state: &Arc<AppState>) {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
                     refresh_bookmarks(&ui, &s);
+                }
+            });
+        }
+    });
+}
+
+/// Fetch site favicons (background) for the web-link clips currently in view, then
+/// refresh so the rows and preview pick up the cached icons. Favicons come from
+/// each site's own `/favicon.ico` — allowed by the "previews only on save" privacy
+/// rule, since a favicon is a site icon, not a page preview.
+fn spawn_clip_favicons(ui: &LauncherWindow, state: &Arc<AppState>) {
+    if !state.fetch_link_favicons {
+        return;
+    }
+    let dir = data_dir().join("favicons");
+    let mut seen = std::collections::HashSet::new();
+    let domains: Vec<String> = current_results(state, now_ms())
+        .iter()
+        .filter(|e| matches!(e.kind, Kind::Link))
+        .filter_map(|e| favicon::domain_of(&e.full_text))
+        .filter(|d| !d.is_empty() && seen.insert(d.clone()))
+        .filter(|d| !favicon::favicon_cache_path(&dir, d).exists())
+        .take(30)
+        .collect();
+    if domains.is_empty() {
+        return;
+    }
+    let weak = ui.as_weak();
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let mut any = false;
+        for d in &domains {
+            if favicon::ensure_favicon(&dir, d, favicon::fetch_favicon).is_some() {
+                any = true;
+            }
+        }
+        if any {
+            let w = weak.clone();
+            let s = state.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    refresh(&ui, &s);
+                    ui.invoke_rebuild_preview();
                 }
             });
         }
@@ -3545,12 +3595,34 @@ pub fn start() {
                 Some(e) if !masked || revealed => load_entry_image(&s.images, e),
                 _ => (slint::Image::default(), false),
             };
+            // Web-link preview extras (screen 04): the domain, plus a cached OG
+            // thumbnail IF this URL was previously bookmarked. Never fetched here —
+            // page previews are fetched exclusively on explicit bookmark save.
+            let (is_link, link_domain, link_image, has_link_image) = match entry {
+                Some(e) if matches!(e.kind, Kind::Link) => {
+                    let domain = favicon::domain_of(&e.full_text).unwrap_or_default();
+                    let p = magpie_app::link_meta::preview_cache_path(
+                        &data_dir().join("previews"),
+                        e.full_text.trim(),
+                    );
+                    let (img, has) = match p.exists().then(|| slint::Image::load_from_path(&p)) {
+                        Some(Ok(img)) => (img, true),
+                        _ => (slint::Image::default(), false),
+                    };
+                    (true, domain, img, has)
+                }
+                _ => (false, String::new(), slint::Image::default(), false),
+            };
             if let Some(ui) = w.upgrade() {
                 ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
                 ui.set_preview_truncated(truncated);
                 ui.set_preview_text(SharedString::from(selectable));
                 ui.set_preview_image(preview_image);
                 ui.set_preview_has_image(has_preview_image);
+                ui.set_preview_is_link(is_link);
+                ui.set_preview_domain(SharedString::from(link_domain));
+                ui.set_preview_link_image(link_image);
+                ui.set_preview_has_link_image(has_link_image);
             }
         });
     }
