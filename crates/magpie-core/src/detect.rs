@@ -7,6 +7,7 @@ pub enum Kind {
     Link,
     Color,
     Email,
+    GitRemote,
     Rtf,
     Html,
     Image,
@@ -20,6 +21,7 @@ impl Kind {
             Kind::Link => "link",
             Kind::Color => "color",
             Kind::Email => "email",
+            Kind::GitRemote => "git_remote",
             Kind::Rtf => "rtf",
             Kind::Html => "html",
             Kind::Image => "image",
@@ -35,6 +37,7 @@ impl Kind {
             "link" => Kind::Link,
             "color" => Kind::Color,
             "email" => Kind::Email,
+            "git_remote" => Kind::GitRemote,
             "rtf" => Kind::Rtf,
             "html" => Kind::Html,
             "image" => Kind::Image,
@@ -52,6 +55,12 @@ fn email_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap())
 }
+fn git_remote_re() -> &'static Regex {
+    // scp-style SSH git remote: `user@host:path[.git]`. The `:path` after the
+    // host is what distinguishes it from an email address.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[\w.-]+@[\w.-]+:[\w./-]+(\.git)?$").unwrap())
+}
 fn color_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -63,6 +72,10 @@ pub fn detect_text_kind(s: &str) -> Kind {
     let t = s.trim();
     if url_re().is_match(t) {
         return Kind::Link;
+    }
+    // Git remotes (`user@host:path`) before email — they look email-ish.
+    if git_remote_re().is_match(t) {
+        return Kind::GitRemote;
     }
     if email_re().is_match(t) {
         return Kind::Email;
@@ -105,6 +118,22 @@ mod tests {
 
     #[test]
     fn detects_email() {
+        assert!(matches!(detect_text_kind("me@example.io"), Kind::Email));
+    }
+
+    #[test]
+    fn git_remotes_are_not_email() {
+        // The `user@host:path` shape looks email-ish (has `@` and a dotted host)
+        // but the `:path` makes it an SSH git remote, not an email.
+        assert!(matches!(
+            detect_text_kind("git@github.com:MarkusSagen/magpie.git"),
+            Kind::GitRemote
+        ));
+        assert!(matches!(
+            detect_text_kind("git@gitlab.example.com:group/sub/repo.git"),
+            Kind::GitRemote
+        ));
+        // A real email (no `:path`) must still be Email.
         assert!(matches!(detect_text_kind("me@example.io"), Kind::Email));
     }
 

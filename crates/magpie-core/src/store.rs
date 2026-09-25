@@ -94,6 +94,18 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE bookmarks ADD COLUMN tags TEXT NOT NULL DEFAULT '';",
     // v2: per-note baseline hash of the last vault-synced content (for 3-way sync).
     "ALTER TABLE notes ADD COLUMN vault_synced_hash TEXT NOT NULL DEFAULT '';",
+    // v3: calculator history (Phase 7) — every evaluated expression. `kind` is
+    // math|date|graph; `syntax` is plain|latex|typst; `result` is the primary
+    // display string; `pinned` exempts a row from the 30-day retention sweep.
+    "CREATE TABLE calc_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        input TEXT NOT NULL,
+        syntax TEXT NOT NULL DEFAULT 'plain',
+        result TEXT NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {

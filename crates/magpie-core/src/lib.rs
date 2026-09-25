@@ -14,21 +14,27 @@
 //! ```
 
 pub mod bookmarks;
+pub mod calc_history;
 pub mod delete;
 pub mod detect;
 pub mod edit;
+pub mod eval;
 pub mod export;
 pub mod mask_support;
+pub mod mathsvg;
 pub mod merge;
 pub mod metrics;
 pub mod model;
 pub mod notes;
+pub mod plot;
 pub mod retention;
 pub mod search;
 pub mod slots;
 pub mod stats;
 pub mod store;
+pub mod table;
 pub mod tags;
+pub mod transforms;
 pub mod vault;
 
 pub use bookmarks::{read_firefox_bookmarks, Bookmark};
