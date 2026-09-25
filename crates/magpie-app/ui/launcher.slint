@@ -212,10 +212,15 @@ export component LauncherWindow inherits Window {
     // Active source-app filter (-1 = any) so the overlay can mark the current one.
     in-out property <int> app-index: -1;
     in-out property <int> time-index: 0;
+    in-out property <int> match-index: 0; // 0 Words, 1 Fuzzy, 2 Regex
     in property <bool> filtered: false;
+    in property <int> filter-count: 0;    // active-filter count for the Filter badge
+    in property <string> active-app-name;  // active source-app filter chip label ("" = none)
+    in property <string> active-time-label; // active "Copied" range chip label ("" = any time)
     callback open-search();
     callback set-time-filter(int);
     callback set-app-filter(int);
+    callback set-match-mode(int);
     callback clear-filters();
 
     // ---- Notes mode ----
@@ -376,6 +381,11 @@ export component LauncherWindow inherits Window {
     Rectangle {
 
         main := MainView {
+            filter-count: root.filter-count;
+            active-app-name: root.active-app-name;
+            active-time-label: root.active-time-label;
+            set-app-filter(a0) => { root.set-app-filter(a0); }
+            set-time-filter(a0) => { root.set-time-filter(a0); }
             transform-input <=> root.transform-input;
             has-answer <=> root.has-answer;
             answer-kind <=> root.answer-kind;
@@ -703,7 +713,9 @@ export component LauncherWindow inherits Window {
             clear-filters() => { root.clear-filters(); }
             mode <=> root.mode;
             pinned-only <=> root.pinned-only;
+            match-index <=> root.match-index;
             set-app-filter(a0) => { root.set-app-filter(a0); }
+            set-match-mode(a0) => { root.set-match-mode(a0); }
             set-pinned-only(a0) => { root.set-pinned-only(a0); }
             set-sort(a0) => { root.set-sort(a0); }
             set-time-filter(a0) => { root.set-time-filter(a0); }

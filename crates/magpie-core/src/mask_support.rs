@@ -28,6 +28,26 @@ impl Store {
         rows.collect()
     }
 
+    /// `(id, display_name, entry_count)` for every app with captured entries,
+    /// most-used first. Drives the Filter popover's source-app list (screen 02).
+    pub fn apps_in_use_with_counts(&self) -> Result<Vec<(i64, String, i64)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.display_name, COUNT(e.id) AS n
+             FROM apps a JOIN entries e ON e.source_app_id = a.id
+             GROUP BY a.id, a.display_name
+             ORDER BY n DESC, a.display_name",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
     /// `(entry_id, app icon_path)` for entries whose source app has a non-null icon.
     pub fn app_icon_pairs(&self) -> Result<Vec<(i64, String)>> {
         let conn = self.conn();
@@ -94,6 +114,20 @@ mod tests {
             .map(|(_, n)| n)
             .collect();
         assert_eq!(apps, vec!["Ghostty".to_string(), "Vivaldi".to_string()]);
+    }
+
+    #[test]
+    fn apps_in_use_with_counts_orders_by_use() {
+        let s = open_in_memory().unwrap();
+        ingest(&s, "a", Some("Ghostty"));
+        ingest(&s, "b", Some("Ghostty"));
+        ingest(&s, "c", Some("Vivaldi"));
+        ingest(&s, "d", None);
+        let rows = s.apps_in_use_with_counts().unwrap();
+        assert_eq!(rows[0].1, "Ghostty");
+        assert_eq!(rows[0].2, 2);
+        assert_eq!(rows[1].1, "Vivaldi");
+        assert_eq!(rows[1].2, 1);
     }
 
     #[test]

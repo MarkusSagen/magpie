@@ -291,13 +291,38 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     // "Is anything narrowing the list?" — drives the empty state's wording and its
     // "Clear filters" escape hatch. The type chip and tag count too: filtering to
     // Image with no images used to say "No clipboard history yet".
+    let active_app_id: Option<i64>;
     if let Ok(u) = state.ui.lock() {
+        use magpie_app::viewmodel::{TimeFilter, TypeFilter};
+        let time_on = !matches!(u.time_filter, TimeFilter::All);
         let filtered = u.app_filter.is_some()
             || u.pinned_only
             || u.tag.is_some()
-            || !matches!(u.type_filter, magpie_app::viewmodel::TypeFilter::All)
-            || !matches!(u.time_filter, magpie_app::viewmodel::TimeFilter::All);
+            || !matches!(u.type_filter, TypeFilter::All)
+            || time_on;
         ui.set_filtered(filtered);
+        // The Filter button badge counts the popover's own controls (screen 02).
+        let match_on = !matches!(u.mode, magpie_core::SearchMode::Word);
+        let count =
+            u.app_filter.is_some() as i32 + time_on as i32 + u.pinned_only as i32 + match_on as i32;
+        ui.set_filter_count(count);
+        ui.set_active_time_label(SharedString::from(match u.time_filter {
+            TimeFilter::Today => "Today",
+            TimeFilter::Last7Days => "Last 7 days",
+            TimeFilter::Last30Days => "Last 30 days",
+            TimeFilter::All => "",
+        }));
+        // Keep the popover controls in sync with the actual filter state.
+        ui.set_time_index(match u.time_filter {
+            TimeFilter::All => 0,
+            TimeFilter::Today => 1,
+            TimeFilter::Last7Days => 2,
+            TimeFilter::Last30Days => 3,
+        });
+        ui.set_match_index(match_mode_index(u.mode));
+        active_app_id = u.app_filter;
+    } else {
+        active_app_id = None;
     }
 
     let (slots, tag_map, all_tags, app_names, app_icons, slot_items) = match state.store.lock() {
@@ -339,6 +364,18 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
             Vec::new(),
         ),
     };
+    // Active source-app filter chip label (screen 02): resolve the app_id → name.
+    let active_app_name = active_app_id
+        .and_then(|id| {
+            state
+                .store
+                .lock()
+                .ok()
+                .and_then(|st| st.apps_in_use().ok())
+                .and_then(|v| v.into_iter().find(|(i, _)| *i == id).map(|(_, n)| n))
+        })
+        .unwrap_or_default();
+    ui.set_active_app_name(SharedString::from(active_app_name));
     ui.set_slots(ModelRc::new(VecModel::from(
         slot_items
             .iter()
@@ -2085,6 +2122,23 @@ fn filter_actions(
         .collect()
 }
 
+/// The Filter popover's Match control (screen 02): 0 = Words, 1 = Fuzzy, 2 = Regex.
+fn match_mode_from_index(i: i32) -> magpie_core::SearchMode {
+    match i {
+        1 => magpie_core::SearchMode::Fuzzy,
+        2 => magpie_core::SearchMode::Regex,
+        _ => magpie_core::SearchMode::Word,
+    }
+}
+
+fn match_mode_index(m: magpie_core::SearchMode) -> i32 {
+    match m {
+        magpie_core::SearchMode::Fuzzy => 1,
+        magpie_core::SearchMode::Regex => 2,
+        _ => 0,
+    }
+}
+
 /// Keep a list selection index in range: clamp to the last row when it would
 /// point past the end, and to 0 when the list is empty.
 fn clamp_selection(sel: i32, len: i32) -> i32 {
@@ -2731,6 +2785,11 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                     match step.as_str() {
                         "actions" => ui.invoke_open_actions(),
                         "filters" => ui.invoke_open_search(),
+                        // Filter popover with an active time filter (chip + badge visible).
+                        "filters-demo" => {
+                            ui.invoke_set_time_filter(2);
+                            ui.invoke_open_search();
+                        }
                         "slots" => ui.invoke_open_slots(),
                         "stats" => ui.invoke_toggle_view(),
                         "edit" => ui.invoke_start_edit(ui.get_selected()),
@@ -3609,15 +3668,18 @@ pub fn start() {
                     .store
                     .lock()
                     .ok()
-                    .and_then(|st| st.apps_in_use().ok())
+                    .and_then(|st| st.apps_in_use_with_counts().ok())
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|(id, name)| AppItem {
+                    .map(|(id, name, count)| AppItem {
                         id: id as i32,
                         name: SharedString::from(name),
+                        count: count as i32,
                     })
                     .collect();
                 ui.set_apps(ModelRc::new(VecModel::from(apps)));
+                // Mirror the current match mode into the popover control.
+                ui.set_match_index(s.ui.lock().map(|u| match_mode_index(u.mode)).unwrap_or(0));
                 ui.set_mode(SharedString::from("search"));
             }
         });
@@ -3630,6 +3692,19 @@ pub fn start() {
                 u.time_filter = magpie_app::viewmodel::time_filter_from_index(idx);
             }
             if let Some(ui) = w.upgrade() {
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_match_mode(move |idx| {
+            if let Ok(mut u) = s.ui.lock() {
+                u.mode = match_mode_from_index(idx);
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_match_index(idx);
                 refresh(&ui, &s);
             }
         });
