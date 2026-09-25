@@ -106,6 +106,19 @@ const MIGRATIONS: &[&str] = &[
         pinned INTEGER NOT NULL DEFAULT 0,
         created_at_ms INTEGER NOT NULL
     );",
+    // v4: favorites & quicklinks (Phase 10). `kind` is clip|note|task|bookmark|
+    // file|snippet|search|quicklink; `payload` is the kind-specific target (a URL/
+    // path/query, or JSON); `keyword` (+ optional `{query}` in payload) makes it a
+    // quicklink; `position` orders the sidebar group.
+    "CREATE TABLE favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        label TEXT NOT NULL,
+        keyword TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -565,6 +578,27 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version_before, version_after);
+    }
+
+    #[test]
+    fn migration_v4_adds_favorites_from_v3() {
+        // Simulate a pre-v4 database (no favorites table, user_version = 3), then
+        // run the upgrade path and confirm v4 lands the table and bumps the version.
+        let s = open_in_memory().unwrap();
+        s.conn
+            .execute_batch("DROP TABLE favorites; PRAGMA user_version = 3;")
+            .unwrap();
+        run_migrations(&s.conn).unwrap();
+        let version: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4, "favorites migration bumps user_version to 4");
+        let n: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "favorites table exists and is empty");
     }
 
     #[test]

@@ -186,6 +186,15 @@ export struct CalcRow {
     pinned: bool,
 }
 
+// One sidebar Favorites-group row (Phase 10). `kind` drives the leading glyph +
+// the activation behaviour (quicklink → open URL, clip → paste, note → open, …).
+export struct FavoriteRow {
+    id: int,
+    kind: string,
+    label: string,
+    keyword: string,
+}
+
 // A recent-data entry in the Data view's left rail (session-scoped).
 export struct RecentData {
     name: string,

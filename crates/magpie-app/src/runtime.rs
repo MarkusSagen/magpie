@@ -1,8 +1,8 @@
 use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalcRow, CalcStore, ChartPoint, ClipRow,
-    DataColumn, DataStore, EntryRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, NoteRow,
-    Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem,
-    TaskRow, TimeEntryRow,
+    DataColumn, DataStore, EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow,
+    NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow,
+    SlotItem, TaskRow, TimeEntryRow,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -463,6 +463,50 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     // Inline answer card (dates / math / units) for the current query.
     let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
     set_answer_card(ui, &query);
+    set_quicklink_hint(ui, state, &query);
+    refresh_favorites(ui, state);
+}
+
+/// If `query` is "<keyword> …" and `<keyword>` matches a quicklink favorite, light
+/// up the quicklink hint chip (↵ opens the target). Requires a space so a plain
+/// search isn't hijacked.
+fn set_quicklink_hint(ui: &LauncherWindow, state: &AppState, query: &str) {
+    let found = query.split_once(' ').and_then(|(kw, rest)| {
+        state
+            .store
+            .lock()
+            .ok()
+            .and_then(|st| st.favorite_by_keyword(kw).ok().flatten())
+            .map(|f| (f, rest.to_string()))
+    });
+    match found {
+        Some((f, rest)) => {
+            let target = magpie_core::favorites::expand_quicklink(&f.payload, &rest);
+            ui.set_has_quicklink(true);
+            ui.set_quicklink_hint(SharedString::from(format!("{} → {target}", f.label)));
+        }
+        None => {
+            ui.set_has_quicklink(false);
+            ui.set_quicklink_hint(SharedString::from(""));
+        }
+    }
+}
+
+/// Push the Favorites list (Phase 10) into the sidebar model.
+fn refresh_favorites(ui: &LauncherWindow, state: &AppState) {
+    let rows: Vec<FavoriteRow> = {
+        let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        st.list_favorites().unwrap_or_default()
+    }
+    .into_iter()
+    .map(|f| FavoriteRow {
+        id: f.id as i32,
+        kind: SharedString::from(f.kind),
+        label: SharedString::from(f.label),
+        keyword: SharedString::from(f.keyword),
+    })
+    .collect();
+    ui.set_favorites(ModelRc::new(VecModel::from(rows)));
 }
 
 /// Map an eval answer kind to the short label shown in the answer card header.
@@ -2163,6 +2207,7 @@ const ACTIONS: &[(&str, &str, &str, &str, &str)] = &[
     ("copy", "", "Copy without pasting", "⌘C", "Entry"),
     ("edit", "", "Edit", "⌘E", "Entry"),
     ("pin", "", "Pin / Unpin", "⌘P", "Entry"),
+    ("favorite", "", "Add to favorites", "⌘D", "Entry"),
     ("slot", "", "Assign quick-paste slot…", "⌘S", "Entry"),
     ("merge", "", "Add to merge", "⌘G", "Entry"),
     ("note", "", "New note from this entry", "⌘J", "Entry"),
@@ -2856,12 +2901,47 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
         for step in steps {
             std::thread::sleep(Duration::from_millis(step_ms));
             let w = weak.clone();
+            let st = state.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
                     // Reset to the list first so each step starts from a known state.
                     ui.set_mode(SharedString::from("list"));
                     ui.set_view(SharedString::from("list"));
                     match step.as_str() {
+                        // Seed a few favorites/quicklinks so the sidebar group shows.
+                        "favorites" => {
+                            if let Ok(store) = st.store.lock() {
+                                let _ = store.add_favorite(
+                                    "quicklink",
+                                    "https://github.com/search?q={query}",
+                                    "GitHub search",
+                                    "gh",
+                                    now_ms(),
+                                );
+                                let _ = store.add_favorite(
+                                    "bookmark",
+                                    "https://github.com/MarkusSagen/magpie",
+                                    "magpie on GitHub",
+                                    "",
+                                    now_ms(),
+                                );
+                            }
+                            refresh(&ui, &st);
+                        }
+                        "quicklink" => {
+                            if let Ok(store) = st.store.lock() {
+                                let _ = store.add_favorite(
+                                    "quicklink",
+                                    "https://github.com/search?q={query}",
+                                    "GitHub search",
+                                    "gh",
+                                    now_ms(),
+                                );
+                            }
+                            let q = SharedString::from("gh rust clipboard");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
                         "actions" => ui.invoke_open_actions(),
                         "filters" => ui.invoke_open_search(),
                         // Filter popover with an active time filter (chip + badge visible).
@@ -4941,6 +5021,84 @@ pub fn start() {
                     let url = e.full_text.trim().to_string();
                     if url.starts_with("http://") || url.starts_with("https://") {
                         open_url_and_hide(&ui, &url);
+                    }
+                }
+            }
+        });
+    }
+    {
+        // ⌘D — favorite / unfavorite the selected clip (a link becomes a bookmark
+        // favorite that opens in the browser; anything else a `clip` that pastes).
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_favorite_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let is_url = e.full_text.trim().starts_with("http://")
+                        || e.full_text.trim().starts_with("https://");
+                    let kind = if is_url { "bookmark" } else { "clip" };
+                    let payload = e.full_text.clone();
+                    let label = e
+                        .full_text
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .map(|l| l.chars().take(40).collect::<String>())
+                        .unwrap_or_else(|| "Favorite".to_string());
+                    if let Ok(st) = s.store.lock() {
+                        let _ = st.toggle_favorite(kind, &payload, &label, now_ms());
+                    }
+                    refresh_favorites(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        // Activate a sidebar favorite: open URLs in the browser, else paste the value.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_activate_favorite(move |id| {
+            if let Some(ui) = w.upgrade() {
+                let fav = s
+                    .store
+                    .lock()
+                    .ok()
+                    .and_then(|st| st.list_favorites().ok())
+                    .and_then(|v| v.into_iter().find(|f| f.id == id as i64));
+                if let Some(f) = fav {
+                    if f.kind == "bookmark" || f.kind == "quicklink" {
+                        let url = magpie_core::favorites::expand_quicklink(&f.payload, "");
+                        open_url_and_hide(&ui, &url);
+                    } else {
+                        if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                            let _ = clip.set_text(&f.payload);
+                        }
+                        hide_launcher(&ui);
+                        let _ = slint::invoke_from_event_loop(|| {
+                            let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                        });
+                    }
+                }
+            }
+        });
+    }
+    {
+        // Quicklink activation: "<keyword> query" → open the expanded target.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_activate_quicklink(move |query| {
+            if let Some(ui) = w.upgrade() {
+                if let Some((kw, rest)) = query.as_str().split_once(' ') {
+                    let f = s
+                        .store
+                        .lock()
+                        .ok()
+                        .and_then(|st| st.favorite_by_keyword(kw).ok().flatten());
+                    if let Some(f) = f {
+                        let target = magpie_core::favorites::expand_quicklink(&f.payload, rest);
+                        open_url_and_hide(&ui, &target);
                     }
                 }
             }

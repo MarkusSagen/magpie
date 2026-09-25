@@ -1,6 +1,6 @@
 import { Theme } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { Palette } from "../types.slint";
+import { Palette, FavoriteRow } from "../types.slint";
 import { HintText } from "keycap.slint";
 
 // One navigation row: icon + label + `G x` hint. Active = `bg-elevated` fill.
@@ -50,6 +50,8 @@ export component Sidebar inherits Rectangle {
     in property <bool> cmd-held;
     in property <bool> screenshare;         // Mask state
     in property <bool> paused;              // capture pause state
+    in property <[FavoriteRow]> favorites;
+    callback activate-favorite(int);
     in property <bool> show-calc-data;      // reveal Calculator (feature flag)
     in property <bool> show-data;           // reveal Data (screens 13/14)
     in property <int> theme-index;
@@ -124,6 +126,30 @@ export component Sidebar inherits Rectangle {
         NavItem {
             label: "Stats"; icon: Icons.tab-stats; hint: "G S"; cmd-held: root.cmd-held;
             active: root.section == "stats"; clicked => { root.set-section("stats"); }
+        }
+
+        // Favorites group (Phase 10): pinned entries / quicklinks.
+        if root.favorites.length > 0: VerticalLayout {
+            padding-top: 12px;
+            spacing: 1px;
+            Text { text: "Favorites"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600;
+                x: 10px; }
+            for f[i] in root.favorites: Rectangle {
+                height: 30px;
+                border-radius: Theme.r-sm;
+                background: favta.has-hover ? Theme.bg-elevated : transparent;
+                favta := TouchArea { clicked => { root.activate-favorite(f.id); } }
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px; spacing: 8px;
+                    VerticalLayout { alignment: center;
+                        Text { text: f.kind == "quicklink" || f.kind == "bookmark" ? "↗" : (f.kind == "note" ? "◇" : (f.kind == "search" ? "⌕" : "★"));
+                            color: Theme.text-faint; font-size: 12px; } }
+                    Text { text: f.label; color: Theme.text-dim; font-size: Theme.fs-body;
+                        vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                    if f.keyword != "": Text { text: f.keyword; color: Theme.text-ghost;
+                        font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+                }
+            }
         }
 
         Rectangle { vertical-stretch: 1; }

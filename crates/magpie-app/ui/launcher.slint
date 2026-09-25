@@ -1,6 +1,6 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette } from "types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow } from "types.slint";
 import { Theme, Pal } from "theme.slint";
 import { Icons } from "icons.slint";
 import { TypeIcon, ActionIcon } from "components/glyphs.slint";
@@ -96,6 +96,13 @@ export component LauncherWindow inherits Window {
     in property <bool> screenshare: false;
     in property <bool> paused: false;
     callback toggle-pause();
+    // Favorites (Phase 10).
+    in property <[FavoriteRow]> favorites;
+    callback activate-favorite(int);
+    callback favorite-selected(); // ⌘D — favorite/unfavorite the current selection
+    in property <bool> has-quicklink;      // query starts with a quicklink keyword + space
+    in property <string> quicklink-hint;   // e.g. "GitHub search → …/search?q=rust"
+    callback activate-quicklink(string);
     in-out property <bool> revealed: false;
     // True while the primary modifier (⌘ on macOS / Ctrl elsewhere) is held —
     in-out property <bool> cmd-held: false;
@@ -182,6 +189,7 @@ export component LauncherWindow inherits Window {
         else if id == "transform" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; }
         else if id == "theme" { root.mode = "settings"; }
         else if id == "open-as-table" { root.open-selected-as-table(); }
+        else if id == "favorite" { root.favorite-selected(); }
     }
     callback open-selected-as-table();
     callback export-data();
@@ -396,6 +404,9 @@ export component LauncherWindow inherits Window {
             filter-count: root.filter-count;
             active-app-name: root.active-app-name;
             active-time-label: root.active-time-label;
+            has-quicklink: root.has-quicklink;
+            quicklink-hint: root.quicklink-hint;
+            activate-quicklink(a0) => { root.activate-quicklink(a0); }
             set-app-filter(a0) => { root.set-app-filter(a0); }
             set-time-filter(a0) => { root.set-time-filter(a0); }
             transform-input <=> root.transform-input;
@@ -450,6 +461,7 @@ export component LauncherWindow inherits Window {
             open-in-editor(a0) => { root.open-in-editor(a0); }
             open-selected-url() => { root.open-selected-url(); }
             bookmark-selected() => { root.bookmark-selected(); }
+            favorite-selected() => { root.favorite-selected(); }
             open-search() => { root.open-search(); }
             open-slots() => { root.open-slots(); }
             over-time-bars: root.over-time-bars;
@@ -673,6 +685,8 @@ export component LauncherWindow inherits Window {
             cmd-held: root.cmd-held;
             screenshare: root.screenshare;
             paused: root.paused;
+            favorites: root.favorites;
+            activate-favorite(a0) => { root.activate-favorite(a0); }
             show-calc-data: true;
             show-data: true;
             theme-index: root.theme-index;

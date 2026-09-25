@@ -38,6 +38,9 @@ export component MainView inherits VerticalLayout {
     callback dismiss-accessibility();
     in property <[EntryRow]> entries;
     in property <bool> filtered;
+    in property <bool> has-quicklink;
+    in property <string> quicklink-hint;
+    callback activate-quicklink(string);
     in property <int> filter-count;
     in property <string> active-app-name;
     in property <string> active-time-label;
@@ -65,6 +68,7 @@ export component MainView inherits VerticalLayout {
     callback open-in-editor(int);
     callback open-selected-url();
     callback bookmark-selected();
+    callback favorite-selected();
     callback open-search();
     callback open-slots();
     in property <[Bar]> over-time-bars;
@@ -191,6 +195,25 @@ export component MainView inherits VerticalLayout {
                                     background: xa2.has-hover ? Theme.line-strong : transparent;
                                     Text { text: "✕"; color: Theme.text-dim; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                     xa2 := TouchArea { clicked => { root.set-time-filter(0); } } }
+                            }
+                        }
+                    }
+                    // Quicklink hint chip (screen: Favorites/Quicklinks): the query
+                    // starts with a keyword, ↵ opens its target.
+                    if root.has-quicklink: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            background: Theme.bg-elevated;
+                            border-radius: Theme.r-sm;
+                            border-width: 1px;
+                            border-color: Theme.accent;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px; spacing: 6px;
+                                Text { text: "↗"; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Text { text: root.quicklink-hint; color: Theme.text; font-size: Theme.fs-sm;
+                                    vertical-alignment: center; overflow: elide; }
+                                Text { text: "↵"; color: Theme.text-faint; font-family: "Geist Mono"; font-size: 11px; vertical-alignment: center; }
                             }
                         }
                     }
@@ -349,6 +372,11 @@ export component MainView inherits VerticalLayout {
                                     }
                                     // everything else falls through to native text editing
                                 }
+                                // ---- quicklink: ↵ opens the keyword's target ----
+                                if root.has-quicklink && event.text == Key.Return {
+                                    root.activate-quicklink(root.query);
+                                    return accept;
+                                }
                                 // ---- inline answer card: Tab cycles format, ↵ pastes, ⌘C copies ----
                                 if root.has-answer && root.answer-formats.length > 0 {
                                     if event.text == Key.Tab {
@@ -391,6 +419,7 @@ export component MainView inherits VerticalLayout {
                                     if event.text == Key.Backspace { root.delete-entry(root.selected); return accept; }
                                     if event.text == "c" { root.copy-only(root.selected); return accept; }
                                     if event.text == "o" { root.open-selected-url(); return accept; }
+                                    if event.text == "d" { root.favorite-selected(); return accept; }
                                     if event.text == "k" { root.open-actions(); return accept; }
                                     if event.text == "s" { root.open-slots(); return accept; }
                                     // ⌘⇧F — "Find everywhere": must be checked before the

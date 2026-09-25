@@ -20,6 +20,7 @@ pub mod detect;
 pub mod edit;
 pub mod eval;
 pub mod export;
+pub mod favorites;
 pub mod mask_support;
 pub mod mathsvg;
 pub mod merge;
