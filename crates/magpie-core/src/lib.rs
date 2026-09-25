@@ -16,6 +16,7 @@
 pub mod bookmarks;
 pub mod calc_history;
 pub mod case;
+pub mod color;
 pub mod delete;
 pub mod detect;
 pub mod edit;

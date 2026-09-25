@@ -837,6 +837,12 @@ enum UnitDomain {
     Mass,
     Time,
     Temp,
+    DataSize,
+    Speed,
+    Area,
+    Volume,
+    Angle,
+    Energy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -973,8 +979,105 @@ fn unit_from_word(w: &str) -> Option<UnitDef> {
             to_base: Rat::int(2),
             name: "k",
         },
+
+        // ---- Data size (base: bytes). Decimal (10³) vs binary (2¹⁰). ----
+        "b" | "byte" | "bytes" => dsize(Rat::int(1), "B"),
+        "kb" | "kilobyte" | "kilobytes" => dsize(Rat::int(1000), "KB"),
+        "mb" | "megabyte" | "megabytes" => dsize(Rat::int(1_000_000), "MB"),
+        "gb" | "gigabyte" | "gigabytes" => dsize(Rat::int(1_000_000_000), "GB"),
+        "tb" | "terabyte" | "terabytes" => dsize(Rat::int(1_000_000_000_000), "TB"),
+        "kib" | "kibibyte" | "kibibytes" => dsize(Rat::int(1024), "KiB"),
+        "mib" | "mebibyte" | "mebibytes" => dsize(Rat::int(1_048_576), "MiB"),
+        "gib" | "gibibyte" | "gibibytes" => dsize(Rat::int(1_073_741_824), "GiB"),
+        "tib" | "tebibyte" | "tebibytes" => dsize(Rat::int(1_099_511_627_776), "TiB"),
+
+        // ---- Speed (base: m/s). ----
+        "m/s" | "mps" => speed(Rat::int(1), "m/s"),
+        "km/h" | "kmh" | "kph" => speed(Rat::new(5, 18).unwrap(), "km/h"),
+        "mph" => speed(Rat::new(1397, 3125).unwrap(), "mph"), // 0.44704 m/s exactly
+        "knot" | "knots" | "kn" => speed(Rat::new(463, 900).unwrap(), "kn"), // 1852/3600
+        "ft/s" | "fps" => speed(Rat::new(381, 1250).unwrap(), "ft/s"), // 0.3048 m/s
+
+        // ---- Area (base: m²). ----
+        "m2" | "m²" | "sqm" => area(Rat::int(1), "m²"),
+        "cm2" | "cm²" => area(Rat::new(1, 10000).unwrap(), "cm²"),
+        "km2" | "km²" => area(Rat::int(1_000_000), "km²"),
+        "ha" | "hectare" | "hectares" => area(Rat::int(10_000), "ha"),
+        "acre" | "acres" => area(Rat::new(40_468_564_224, 10_000_000).unwrap(), "acre"), // 4046.8564224 m²
+        "ft2" | "ft²" | "sqft" => area(Rat::new(9_290_304, 100_000_000).unwrap(), "ft²"), // 0.09290304 m²
+
+        // ---- Volume (base: litre). ----
+        "ml" | "milliliter" | "millilitre" => vol(Rat::new(1, 1000).unwrap(), "ml"),
+        "l" | "liter" | "litre" | "liters" | "litres" => vol(Rat::int(1), "l"),
+        "cl" | "centiliter" => vol(Rat::new(1, 100).unwrap(), "cl"),
+        "dl" | "deciliter" => vol(Rat::new(1, 10).unwrap(), "dl"),
+        "gal" | "gallon" | "gallons" => vol(Rat::new(454_609, 100_000).unwrap(), "gal"), // UK gallon 4.54609 l
+        "usgal" => vol(Rat::new(3_785_411_784, 1_000_000_000).unwrap(), "US gal"),
+        "cup" | "cups" => vol(Rat::new(473_176_473, 2_000_000_000).unwrap(), "cup"), // US cup 236.588 ml
+        "tbsp" => vol(Rat::new(295_735_296, 20_000_000_000).unwrap(), "tbsp"),
+        "tsp" => vol(Rat::new(295_735_296, 60_000_000_000).unwrap(), "tsp"),
+
+        // ---- Angle (base: radian, using a rational π approximation is lossy, so
+        //      store degrees as base and let radians decay to float on convert). ----
+        "deg" | "degree" | "degrees" | "°" => angle(Rat::int(1), "°"),
+        // 1 rad = 180/π ≈ 57.29577951° (rational approximation — π is irrational).
+        "rad" | "radian" | "radians" => angle(Rat::new(5_729_577_951, 100_000_000).unwrap(), "rad"),
+        "grad" | "gon" => angle(Rat::new(9, 10).unwrap(), "grad"),
+        "turn" | "turns" => angle(Rat::int(360), "turn"),
+
+        // ---- Energy (base: joule). ----
+        "j" | "joule" | "joules" => energy(Rat::int(1), "J"),
+        "kj" | "kilojoule" | "kilojoules" => energy(Rat::int(1000), "kJ"),
+        "cal" | "calorie" | "calories" => energy(Rat::new(4184, 1000).unwrap(), "cal"),
+        "kcal" | "kilocalorie" | "kilocalories" => energy(Rat::new(4184, 1).unwrap(), "kcal"),
+        "wh" | "watthour" => energy(Rat::int(3600), "Wh"),
+        "kwh" | "kilowatthour" => energy(Rat::int(3_600_000), "kWh"),
+
         _ => return None,
     })
+}
+
+fn dsize(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::DataSize,
+        to_base,
+        name,
+    }
+}
+fn speed(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::Speed,
+        to_base,
+        name,
+    }
+}
+fn area(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::Area,
+        to_base,
+        name,
+    }
+}
+fn vol(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::Volume,
+        to_base,
+        name,
+    }
+}
+fn angle(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::Angle,
+        to_base,
+        name,
+    }
+}
+fn energy(to_base: Rat, name: &'static str) -> UnitDef {
+    UnitDef {
+        domain: UnitDomain::Energy,
+        to_base,
+        name,
+    }
 }
 
 fn convert_units(value: Num, from: UnitDef, to: UnitDef) -> Result<Num, String> {
@@ -3178,6 +3281,51 @@ mod tests {
     fn unit_lb_to_kg() {
         let a = ans("2 lb in kg");
         assert!(a.display.starts_with("\u{2248} 0.907185"), "{}", a.display);
+    }
+
+    #[test]
+    fn unit_data_size_decimal_vs_binary() {
+        // Decimal: 1 GB = 1000 MB exactly.
+        let a = ans("1 gb in mb");
+        assert_eq!(a.kind, AnswerKind::Unit);
+        assert!(
+            a.display.contains("1000") && a.display.ends_with("MB"),
+            "{}",
+            a.display
+        );
+        // Binary: 1 GiB = 1024 MiB exactly.
+        let b = ans("1 gib in mib");
+        assert!(
+            b.display.contains("1024") && b.display.ends_with("MiB"),
+            "{}",
+            b.display
+        );
+    }
+
+    #[test]
+    fn unit_speed_volume_energy_convert() {
+        let a = ans("100 kmh in mph");
+        assert_eq!(a.kind, AnswerKind::Unit);
+        assert!(a.display.contains("62."), "{}", a.display); // ≈ 62.137 mph
+        let v = ans("2 l in ml");
+        assert!(
+            v.display.contains("2000") && v.display.ends_with("ml"),
+            "{}",
+            v.display
+        );
+        let e = ans("1 kwh in kj");
+        assert!(
+            e.display.contains("3600") && e.display.ends_with("kJ"),
+            "{}",
+            e.display
+        );
+    }
+
+    #[test]
+    fn unit_angle_degrees_to_radians() {
+        let a = ans("180 deg in rad");
+        assert_eq!(a.kind, AnswerKind::Unit);
+        assert!(a.display.contains("3.14"), "{}", a.display);
     }
 
     #[test]

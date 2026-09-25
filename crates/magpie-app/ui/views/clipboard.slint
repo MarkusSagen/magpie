@@ -29,6 +29,10 @@ export component ClipboardView inherits VerticalLayout {
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-color;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
     in property <bool> preview-is-link;
     in property <string> preview-domain;
     in property <image> preview-link-image;
@@ -61,6 +65,7 @@ export component ClipboardView inherits VerticalLayout {
     in property <string> answer-explanation;
     in property <[string]> answer-formats;
     in property <int> answer-format-index;
+    in property <bool> answer-random;
                 spacing: Theme.sp2;
 
                 // Inline answer card (dates / math / units) above the results.
@@ -70,6 +75,7 @@ export component ClipboardView inherits VerticalLayout {
                     explanation: root.answer-explanation;
                     formats: root.answer-formats;
                     format-index: root.answer-format-index;
+                    is-random: root.answer-random;
                 }
 
                 // Row 1 — filter + sort the clipboard list.
@@ -539,17 +545,31 @@ export component ClipboardView inherits VerticalLayout {
                                     height: parent.height;
                                     image-fit: contain;
                                 }
-                                // Colour entries: a large swatch above the value, so
-                                // "#333" is something you can actually see.
+                                // Colour entries (screen 17): swatch + format strings +
+                                // an OKLCH tint/shade scale + complement/triad harmonies.
                                 if !root.preview-has-image && root.selected < entries.length && entries[root.selected].has-swatch: VerticalLayout {
-                                    spacing: 8px;
+                                    spacing: 10px;
                                     alignment: start;
                                     Rectangle {
-                                        height: 72px;
-                                        border-radius: 8px;
+                                        height: 96px;
+                                        border-radius: Theme.r-md;
                                         background: entries[root.selected].swatch;
                                         border-width: 1px;
-                                        border-color: Theme.text-faint;
+                                        border-color: Theme.line-strong;
+                                    }
+                                    // Format strings (hex / rgb / hsl / oklch).
+                                    for f in root.color-formats: Text {
+                                        text: f; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                    }
+                                    if root.color-scale.length > 0: Text { text: "Scale"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    if root.color-scale.length > 0: HorizontalLayout {
+                                        spacing: 0px; height: 28px;
+                                        for c in root.color-scale: Rectangle { background: c; horizontal-stretch: 1; }
+                                    }
+                                    if root.color-harmony.length > 0: Text { text: "Complement · Triad"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    if root.color-harmony.length > 0: HorizontalLayout {
+                                        spacing: 6px; height: 28px; alignment: start;
+                                        for c in root.color-harmony: Rectangle { width: 40px; background: c; border-radius: Theme.r-xs; border-width: 1px; border-color: Theme.line; }
                                     }
                                 }
                                 // Normal-size entries: a selectable, scrollable,
@@ -557,8 +577,8 @@ export component ClipboardView inherits VerticalLayout {
                                 // Plain TextInput (not std TextEdit) so we control the
                                 // text color — the themed TextEdit rendered invisibly
                                 // on the dark pane.
-                                if !root.preview-has-image && root.preview-text != "": Flickable {
-                                    y: (root.selected < entries.length && entries[root.selected].has-swatch) ? 88px : 0px;
+                                if !root.preview-has-image && root.preview-text != "" && !(root.selected < entries.length && entries[root.selected].has-swatch): Flickable {
+                                    y: 0px;
                                     viewport-width: self.width;
                                     viewport-height: pvtext.preferred-height;
                                     pvtext := TextInput {
@@ -628,7 +648,7 @@ export component ClipboardView inherits VerticalLayout {
                             // window the block used to absorb the slack and its rows
                             // drifted apart unevenly. All spare height belongs to the
                             // preview area above.
-                            if entries.length > 0 && root.selected < entries.length: VerticalLayout {
+                            if entries.length > 0 && root.selected < entries.length && !root.preview-is-color: VerticalLayout {
                                 spacing: 5px;
                                 vertical-stretch: 0;
                                 alignment: start;

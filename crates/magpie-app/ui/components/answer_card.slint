@@ -9,6 +9,9 @@ export component AnswerCard inherits Rectangle {
     in property <string> explanation;
     in property <[string]> formats;
     in property <int> format-index;
+    // Random generators (Phase 13): the candidates are ephemeral — never saved —
+    // so the header must NOT claim "saved to history".
+    in property <bool> is-random;
     // Math typesetting (Phase 8) — off by default so the clipboard card is unchanged.
     in property <bool> show-syntax-toggle;
     in property <bool> math-has;
@@ -54,7 +57,7 @@ export component AnswerCard inherits Rectangle {
                 }
             }
             if !root.show-syntax-toggle: Text {
-                text: "Saved to Calculator history";
+                text: root.is-random ? "Never saved — press ↵ to paste" : "Saved to Calculator history";
                 color: Theme.text-faint;
                 font-size: Theme.fs-xs;
                 vertical-alignment: center;

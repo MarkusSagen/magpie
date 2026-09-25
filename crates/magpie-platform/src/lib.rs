@@ -15,6 +15,7 @@ pub use os::accessibility::{
     accessibility_trusted, open_accessibility_settings, prompt_accessibility,
 };
 pub use os::db_key::db_key;
+pub use os::entropy::{random_bytes, random_u64};
 pub use os::factory::{platform_autostart, platform_clipboard};
 pub use os::notify::{
     cancel_scheduled_reminders, install_notification_delegate, notify,

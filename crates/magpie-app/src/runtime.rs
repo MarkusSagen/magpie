@@ -557,10 +557,136 @@ fn set_answer_card(ui: &LauncherWindow, query: &str) {
             if ui.get_answer_format_index() >= n.max(1) {
                 ui.set_answer_format_index(0);
             }
+            ui.set_answer_random(false);
             ui.set_has_answer(n > 0);
         }
+        // Not a date/math answer — is it a random-generation request?
+        _ if set_random_answer(ui, query) => {}
         _ => ui.set_has_answer(false),
     }
+}
+
+/// If `query` is a random-generation command (`password 24`, `uuid`, `2d6`,
+/// `random 1-100`, `coin`), populate the inline answer card with fresh candidates
+/// (drawn from the OS CSPRNG) and return `true`. Tab cycles the candidates (a
+/// re-roll) and ↵ pastes the selected one — passwords never touch history unless
+/// pasted. Returns `false` when the query is not a generator command.
+fn set_random_answer(ui: &LauncherWindow, query: &str) -> bool {
+    use magpie_core::random::{self as rnd, RandomRequest};
+    let Some(req) = rnd::parse_random_request(query) else {
+        return false;
+    };
+    // How many candidate chips to offer (Tab re-rolls through them).
+    let (kind, explanation, candidates): (String, String, Vec<String>) = match req {
+        RandomRequest::Password { len, opts } => {
+            let mut sets = Vec::new();
+            if opts.letters {
+                sets.push("letters");
+            }
+            if opts.digits {
+                sets.push("digits");
+            }
+            if opts.symbols {
+                sets.push("symbols");
+            }
+            let cands = (0..5)
+                .map(|_| rnd::password(&magpie_platform::random_bytes(len.max(1)), len, &opts))
+                .collect();
+            (
+                "Random · password".into(),
+                format!("{len} chars · {} · Tab to re-roll", sets.join(" + ")),
+                cands,
+            )
+        }
+        RandomRequest::Uuid => {
+            let cands = (0..5)
+                .map(|_| {
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&magpie_platform::random_bytes(16));
+                    rnd::uuid_v4(b)
+                })
+                .collect();
+            (
+                "Random · UUID v4".into(),
+                "RFC 4122 · Tab to re-roll".into(),
+                cands,
+            )
+        }
+        RandomRequest::IntRange { lo, hi } => {
+            let cands = (0..6)
+                .map(|_| rnd::int_in_range(magpie_platform::random_u64(), lo, hi).to_string())
+                .collect();
+            (
+                "Random · number".into(),
+                format!("integer in [{lo}, {hi}] · Tab to re-roll"),
+                cands,
+            )
+        }
+        RandomRequest::FloatRange { lo, hi } => {
+            let cands = (0..6)
+                .map(|_| {
+                    format!(
+                        "{:.4}",
+                        rnd::float_in_range(magpie_platform::random_u64(), lo, hi)
+                    )
+                })
+                .collect();
+            (
+                "Random · number".into(),
+                format!("float in [{lo}, {hi}) · Tab to re-roll"),
+                cands,
+            )
+        }
+        RandomRequest::Dice { count, sides } => {
+            let roll = || -> String {
+                let dice: Vec<i64> = (0..count)
+                    .map(|_| rnd::int_in_range(magpie_platform::random_u64(), 1, sides))
+                    .collect();
+                if count == 1 {
+                    dice[0].to_string()
+                } else {
+                    let sum: i64 = dice.iter().sum();
+                    let parts: Vec<String> = dice.iter().map(|d| d.to_string()).collect();
+                    format!("{sum}  ({})", parts.join(" + "))
+                }
+            };
+            let cands = (0..6).map(|_| roll()).collect();
+            (
+                format!("Random · {count}d{sides}"),
+                "Tab to re-roll".into(),
+                cands,
+            )
+        }
+        RandomRequest::Coin => {
+            let cands = (0..6)
+                .map(|_| {
+                    if magpie_platform::random_u64() & 1 == 0 {
+                        "Heads".to_string()
+                    } else {
+                        "Tails".to_string()
+                    }
+                })
+                .collect();
+            (
+                "Random · coin flip".into(),
+                "Tab to flip again".into(),
+                cands,
+            )
+        }
+    };
+    let display = candidates.first().cloned().unwrap_or_default();
+    let chips: Vec<SharedString> = candidates.into_iter().map(SharedString::from).collect();
+    let n = chips.len() as i32;
+    ui.set_answer_kind(SharedString::from(kind));
+    ui.set_answer_display(SharedString::from(display));
+    ui.set_answer_explanation(SharedString::from(explanation));
+    ui.set_answer_formats(ModelRc::new(VecModel::from(chips)));
+    if ui.get_answer_format_index() >= n.max(1) {
+        ui.set_answer_format_index(0);
+    }
+    ui.set_answer_random(true);
+    ui.set_has_answer(n > 0);
+    n > 0
 }
 
 /// A built-in sample dataset (NASA planetary fact sheet) shown the first time the
@@ -3014,6 +3140,13 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Random generator (Phase 13): a password request → candidate
+                        // chips (Tab re-rolls, ↵ pastes the selected one).
+                        "random" => {
+                            let q = SharedString::from("password 24");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
                         // Data view: the typed grid (13), optionally with the chart (14).
                         "data" => {
                             ui.invoke_set_section(SharedString::from("data"));
@@ -3728,12 +3861,46 @@ pub fn start() {
                 }
                 _ => (false, String::new(), slint::Image::default(), false),
             };
+            // Colour card (screen 17): scale + harmonies + format strings.
+            let to_slint = |c: magpie_core::color::Color| {
+                let (r, g, b) = c.rgb_u8();
+                slint::Color::from_rgb_u8(r, g, b)
+            };
+            let (is_color, cscale, charmony, cformats) = match entry {
+                Some(e) if !masked || revealed => match magpie_core::color::parse(&e.full_text) {
+                    Some(c) => {
+                        let scale: Vec<slint::Color> = magpie_core::color::scale(c)
+                            .into_iter()
+                            .map(to_slint)
+                            .collect();
+                        let (t1, t2) = magpie_core::color::triad(c);
+                        let harmony: Vec<slint::Color> =
+                            [magpie_core::color::complement(c), t1, t2]
+                                .into_iter()
+                                .map(to_slint)
+                                .collect();
+                        let formats: Vec<SharedString> = vec![
+                            SharedString::from(c.to_hex()),
+                            SharedString::from(c.to_rgb_string()),
+                            SharedString::from(c.to_hsl_string()),
+                            SharedString::from(c.to_oklch_string()),
+                        ];
+                        (true, scale, harmony, formats)
+                    }
+                    None => (false, Vec::new(), Vec::new(), Vec::new()),
+                },
+                _ => (false, Vec::new(), Vec::new(), Vec::new()),
+            };
             if let Some(ui) = w.upgrade() {
                 ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
                 ui.set_preview_truncated(truncated);
                 ui.set_preview_text(SharedString::from(selectable));
                 ui.set_preview_image(preview_image);
                 ui.set_preview_has_image(has_preview_image);
+                ui.set_preview_is_color(is_color);
+                ui.set_color_scale(ModelRc::new(VecModel::from(cscale)));
+                ui.set_color_harmony(ModelRc::new(VecModel::from(charmony)));
+                ui.set_color_formats(ModelRc::new(VecModel::from(cformats)));
                 ui.set_preview_is_link(is_link);
                 ui.set_preview_domain(SharedString::from(link_domain));
                 ui.set_preview_link_image(link_image);

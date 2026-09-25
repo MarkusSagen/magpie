@@ -78,6 +78,10 @@ export component MainView inherits VerticalLayout {
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-color;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
     in property <bool> preview-is-link;
     in property <string> preview-domain;
     in property <image> preview-link-image;
@@ -134,6 +138,7 @@ export component MainView inherits VerticalLayout {
     in-out property <string> answer-explanation;
     in-out property <[string]> answer-formats;
     in-out property <int> answer-format-index;
+    in-out property <bool> answer-random;
     forward-focus: searchinput;
     public function focus-input() { searchinput.focus(); }
             // Inset to the right of the sidebar via left padding (see the note
@@ -513,6 +518,7 @@ export component MainView inherits VerticalLayout {
                 answer-explanation: root.answer-explanation;
                 answer-formats: root.answer-formats;
                 answer-format-index: root.answer-format-index;
+                answer-random: root.answer-random;
                 activate(a0) => { root.activate(a0); }
                 add-tag(a0, a1) => { root.add-tag(a0, a1); }
                 add-tag-text <=> root.add-tag-text;
@@ -533,6 +539,10 @@ export component MainView inherits VerticalLayout {
                 preview-font-size <=> root.preview-font-size;
                 preview-has-image: root.preview-has-image;
                 preview-image: root.preview-image;
+                preview-is-color: root.preview-is-color;
+                color-scale: root.color-scale;
+                color-harmony: root.color-harmony;
+                color-formats: root.color-formats;
                 preview-is-link: root.preview-is-link;
                 preview-domain: root.preview-domain;
                 preview-link-image: root.preview-link-image;

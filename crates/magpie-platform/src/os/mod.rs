@@ -1,5 +1,6 @@
 pub mod accessibility;
 pub mod db_key;
+pub mod entropy;
 pub mod hotkeys;
 pub mod notify;
 pub mod paste;

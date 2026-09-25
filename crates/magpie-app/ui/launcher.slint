@@ -70,6 +70,7 @@ export component LauncherWindow inherits Window {
     in-out property <string> answer-explanation;
     in-out property <[string]> answer-formats;
     in-out property <int> answer-format-index;
+    in-out property <bool> answer-random;
     init => { Theme.index = root.theme-index; }
     changed theme-index => { Theme.index = root.theme-index; }
 
@@ -132,6 +133,11 @@ export component LauncherWindow inherits Window {
     // Image entries: the decoded bitmap for the selected entry. Without this the
     in property <image> preview-image;
     in property <bool> preview-has-image: false;
+    // Colour preview (screen 17): scale + harmonies + format strings for a colour entry.
+    in property <bool> preview-is-color: false;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
     // Web-link preview (screen 04): domain, and a cached OG thumbnail if bookmarked.
     in property <bool> preview-is-link: false;
     in property <string> preview-domain;
@@ -416,6 +422,7 @@ export component LauncherWindow inherits Window {
             answer-explanation <=> root.answer-explanation;
             answer-formats <=> root.answer-formats;
             answer-format-index <=> root.answer-format-index;
+            answer-random <=> root.answer-random;
             action-selected <=> root.action-selected;
             actions: root.actions;
             actions-backspace() => { root.actions-backspace(); }
@@ -471,6 +478,10 @@ export component LauncherWindow inherits Window {
             preview-font-size <=> root.preview-font-size;
             preview-has-image: root.preview-has-image;
             preview-image: root.preview-image;
+            preview-is-color: root.preview-is-color;
+            color-scale: root.color-scale;
+            color-harmony: root.color-harmony;
+            color-formats: root.color-formats;
             preview-is-link: root.preview-is-link;
             preview-domain: root.preview-domain;
             preview-link-image: root.preview-link-image;

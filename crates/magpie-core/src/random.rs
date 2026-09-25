@@ -99,9 +99,306 @@ pub fn passphrase(indices: &[usize], wordlist: &[&str], sep: &str) -> String {
         .join(sep)
 }
 
+/// A parsed random-generation request recognised from the launcher search box.
+/// Parsing is pure and total; the app turns a request into a result by supplying
+/// OS entropy (see `magpie-app`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RandomRequest {
+    Password { len: usize, opts: PasswordOpts },
+    Uuid,
+    IntRange { lo: i64, hi: i64 },
+    FloatRange { lo: f64, hi: f64 },
+    Dice { count: u32, sides: i64 },
+    Coin,
+}
+
+/// The default password length when the user types just `password`.
+pub const DEFAULT_PASSWORD_LEN: usize = 20;
+
+/// `NdM` dice spec (e.g. `2d6`, `d20`) → `(count, sides)`. `d20` means one d20.
+fn parse_dice_token(tok: &str) -> Option<(u32, i64)> {
+    let (a, b) = tok.split_once('d')?;
+    let count: u32 = if a.is_empty() { 1 } else { a.parse().ok()? };
+    let sides: i64 = b.parse().ok()?;
+    if count == 0 || count > 1000 || !(2..=1_000_000).contains(&sides) {
+        return None;
+    }
+    Some((count, sides))
+}
+
+/// Recognise a random-generation request in `query`, or `None` if the text is not
+/// a generator command. Deliberately strict — every non-numeric token must be a
+/// known keyword — so ordinary searches like `password manager` are NOT hijacked.
+pub fn parse_random_request(query: &str) -> Option<RandomRequest> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    let joined: String = q.split_whitespace().collect();
+    let toks: Vec<&str> = q.split_whitespace().collect();
+
+    // Coin flip.
+    if matches!(
+        joined.as_str(),
+        "coin" | "coinflip" | "flipcoin" | "flipacoin" | "headsortails"
+    ) {
+        return Some(RandomRequest::Coin);
+    }
+    if toks.first() == Some(&"flip") && (toks.len() == 1 || joined.contains("coin")) {
+        return Some(RandomRequest::Coin);
+    }
+
+    // UUID / GUID.
+    if matches!(
+        joined.as_str(),
+        "uuid" | "guid" | "uuidv4" | "guidv4" | "uuid4"
+    ) {
+        return Some(RandomRequest::Uuid);
+    }
+
+    // Dice: `2d6`, `d20`, or `roll`/`dice`/`die [NdM]`.
+    if let Some((c, s)) = parse_dice_token(&joined) {
+        return Some(RandomRequest::Dice { count: c, sides: s });
+    }
+    if matches!(toks.first(), Some(&"roll") | Some(&"dice") | Some(&"die")) {
+        let spec = toks
+            .iter()
+            .skip(1)
+            .find_map(|t| parse_dice_token(t))
+            .unwrap_or((1, 6));
+        return Some(RandomRequest::Dice {
+            count: spec.0,
+            sides: spec.1,
+        });
+    }
+
+    // Password: first token a password keyword; every remaining token must be a
+    // length or a recognised option word (else it is an ordinary search).
+    let pw_head = matches!(
+        toks.first(),
+        Some(&"password") | Some(&"passwd") | Some(&"pw")
+    ) || (toks.len() >= 2
+        && matches!(toks[0], "generate" | "random" | "new")
+        && matches!(toks[1], "password" | "passwd" | "pw"));
+    if pw_head {
+        let start = if matches!(toks[0], "generate" | "random" | "new") {
+            2
+        } else {
+            1
+        };
+        let mut len = DEFAULT_PASSWORD_LEN;
+        // Enabled sets. Once the user names a set explicitly, we switch from the
+        // default (all on) to only the named sets; `explicit_sets` marks that flip.
+        let mut letters = true;
+        let mut digits = true;
+        let mut symbols = true;
+        let mut explicit_sets = false;
+        // Turn on `which` as an explicit set: the first explicit keyword clears the
+        // all-on default first (without a dead store on `which` itself).
+        let mut enable =
+            |which: char, letters: &mut bool, digits: &mut bool, symbols: &mut bool| {
+                if !explicit_sets {
+                    *letters = false;
+                    *digits = false;
+                    *symbols = false;
+                    explicit_sets = true;
+                }
+                match which {
+                    'l' => *letters = true,
+                    'd' => *digits = true,
+                    's' => *symbols = true,
+                    _ => {}
+                }
+            };
+        let mut i = start;
+        while i < toks.len() {
+            let t = toks[i];
+            if let Ok(n) = t.parse::<usize>() {
+                len = n.clamp(4, 256);
+            } else if t == "no" && i + 1 < toks.len() {
+                match toks[i + 1] {
+                    "symbols" | "symbol" | "special" | "punctuation" => symbols = false,
+                    "digits" | "numbers" | "numeric" => digits = false,
+                    "letters" | "alpha" => letters = false,
+                    _ => return None,
+                }
+                i += 1;
+            } else {
+                match t {
+                    "letters" | "alpha" => enable('l', &mut letters, &mut digits, &mut symbols),
+                    "digits" | "numbers" | "numeric" => {
+                        enable('d', &mut letters, &mut digits, &mut symbols)
+                    }
+                    "symbols" | "symbol" | "special" => {
+                        enable('s', &mut letters, &mut digits, &mut symbols)
+                    }
+                    "alnum" | "alphanumeric" => {
+                        enable('l', &mut letters, &mut digits, &mut symbols);
+                        enable('d', &mut letters, &mut digits, &mut symbols);
+                        symbols = false;
+                    }
+                    "chars" | "char" | "characters" | "long" => {} // filler words
+                    _ => return None,
+                }
+            }
+            i += 1;
+        }
+        return Some(RandomRequest::Password {
+            len,
+            opts: PasswordOpts {
+                letters,
+                digits,
+                symbols,
+            },
+        });
+    }
+
+    // Numeric range: needs a `random`/`rand`/`rng` keyword. Bare keyword → 1..100.
+    let has_rand_kw = toks.iter().any(|t| matches!(*t, "random" | "rand" | "rng"));
+    if has_rand_kw {
+        let nums: Vec<&str> = toks
+            .iter()
+            .copied()
+            .filter(|t| {
+                !matches!(
+                    *t,
+                    "random" | "rand" | "rng" | "between" | "and" | "to" | "-"
+                )
+            })
+            .collect();
+        if nums.is_empty() {
+            return Some(RandomRequest::IntRange { lo: 1, hi: 100 });
+        }
+        // A single `a-b` token, or two separate numeric tokens.
+        let pair: Option<(String, String)> = if nums.len() == 1 {
+            nums[0]
+                .split_once('-')
+                .filter(|(a, b)| !a.is_empty() && !b.is_empty())
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+        } else if nums.len() == 2 {
+            Some((nums[0].to_string(), nums[1].to_string()))
+        } else {
+            None
+        };
+        if let Some((a, b)) = pair {
+            let is_float = a.contains('.') || b.contains('.');
+            if is_float {
+                if let (Ok(lo), Ok(hi)) = (a.parse::<f64>(), b.parse::<f64>()) {
+                    return Some(RandomRequest::FloatRange { lo, hi });
+                }
+            } else if let (Ok(lo), Ok(hi)) = (a.parse::<i64>(), b.parse::<i64>()) {
+                return Some(RandomRequest::IntRange { lo, hi });
+            }
+            return None;
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_password_requests() {
+        assert_eq!(
+            parse_random_request("password"),
+            Some(RandomRequest::Password {
+                len: DEFAULT_PASSWORD_LEN,
+                opts: PasswordOpts::default()
+            })
+        );
+        assert_eq!(
+            parse_random_request("password 32"),
+            Some(RandomRequest::Password {
+                len: 32,
+                opts: PasswordOpts::default()
+            })
+        );
+        // Explicit sets narrow the charset.
+        assert_eq!(
+            parse_random_request("password 16 letters digits"),
+            Some(RandomRequest::Password {
+                len: 16,
+                opts: PasswordOpts {
+                    letters: true,
+                    digits: true,
+                    symbols: false
+                }
+            })
+        );
+        assert_eq!(
+            parse_random_request("password no symbols"),
+            Some(RandomRequest::Password {
+                len: DEFAULT_PASSWORD_LEN,
+                opts: PasswordOpts {
+                    letters: true,
+                    digits: true,
+                    symbols: false
+                }
+            })
+        );
+        // Ordinary searches are NOT hijacked.
+        assert_eq!(parse_random_request("password manager"), None);
+        assert_eq!(parse_random_request("my passwords"), None);
+    }
+
+    #[test]
+    fn parse_uuid_dice_coin() {
+        assert_eq!(parse_random_request("uuid"), Some(RandomRequest::Uuid));
+        assert_eq!(parse_random_request("GUID"), Some(RandomRequest::Uuid));
+        assert_eq!(
+            parse_random_request("2d6"),
+            Some(RandomRequest::Dice { count: 2, sides: 6 })
+        );
+        assert_eq!(
+            parse_random_request("d20"),
+            Some(RandomRequest::Dice {
+                count: 1,
+                sides: 20
+            })
+        );
+        assert_eq!(
+            parse_random_request("roll"),
+            Some(RandomRequest::Dice { count: 1, sides: 6 })
+        );
+        assert_eq!(
+            parse_random_request("roll 3d8"),
+            Some(RandomRequest::Dice { count: 3, sides: 8 })
+        );
+        assert_eq!(parse_random_request("coin flip"), Some(RandomRequest::Coin));
+        assert_eq!(parse_random_request("flip"), Some(RandomRequest::Coin));
+    }
+
+    #[test]
+    fn parse_ranges() {
+        assert_eq!(
+            parse_random_request("random 1-100"),
+            Some(RandomRequest::IntRange { lo: 1, hi: 100 })
+        );
+        assert_eq!(
+            parse_random_request("rand 5 10"),
+            Some(RandomRequest::IntRange { lo: 5, hi: 10 })
+        );
+        assert_eq!(
+            parse_random_request("random between 1 and 6"),
+            Some(RandomRequest::IntRange { lo: 1, hi: 6 })
+        );
+        assert_eq!(
+            parse_random_request("random"),
+            Some(RandomRequest::IntRange { lo: 1, hi: 100 })
+        );
+        match parse_random_request("random 0.0-1.0") {
+            Some(RandomRequest::FloatRange { lo, hi }) => {
+                assert_eq!(lo, 0.0);
+                assert_eq!(hi, 1.0);
+            }
+            other => panic!("expected float range, got {other:?}"),
+        }
+        // Not a generator command.
+        assert_eq!(parse_random_request("random thoughts"), None);
+    }
 
     #[test]
     fn password_length_and_charset() {
