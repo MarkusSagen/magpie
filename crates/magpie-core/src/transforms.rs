@@ -33,6 +33,24 @@ pub enum TransformKind {
     Hash,
     Qr,
     Count,
+    // Case conversions (Phase 13) — index into `case::all_cases`.
+    CaseCamel,
+    CasePascal,
+    CaseSnake,
+    CaseKebab,
+    CaseScreaming,
+    CaseTrain,
+    CaseTitle,
+    CaseUpper,
+    CaseLower,
+}
+
+/// Apply case style `n` (0..9, order of `case::all_cases`) to `input`.
+fn case_n(input: &str, n: usize) -> Result<String, TransformError> {
+    Ok(crate::case::all_cases(input)
+        .get(n)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -908,7 +926,7 @@ pub fn count(input: &str) -> Result<String, TransformError> {
 }
 
 /// The transform catalogue in UI order (matches the ⌘T palette / spec grouping).
-pub const KINDS: [TransformKind; 9] = [
+pub const KINDS: [TransformKind; 18] = [
     TransformKind::SqlInClause,
     TransformKind::WrapJoin,
     TransformKind::SortUniqueTrim,
@@ -918,6 +936,15 @@ pub const KINDS: [TransformKind; 9] = [
     TransformKind::Hash,
     TransformKind::Count,
     TransformKind::Qr,
+    TransformKind::CaseCamel,
+    TransformKind::CasePascal,
+    TransformKind::CaseSnake,
+    TransformKind::CaseKebab,
+    TransformKind::CaseScreaming,
+    TransformKind::CaseTrain,
+    TransformKind::CaseTitle,
+    TransformKind::CaseUpper,
+    TransformKind::CaseLower,
 ];
 
 /// Apply a transform with its default options (UI convenience dispatcher).
@@ -932,6 +959,15 @@ pub fn run(kind: TransformKind, input: &str) -> Result<String, TransformError> {
         TransformKind::Hash => hash(input, &HashOptions::default()),
         TransformKind::Qr => qr(input),
         TransformKind::Count => count(input),
+        TransformKind::CaseCamel => case_n(input, 0),
+        TransformKind::CasePascal => case_n(input, 1),
+        TransformKind::CaseSnake => case_n(input, 2),
+        TransformKind::CaseKebab => case_n(input, 3),
+        TransformKind::CaseScreaming => case_n(input, 4),
+        TransformKind::CaseTrain => case_n(input, 5),
+        TransformKind::CaseTitle => case_n(input, 6),
+        TransformKind::CaseUpper => case_n(input, 7),
+        TransformKind::CaseLower => case_n(input, 8),
     }
 }
 

@@ -15,6 +15,7 @@
 
 pub mod bookmarks;
 pub mod calc_history;
+pub mod case;
 pub mod delete;
 pub mod detect;
 pub mod edit;
@@ -28,6 +29,7 @@ pub mod metrics;
 pub mod model;
 pub mod notes;
 pub mod plot;
+pub mod random;
 pub mod retention;
 pub mod search;
 pub mod slots;

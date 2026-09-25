@@ -25,6 +25,15 @@ export component TransformsView inherits Rectangle {
         { group: "Other", name: "Hash · SHA-256, MD5", hint: "" },
         { group: "Other", name: "Count words, lines, chars", hint: "" },
         { group: "Other", name: "QR code", hint: "" },
+        { group: "Case", name: "camelCase", hint: "" },
+        { group: "Case", name: "PascalCase", hint: "" },
+        { group: "Case", name: "snake_case", hint: "" },
+        { group: "Case", name: "kebab-case", hint: "" },
+        { group: "Case", name: "SCREAMING_SNAKE", hint: "" },
+        { group: "Case", name: "Train-Case", hint: "" },
+        { group: "Case", name: "Title Case", hint: "" },
+        { group: "Case", name: "UPPERCASE", hint: "" },
+        { group: "Case", name: "lowercase", hint: "" },
     ];
     property <string> result: root.transform-run(root.transform-selected, root.transform-input);
     property <string> stats: root.transform-stats(root.transform-selected, root.transform-input);
@@ -78,6 +87,9 @@ export component TransformsView inherits Rectangle {
                 // Left: transform list (grouped, with example hints).
                 Rectangle {
                     width: 300px;
+                    clip: true;
+                    Flickable {
+                    viewport-height: root.rows.length * 33px + 80px;
                     VerticalLayout {
                         spacing: 1px;
                         for row[i] in root.rows: VerticalLayout {
@@ -101,6 +113,7 @@ export component TransformsView inherits Rectangle {
                                 }
                             }
                         }
+                    }
                     }
                 }
                 // Right: "Result" label + live result box + stats line.

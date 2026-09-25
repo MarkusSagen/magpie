@@ -2968,6 +2968,12 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_transform_selected(0);
                             ui.set_mode(SharedString::from("transform"));
                         }
+                        // Case conversion via ⌘T (Phase 13): snake_case of an identifier.
+                        "transform-case" => {
+                            ui.set_transform_input(SharedString::from("parseHTTPResponse value"));
+                            ui.set_transform_selected(11); // snake_case
+                            ui.set_mode(SharedString::from("transform"));
+                        }
                         "notes" => ui.invoke_set_mode_notes(true),
                         "tasks" => ui.invoke_set_mode_tasks(true),
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
