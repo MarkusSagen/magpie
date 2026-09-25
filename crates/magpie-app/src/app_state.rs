@@ -13,6 +13,8 @@ pub struct AppState {
     pub merge_set: Mutex<Vec<i64>>,
     /// Session-only screensharing mode (masks everything). Not persisted.
     pub screenshare: Mutex<bool>,
+    /// Session-only capture pause (the watcher skips polling while set). Not persisted.
+    pub paused: std::sync::atomic::AtomicBool,
     /// Masking config snapshot (from `Config`, immutable for the session).
     pub mask_apps: Vec<String>,
     pub mask_patterns: Vec<String>,
@@ -119,6 +121,7 @@ mod tests {
             ui: std::sync::Mutex::new(crate::viewmodel::UiState::new()),
             merge_set: std::sync::Mutex::new(Vec::new()),
             screenshare: std::sync::Mutex::new(false),
+            paused: std::sync::atomic::AtomicBool::new(false),
             mask_apps: Vec::new(),
             mask_patterns: Vec::new(),
             mask_visible_chars: 3,

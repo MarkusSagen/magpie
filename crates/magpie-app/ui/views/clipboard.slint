@@ -88,14 +88,36 @@ export component ClipboardView inherits VerticalLayout {
                             horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    for label[i] in ["Recent", "Most copied"]: Rectangle {
+                    // Sort as one "Recent ▾" menu (screen 01), replacing the two buttons.
+                    Rectangle {
                         height: 28px;
-                        width: i == 0 ? 66px : 96px;
-                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : transparent);
+                        width: 128px;
                         border-radius: Theme.r-sm;
-                        sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
-                        Text { text: label; color: i == root.sort-index ? Theme.text : Theme.text-dim;
-                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        background: sortbtnta.has-hover ? Theme.bg-elevated : transparent;
+                        sortbtnta := TouchArea { clicked => { sortpop.show(); } }
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 8px;
+                            Text { text: root.sort-index == 0 ? "Recent" : "Most copied"; color: Theme.text-dim;
+                                font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: "▾"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
+                        }
+                        sortpop := PopupWindow {
+                            x: 0; y: 30px; width: 128px; height: 74px;
+                            Rectangle {
+                                background: Theme.bg-panel; border-color: Theme.line-strong; border-width: 1px; border-radius: Theme.r-md;
+                                VerticalLayout {
+                                    padding: 4px; spacing: 1px;
+                                    for label[i] in ["Recent", "Most copied"]: Rectangle {
+                                        height: 30px; border-radius: Theme.r-sm;
+                                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : transparent);
+                                        sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); sortpop.close(); } }
+                                        HorizontalLayout { padding-left: 10px;
+                                            Text { text: label; color: i == root.sort-index ? Theme.text : Theme.text-dim;
+                                                font-size: Theme.fs-body; vertical-alignment: center; } }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -257,13 +279,22 @@ export component ClipboardView inherits VerticalLayout {
                                 // 1-9 quick-paste number on the LEFT, aligned with the
                                 // top line of the copied text; brightens while ⌘/Ctrl held.
                                 Rectangle {
-                                    width: 20px;
-                                    if i < 9: Text {
+                                    width: 30px;
+                                    // Selected row shows a real ⌘n keycap; others a ghost number
+                                    // that brightens while ⌘/Ctrl is held (screen 01).
+                                    if i < 9 && i == root.selected: Rectangle {
+                                        y: 7px; width: 28px; height: 18px; border-radius: 4px;
+                                        background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                                        Text { text: "⌘" + (i + 1); color: Theme.text; font-family: "Geist Mono";
+                                            font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                    if i < 9 && i != root.selected: Text {
                                         y: 9px;
                                         text: i + 1;
-                                        color: root.cmd-held ? Theme.accent : Theme.line-strong;
+                                        color: root.cmd-held ? Theme.accent : Theme.text-ghost;
                                         font-size: 12px;
                                         horizontal-alignment: center;
+                                        width: 30px;
                                     }
                                 }
                                 // Leading visual, most content-specific first: the

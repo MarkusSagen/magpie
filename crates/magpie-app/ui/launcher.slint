@@ -94,6 +94,8 @@ export component LauncherWindow inherits Window {
     in-out property <int> sort-index: 0;
     in-out property <int> action-selected: 0;
     in property <bool> screenshare: false;
+    in property <bool> paused: false;
+    callback toggle-pause();
     in-out property <bool> revealed: false;
     // True while the primary modifier (⌘ on macOS / Ctrl elsewhere) is held —
     in-out property <bool> cmd-held: false;
@@ -178,7 +180,10 @@ export component LauncherWindow inherits Window {
         else if id == "bookmark" { root.bookmark-selected(); }
         else if id == "task-from-link" { root.task-from-link(); }
         else if id == "transform" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; }
+        else if id == "theme" { root.mode = "settings"; }
+        else if id == "open-as-table" { root.open-selected-as-table(); }
     }
+    callback open-selected-as-table();
     callback export-data();
 
     // "none" | "entry" | "snippet" — also drives the edit modal.
@@ -334,6 +339,8 @@ export component LauncherWindow inherits Window {
     in-out property <string> board-query;
     in property <[BoardColumn]> board;
     in property <[string]> board-projects;
+    in property <string> board-caption;
+    callback board-search-backspace();
     callback board-controls-changed();
     callback board-open-task(int);
     callback board-set-status(int, int, int); // note_id, line_index, status (0/1/2)
@@ -567,6 +574,8 @@ export component LauncherWindow inherits Window {
         if root.board-mode: BoardView {
             focus-search() => { main.focus-input(); }
             board: root.board;
+            board-caption: root.board-caption;
+            board-search-backspace() => { root.board-search-backspace(); }
             board-controls-changed() => { root.board-controls-changed(); }
             board-drag-active <=> root.board-drag-active;
             board-drag-line <=> root.board-drag-line;
@@ -663,6 +672,7 @@ export component LauncherWindow inherits Window {
             section: root.section;
             cmd-held: root.cmd-held;
             screenshare: root.screenshare;
+            paused: root.paused;
             show-calc-data: true;
             show-data: true;
             theme-index: root.theme-index;
@@ -670,6 +680,7 @@ export component LauncherWindow inherits Window {
             set-theme(i) => { root.set-theme(i); }
             open-shortcuts => { root.mode = "help"; }
             toggle-mask => { root.toggle-screenshare(); }
+            toggle-pause => { root.toggle-pause(); }
             open-settings => { root.mode = "settings"; }
         }
 

@@ -53,6 +53,7 @@ fn state() -> AppState {
         ui: Mutex::new(UiState::new()),
         merge_set: Mutex::new(Vec::new()),
         screenshare: Mutex::new(false),
+        paused: std::sync::atomic::AtomicBool::new(false),
         mask_apps: Vec::new(),
         mask_patterns: Vec::new(),
         mask_visible_chars: 3,

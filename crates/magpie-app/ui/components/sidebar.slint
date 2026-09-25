@@ -49,6 +49,7 @@ export component Sidebar inherits Rectangle {
     in property <string> section;           // clipboard|tasks|notes|bookmarks|stats
     in property <bool> cmd-held;
     in property <bool> screenshare;         // Mask state
+    in property <bool> paused;              // capture pause state
     in property <bool> show-calc-data;      // reveal Calculator (feature flag)
     in property <bool> show-data;           // reveal Data (screens 13/14)
     in property <int> theme-index;
@@ -57,6 +58,7 @@ export component Sidebar inherits Rectangle {
     callback open-shortcuts();
     callback open-settings();
     callback toggle-mask();
+    callback toggle-pause();
     width: 208px;
     background: Theme.bg-sidebar;
     // hairline right border
@@ -144,11 +146,11 @@ export component Sidebar inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 Rectangle { width: 6px; height: 6px; border-radius: 3px;
-                    background: root.screenshare ? Theme.text-faint : Theme.accent; }
+                    background: (root.paused || root.screenshare) ? Theme.text-faint : Theme.accent; }
             }
             VerticalLayout {
                 alignment: center;
-                Text { text: root.screenshare ? "Masked" : "Capturing";
+                Text { text: root.paused ? "Paused" : (root.screenshare ? "Masked" : "Capturing");
                     color: Theme.text-faint; font-size: Theme.fs-xs; }
             }
             Rectangle { horizontal-stretch: 1; }
@@ -158,6 +160,20 @@ export component Sidebar inherits Rectangle {
                 mta := TouchArea { clicked => { root.toggle-mask(); } }
                 Image { source: Icons.lock; width: 14px; height: 14px; image-fit: contain;
                     colorize: root.screenshare ? Theme.accent : Theme.text-faint; }
+            }
+            // Pause / resume capture.
+            pausebtn := Rectangle {
+                width: 22px; height: 22px; border-radius: Theme.r-xs;
+                background: pta.has-hover ? Theme.bg-elevated : transparent;
+                pta := TouchArea { clicked => { root.toggle-pause(); } }
+                // Paused → a play triangle; capturing → two pause bars.
+                if !root.paused: HorizontalLayout {
+                    alignment: center; spacing: 3px;
+                    Rectangle { width: 3px; height: 11px; border-radius: 1px; background: Theme.text-faint; }
+                    Rectangle { width: 3px; height: 11px; border-radius: 1px; background: Theme.text-faint; }
+                }
+                if root.paused: Text { text: "▶"; color: Theme.accent; font-size: 11px;
+                    horizontal-alignment: center; vertical-alignment: center; }
             }
         }
 

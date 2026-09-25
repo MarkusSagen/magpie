@@ -12,6 +12,7 @@ import { StatsView } from "stats.slint";
 import { DataView } from "data.slint";
 import { CalcView } from "calculator.slint";
 import { CalcStore } from "../calc_store.slint";
+import { DataStore } from "../data_store.slint";
 
 export component MainView inherits VerticalLayout {
     in-out property <int> action-selected;
@@ -414,6 +415,8 @@ export component MainView inherits VerticalLayout {
                                     if event.text == "t" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; return accept; }
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
+                                    // ⌘⇧G toggles the Data chart (no clash with ⌘G merge).
+                                    if event.modifiers.shift && (event.text == "g" || event.text == "G") && root.view == "data" { DataStore.chart-toggle(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
                                     if event.text == "j" { root.note-from-entry(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }

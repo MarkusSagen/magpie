@@ -24,7 +24,9 @@ export component HBar inherits Rectangle {
                 y: 0;
                 height: parent.height;
                 width: track.width * value_norm;
-                background: Theme.accent;
+                // Neutral fill — the accent is reserved for "today" on the over-time
+                // chart (spec principle: bars neutral, one accent).
+                background: Theme.line-strong;
                 border-radius: 3px;
             }
         }

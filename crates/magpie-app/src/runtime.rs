@@ -63,6 +63,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         ui: std::sync::Mutex::new(magpie_app::viewmodel::UiState::new()),
         merge_set: std::sync::Mutex::new(Vec::new()),
         screenshare: std::sync::Mutex::new(false),
+        paused: std::sync::atomic::AtomicBool::new(false),
         mask_apps: cfg.mask_apps.clone(),
         mask_patterns: cfg.mask_patterns.clone(),
         mask_visible_chars: cfg.mask_visible_chars.max(0),
@@ -1940,8 +1941,28 @@ fn refresh_board(ui: &LauncherWindow, state: &AppState) {
             projects.into_iter().map(SharedString::from).collect(),
         )
     };
+    let task_total: i32 = columns.iter().map(|c| c.count).sum();
+    let project_count = projects.len();
     ui.set_board(ModelRc::new(VecModel::from(columns)));
     ui.set_board_projects(ModelRc::new(VecModel::from(projects)));
+    let ptxt = if project_count == 1 {
+        "project"
+    } else {
+        "projects"
+    };
+    let ttxt = if task_total == 1 { "task" } else { "tasks" };
+    ui.set_board_caption(SharedString::from(format!(
+        "{task_total} {ttxt} across {project_count} {ptxt}"
+    )));
+}
+
+/// Delete the last character of the Tasks board search query and re-filter
+/// (Slint has no string slicing, so the backspace is done here).
+fn board_search_backspace(ui: &LauncherWindow, state: &AppState) {
+    let mut q = ui.get_board_query().to_string();
+    q.pop();
+    ui.set_board_query(SharedString::from(q));
+    refresh_board(ui, state);
 }
 
 /// Rebuild Graph mode: every note, laid out by `magpie_app::graph::build_graph`
@@ -2147,9 +2168,11 @@ const ACTIONS: &[(&str, &str, &str, &str, &str)] = &[
     ("note", "", "New note from this entry", "⌘J", "Entry"),
     ("snippet", "", "New snippet", "⌘N", "Entry"),
     ("transform", "", "Transform…", "⌘T", "Convert"),
+    ("open-as-table", "", "Open as table", "", "Convert"),
     ("bookmark", "", "Bookmark this link", "", "Convert"),
     ("task-from-link", "", "Create task from link", "", "Convert"),
     ("export", "", "Export data…", "", "Convert"),
+    ("theme", "", "Theme…", "", "Convert"),
     ("delete", "", "Delete entry", "⌘⌫", ""),
 ];
 
@@ -2561,6 +2584,12 @@ fn spawn_watcher(
         };
         let log_path = data_dir().join("logs").join("magpie.log");
         loop {
+            // Capture pause (sidebar Pause button): skip polling entirely, but keep
+            // the loop alive so resuming is instant.
+            if state.paused.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(300));
+                continue;
+            }
             // Guard each iteration: a panic in poll/ingest is logged + surfaced by
             // the panic hook, but must NOT silently end clipboard capture — catch it
             // and keep polling so the watcher survives a bad event.
@@ -3980,6 +4009,19 @@ pub fn start() {
         });
     }
     {
+        // Sidebar Pause button: flip the shared flag the watcher polls each tick.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_pause(move || {
+            use std::sync::atomic::Ordering;
+            let now = !s.paused.load(Ordering::Relaxed);
+            s.paused.store(now, Ordering::Relaxed);
+            if let Some(ui) = w.upgrade() {
+                ui.set_paused(now);
+            }
+        });
+    }
+    {
         let s = state.clone();
         ui.on_copy_only(move |idx| {
             let recent = current_results(&s, now_ms());
@@ -4872,6 +4914,22 @@ pub fn start() {
         });
     }
     {
+        // ⌘K → Open as table: parse the selected clip as a dataset and show Data.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_selected_as_table(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let text = e.full_text.clone();
+                    open_data(&ui, &s, "Clipboard entry", &text);
+                    nav_to(&ui, &s, "data", "");
+                }
+            }
+        });
+    }
+    {
         // ⌘O — open the selected web-link entry in the default browser (screen 04).
         let s = state.clone();
         let w = ui.as_weak();
@@ -4996,6 +5054,15 @@ pub fn start() {
         ui.on_board_controls_changed(move || {
             if let Some(ui) = w.upgrade() {
                 refresh_board(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_board_search_backspace(move || {
+            if let Some(ui) = w.upgrade() {
+                board_search_backspace(&ui, &s);
             }
         });
     }

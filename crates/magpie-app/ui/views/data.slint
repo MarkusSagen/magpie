@@ -234,6 +234,17 @@ export component DataView inherits HorizontalLayout {
                     horizontal-stretch: 1;
                     clip: true;
                     canvas := Rectangle {
+                        // Gridlines + axes (screen 14). Numeric tick labels need the
+                        // real data range (not carried into Slint) — deferred.
+                        for gy in [0.0, 0.25, 0.5, 0.75, 1.0]: Rectangle {
+                            x: 20px;
+                            width: canvas.width - 40px;
+                            height: 1px;
+                            y: (1 - gy) * (canvas.height - 40px) + 10px;
+                            background: Theme.line;
+                        }
+                        Rectangle { x: 20px; y: 10px; width: 1px; height: canvas.height - 40px; background: Theme.line-strong; }
+                        Rectangle { x: 20px; y: canvas.height - 30px; width: canvas.width - 40px; height: 1px; background: Theme.line-strong; }
                         for p[i] in DataStore.chart-points: Rectangle {
                             property <length> px: p.x * (canvas.width - 40px) + 20px;
                             property <length> py: (1 - p.y) * (canvas.height - 40px) + 10px;

@@ -35,6 +35,8 @@ export component BoardView inherits Rectangle {
     callback nav-section(string);
     callback set-mode-board(bool);
     callback set-task-view(string);
+    callback board-search-backspace();
+    in property <string> board-caption;
     in-out property <length> sidebar-w;
     in-out property <string> tasks-view;
             background: Theme.bg-app;
@@ -60,8 +62,27 @@ export component BoardView inherits Rectangle {
                     if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
                     if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     if e.text == Key.Escape {
+                        if root.board-query != "" {
+                            root.board-query = "";
+                            root.board-controls-changed();
+                            return accept;
+                        }
                         root.set-mode-board(false);
                         root.focus-search();
+                        return accept;
+                    }
+                    // Search-tasks input (screen 06): the top bar reflects board-query.
+                    if e.text == Key.Backspace {
+                        root.board-search-backspace();
+                        return accept;
+                    }
+                    if !e.modifiers.control && !e.modifiers.alt && e.text != ""
+                        && e.text != Key.Tab && e.text != Key.Return
+                        && e.text != Key.UpArrow && e.text != Key.DownArrow
+                        && e.text != Key.LeftArrow && e.text != Key.RightArrow
+                        && e.text != Key.Delete {
+                        root.board-query += e.text;
+                        root.board-controls-changed();
                         return accept;
                     }
                     return reject;
@@ -75,34 +96,55 @@ export component BoardView inherits Rectangle {
                 padding-top: 8px;
                 padding-bottom: 8px;
                 spacing: 8px;
-                // Top bar: back to clipboard + title.
+                // Shared top bar (screen 06): search tasks + Filter.
+                Rectangle {
+                    height: 52px;
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                    HorizontalLayout {
+                        padding-right: 4px;
+                        spacing: 12px;
+                        VerticalLayout { alignment: center;
+                            Image { source: Icons.search; width: 16px; height: 16px; image-fit: contain; colorize: Theme.text-faint; } }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            if root.board-query == "": Text { x: 0; text: "Search tasks"; color: Theme.text-faint; font-size: Theme.fs-lg; vertical-alignment: center; }
+                            HorizontalLayout {
+                                alignment: start;
+                                if root.board-query != "": Text { text: root.board-query; color: Theme.text; font-size: Theme.fs-lg; vertical-alignment: center; overflow: elide; }
+                                Rectangle { width: 2px; height: 20px; background: Theme.accent; y: (parent.height - self.height) / 2; }
+                            }
+                        }
+                        VerticalLayout { alignment: center;
+                            HorizontalLayout { spacing: 8px;
+                                Text { text: "Filter"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                                VerticalLayout { alignment: center; Rectangle {
+                                    width: 30px; height: 20px; border-radius: 4px; background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                                    Text { text: "⌘F"; color: Theme.text-dim; font-family: "Geist Mono"; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; } } }
+                            }
+                        }
+                    }
+                }
+                // Tab row: Today / List / Board (bg-elevated selection) + Display menu.
                 HorizontalLayout {
-                    spacing: 8px;
-                    // [Today · List · Board] — replaces the old "← Clipboard" back
-                    // button; the sidebar's Clipboard icon is the back button now.
+                    spacing: 16px;
+                    alignment: start;
                     HorizontalLayout {
                         spacing: 4px;
                         for tv in ["today", "list", "board"]: Rectangle {
                             height: 30px;
-                            width: 56px;
-                            border-radius: 6px;
-                            background: root.tasks-view == tv ? Pal.accent : (tvsw3.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                            width: 60px;
+                            border-radius: Theme.r-sm;
+                            background: root.tasks-view == tv ? Theme.bg-elevated : (tvsw3.has-hover ? Theme.bg-elevated : transparent);
                             tvsw3 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
                                 text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
-                                color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
-                                font-size: 12px;
+                                color: root.tasks-view == tv ? Theme.text : Theme.text-dim;
+                                font-size: Theme.fs-body;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
                         }
                     }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                // Controls row 1: Group / Layout / Sort chip groups + Hide done.
-                HorizontalLayout {
-                    spacing: 16px;
-                    alignment: start;
                     displaybtn := Rectangle {
                         height: 28px;
                         border-radius: 6px;
@@ -192,38 +234,19 @@ export component BoardView inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     width: 40px;
-                                    border-radius: 6px;
-                                    background: root.board-project-filter == "" ? Pal.accent : (bpallta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    border-radius: Theme.r-sm;
+                                    background: root.board-project-filter == "" ? Theme.bg-elevated : (bpallta.has-hover ? Theme.bg-elevated : transparent);
                                     bpallta := TouchArea { clicked => { root.board-project-filter = ""; root.board-controls-changed(); } }
-                                    Text { text: "All"; color: root.board-project-filter == "" ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "All"; color: root.board-project-filter == "" ? Theme.text : Theme.text-dim; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 for p in root.board-projects: Rectangle {
                                     height: 24px;
                                     width: 76px;
-                                    border-radius: 6px;
-                                    background: root.board-project-filter == p ? Pal.accent : (bpta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    border-radius: Theme.r-sm;
+                                    background: root.board-project-filter == p ? Theme.bg-elevated : (bpta.has-hover ? Theme.bg-elevated : transparent);
                                     bpta := TouchArea { clicked => { root.board-project-filter = p; root.board-controls-changed(); } }
-                                    Text { text: p; color: root.board-project-filter == p ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                    Text { text: "#" + p; color: root.board-project-filter == p ? Theme.text : Theme.text-dim; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                 }
-                            }
-                        }
-                    }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 26px;
-                        background: Theme.bg-panel;
-                        border-radius: 6px;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            if root.board-query == "": Text { text: "Search title…"; color: Theme.text-faint; font-size: 12px; vertical-alignment: center; }
-                            bqta := TextInput {
-                                text <=> root.board-query;
-                                color: Theme.text;
-                                font-size: 12px;
-                                single-line: true;
-                                vertical-alignment: center;
-                                edited => { root.board-controls-changed(); }
                             }
                         }
                     }
@@ -429,6 +452,27 @@ export component BoardView inherits Rectangle {
                 if root.board.length == 0: HorizontalLayout {
                     alignment: center;
                     Text { text: "No tasks match these filters."; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                }
+                // Bottom hint bar (screen 06).
+                Rectangle {
+                    height: 40px;
+                    Rectangle { y: 0; height: 1px; background: Theme.line; }
+                    HorizontalLayout {
+                        padding-right: 4px;
+                        spacing: 14px;
+                        VerticalLayout { alignment: center;
+                            Text { text: root.board-caption; color: Theme.text-faint; font-size: 12px; } }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout { alignment: center; Text { text: "Complete"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                        VerticalLayout { alignment: center; Rectangle { width: 42px; height: 20px; border-radius: 4px; background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                            Text { text: "Space"; color: Theme.text; font-family: "Geist Mono"; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; } } }
+                        VerticalLayout { alignment: center; Text { text: "Open in note"; color: Theme.text-dim; font-size: 12.5px; } }
+                        VerticalLayout { alignment: center; Rectangle { width: 24px; height: 20px; border-radius: 4px; background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                            Text { text: "↵"; color: Theme.text-dim; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; } } }
+                        VerticalLayout { alignment: center; Text { text: "Actions"; color: Theme.text-dim; font-size: 12.5px; } }
+                        VerticalLayout { alignment: center; Rectangle { width: 30px; height: 20px; border-radius: 4px; background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                            Text { text: "⌘K"; color: Theme.text-dim; font-family: "Geist Mono"; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; } } }
+                    }
                 }
             }
         }
