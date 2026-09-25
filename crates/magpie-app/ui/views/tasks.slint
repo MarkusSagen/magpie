@@ -141,16 +141,16 @@ export component TasksView inherits Rectangle {
                     if root.active-title != "": Rectangle {
                         height: 30px;
                         border-radius: 6px;
-                        background: Theme.success.with-alpha(0.18);
+                        background: Theme.text-faint.with-alpha(0.18);
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 6px;
-                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: "▶"; color: Theme.text-faint; font-size: 12px; vertical-alignment: center; }
                             Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
                             Text {
                                 text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
-                                color: Theme.success;
+                                color: Theme.text-faint;
                                 font-size: 12px;
                                 font-weight: 700;
                                 vertical-alignment: center;
@@ -242,8 +242,8 @@ export component TasksView inherits Rectangle {
                                     height: 22px;
                                     border-radius: 5px;
                                     border-width: 1px;
-                                    border-color: t.doing && !t.done ? Theme.warn : Theme.text-faint;
-                                    background: t.done ? Pal.accent : (t.doing ? Theme.warn.with-alpha(0.2) : transparent);
+                                    border-color: t.doing && !t.done ? Theme.text-dim : Theme.text-faint;
+                                    background: t.done ? Pal.accent : (t.doing ? Theme.text-dim.with-alpha(0.2) : transparent);
                                     if t.done: Text {
                                         text: "✓";
                                         color: Pal.on-accent;
@@ -255,7 +255,7 @@ export component TasksView inherits Rectangle {
                                     }
                                     if !t.done && t.doing: Text {
                                         text: "◐";
-                                        color: Theme.warn;
+                                        color: Theme.text-dim;
                                         font-size: 13px;
                                         width: 22px;
                                         height: 22px;
@@ -275,11 +275,11 @@ export component TasksView inherits Rectangle {
                                     width: 18px;
                                     height: 18px;
                                     border-radius: 5px;
-                                    background: t.priority == 0 ? Theme.prio-high
-                                        : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
+                                    background: t.priority == 0 ? Theme.text
+                                        : (t.priority == 1 ? Theme.text-faint : Theme.text-faint);
                                     Text {
                                         text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
-                                        color: #16161a;
+                                        color: Theme.on-accent;
                                         font-size: 11px;
                                         font-weight: 700;
                                         horizontal-alignment: center;
@@ -302,8 +302,8 @@ export component TasksView inherits Rectangle {
                                     spacing: 8px;
                                     alignment: start;
                                     if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                                    if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; }
-                                    if t.recur != "": Text { text: t.recur; color: Theme.success; font-size: 11px; vertical-alignment: center; }
+                                    if t.project != "": Text { text: "#" + t.project; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                                    if t.recur != "": Text { text: t.recur; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
                                     if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                                     // (bookmark shown by the trailing ★ toggle, not a badge)
                                     if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
@@ -314,7 +314,7 @@ export component TasksView inherits Rectangle {
                                 bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
                                 Text {
                                     text: t.bookmarked ? "★" : "☆";
-                                    color: t.bookmarked ? Theme.warn : (bmk.has-hover ? Theme.text : Theme.text-faint);
+                                    color: t.bookmarked ? Theme.text-dim : (bmk.has-hover ? Theme.text : Theme.text-faint);
                                     font-size: 16px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -325,7 +325,7 @@ export component TasksView inherits Rectangle {
                                 tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
                                 Text {
                                     text: t.tracking ? "⏹" : "▶";
-                                    color: t.tracking ? Theme.success : (tmr.has-hover ? Theme.text : Theme.text-faint);
+                                    color: t.tracking ? Theme.text-faint : (tmr.has-hover ? Theme.text : Theme.text-faint);
                                     font-size: 14px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;

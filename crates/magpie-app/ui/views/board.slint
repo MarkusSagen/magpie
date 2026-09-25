@@ -103,49 +103,71 @@ export component BoardView inherits Rectangle {
                 HorizontalLayout {
                     spacing: 16px;
                     alignment: start;
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Text { text: "Group:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                        for g[i] in ["Status", "Priority", "Project"]: Rectangle {
-                            height: 24px;
-                            width: 66px;
-                            border-radius: 6px;
-                            background: root.board-group == i ? Pal.accent : (bgta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                            bgta := TouchArea { clicked => { root.board-group = i; root.board-controls-changed(); } }
-                            Text { text: g; color: root.board-group == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Text { text: "Layout:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                        for lo[i] in ["Kanban", "List", "Grid", "Table"]: Rectangle {
-                            height: 24px;
-                            width: 58px;
-                            border-radius: 6px;
-                            background: root.board-layout == i ? Pal.accent : (blta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                            blta := TouchArea { clicked => { root.board-layout = i; root.board-controls-changed(); } }
-                            Text { text: lo; color: root.board-layout == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Text { text: "Sort:"; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                        for so[i] in ["Due", "Priority", "Title", "Status"]: Rectangle {
-                            height: 24px;
-                            width: 66px;
-                            border-radius: 6px;
-                            background: root.board-sort == i ? Pal.accent : (bsta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                            bsta := TouchArea { clicked => { root.board-sort = i; root.board-controls-changed(); } }
-                            Text { text: so; color: root.board-sort == i ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                        }
-                    }
-                    Rectangle {
-                        height: 24px;
-                        width: 84px;
+                    displaybtn := Rectangle {
+                        height: 28px;
                         border-radius: 6px;
-                        background: root.board-hide-done ? Pal.accent : (bhdta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                        bhdta := TouchArea { clicked => { root.board-hide-done = !root.board-hide-done; root.board-controls-changed(); } }
-                        Text { text: "Hide done"; color: root.board-hide-done ? Pal.on-accent : Theme.text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        background: dispta.has-hover ? Theme.bg-elevated : transparent;
+                        dispta := TouchArea { clicked => { disppop.show(); } }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 8px;
+                            spacing: 6px;
+                            Text { text: "Display"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                            Text { text: "▾"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
+                        }
+                        disppop := PopupWindow {
+                            x: 0;
+                            y: 32px;
+                            width: 232px;
+                            height: 300px;
+                            Rectangle {
+                                background: Theme.bg-panel;
+                                border-color: Theme.line-strong;
+                                border-width: 1px;
+                                border-radius: Theme.r-md;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 10px;
+                                    Text { text: "Group"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    HorizontalLayout { spacing: 4px;
+                                        for g[i] in ["Status", "Priority", "Project"]: Rectangle {
+                                            height: 26px; horizontal-stretch: 1; border-radius: Theme.r-sm;
+                                            background: root.board-group == i ? Theme.bg-elevated : (bgta.has-hover ? Theme.bg-elevated : transparent);
+                                            bgta := TouchArea { clicked => { root.board-group = i; root.board-controls-changed(); } }
+                                            Text { text: g; color: root.board-group == i ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                    }
+                                    Text { text: "Layout"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    HorizontalLayout { spacing: 4px;
+                                        for lo[i] in ["Kanban", "List", "Grid", "Table"]: Rectangle {
+                                            height: 26px; horizontal-stretch: 1; border-radius: Theme.r-sm;
+                                            background: root.board-layout == i ? Theme.bg-elevated : (blta.has-hover ? Theme.bg-elevated : transparent);
+                                            blta := TouchArea { clicked => { root.board-layout = i; root.board-controls-changed(); } }
+                                            Text { text: lo; color: root.board-layout == i ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                    }
+                                    Text { text: "Sort"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    HorizontalLayout { spacing: 4px;
+                                        for so[i] in ["Due", "Priority", "Title", "Status"]: Rectangle {
+                                            height: 26px; horizontal-stretch: 1; border-radius: Theme.r-sm;
+                                            background: root.board-sort == i ? Theme.bg-elevated : (bsta.has-hover ? Theme.bg-elevated : transparent);
+                                            bsta := TouchArea { clicked => { root.board-sort = i; root.board-controls-changed(); } }
+                                            Text { text: so; color: root.board-sort == i ? Theme.text : Theme.text-dim; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: Theme.line; }
+                                    Rectangle {
+                                        height: 28px; border-radius: Theme.r-sm;
+                                        background: bhdta.has-hover ? Theme.bg-elevated : transparent;
+                                        bhdta := TouchArea { clicked => { root.board-hide-done = !root.board-hide-done; root.board-controls-changed(); } }
+                                        HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                                            Text { text: "Hide done"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                                            Text { text: root.board-hide-done ? "On" : "Off"; color: root.board-hide-done ? Theme.accent : Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 // Controls row 2: project filter chips + title search.
@@ -276,57 +298,11 @@ export component BoardView inherits Rectangle {
                             Text { text: col.title; color: Theme.text-dim; font-size: 12px; font-weight: 700; vertical-alignment: bottom; }
                             Text { text: "(" + col.count + ")"; color: Theme.text-faint; font-size: 11px; vertical-alignment: bottom; }
                         }
-                        for t in col.tasks: Rectangle {
-                            height: 40px;
-                            background: lrta.has-hover ? Theme.bg-elevated : transparent;
-                            border-radius: 6px;
-                            lrta := TouchArea { clicked => { root.board-open-task(t.note_id); } }
-                            HorizontalLayout {
-                                padding-left: 6px;
-                                padding-right: 6px;
-                                spacing: 8px;
-                                alignment: start;
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    alignment: start;
-                                    for i in [0, 1, 2]: Rectangle {
-                                        width: 11px;
-                                        height: 11px;
-                                        border-radius: 6px;
-                                        border-width: 1.5px;
-                                        background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
-                                        border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
-                                            : (i == 1 && t.doing) ? transparent
-                                            : (i == 2 && t.done) ? transparent
-                                            : (lsta.has-hover ? Theme.text : Theme.text-faint);
-                                        lsta := TouchArea { clicked => { root.board-set-status(t.note_id, t.line_index, i); } }
-                                    }
-                                }
-                                Text {
-                                    text: t.title;
-                                    color: t.done ? Theme.text-faint : Theme.text;
-                                    font-size: 13px;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
-                                    vertical-alignment: center;
-                                }
-                                if t.priority <= 2: Rectangle {
-                                    width: 16px;
-                                    height: 16px;
-                                    border-radius: 4px;
-                                    background: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
-                                    Text {
-                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
-                                        color: #16161a;
-                                        font-size: 10px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                                if t.project != "": Text { text: "#" + t.project; color: Theme.link; font-size: 11px; vertical-alignment: center; overflow: elide; width: 90px; }
-                            }
+                        for t in col.tasks: BoardCard {
+                            t: t;
+                            draggable: false;
+                            open => { root.board-open-task(t.note_id); }
+                            set-status(s) => { root.board-set-status(t.note_id, t.line_index, s); }
                         }
                     }
                 }
@@ -389,7 +365,7 @@ export component BoardView inherits Rectangle {
                                 Text { text: "Due"; color: Theme.text-dim; font-size: 11px; width: 90px; vertical-alignment: center; }
                                 Text { text: "#Project"; color: Theme.text-dim; font-size: 11px; width: 120px; vertical-alignment: center; }
                             }
-                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: Theme.border; }
+                            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: Theme.line; }
                         }
                         for col in root.board: VerticalLayout {
                             spacing: 2px;
@@ -424,7 +400,7 @@ export component BoardView inherits Rectangle {
                                             height: 13px;
                                             border-radius: 7px;
                                             border-width: 1.5px;
-                                            background: (i == 1 && t.doing) ? Theme.warn : (i == 2 && t.done) ? Theme.success : transparent;
+                                            background: (i == 1 && t.doing) ? Theme.text-dim : (i == 2 && t.done) ? Theme.text-faint : transparent;
                                             border-color: (i == 0 && !t.done && !t.doing) ? Pal.accent
                                                 : (i == 1 && t.doing) ? transparent
                                                 : (i == 2 && t.done) ? transparent
@@ -436,7 +412,7 @@ export component BoardView inherits Rectangle {
                                         width: 28px;
                                         if t.priority <= 2: Text {
                                             text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
-                                            color: t.priority == 0 ? Theme.prio-high : (t.priority == 1 ? Theme.prio-med : Theme.prio-low);
+                                            color: t.priority == 0 ? Theme.text : (t.priority == 1 ? Theme.text-faint : Theme.text-faint);
                                             font-size: 11px;
                                             font-weight: 700;
                                             horizontal-alignment: center;
@@ -444,7 +420,7 @@ export component BoardView inherits Rectangle {
                                         }
                                     }
                                     Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; width: 90px; overflow: elide; vertical-alignment: center; }
-                                    Text { text: t.project != "" ? "#" + t.project : ""; color: Theme.link; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
+                                    Text { text: t.project != "" ? "#" + t.project : ""; color: Theme.text-dim; font-size: 11px; overflow: elide; width: 120px; vertical-alignment: center; }
                                 }
                             }
                         }

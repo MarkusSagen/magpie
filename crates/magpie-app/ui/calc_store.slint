@@ -1,0 +1,45 @@
+import { CalcRow, ChartPoint } from "types.slint";
+
+// Calculator view state (screen 11/12). A global so Rust sets it directly and the
+// CalcView reads it with no property threading (mirrors DataStore / Theme).
+export global CalcStore {
+    // History (screen 11).
+    in-out property <[CalcRow]> history;
+    in-out property <int> tab;          // 0 All, 1 Math, 2 Dates, 3 Graphs
+    in-out property <int> count-all;
+    in-out property <int> count-math;
+    in-out property <int> count-date;
+    in-out property <int> count-graph;
+    in-out property <int> selected;
+    callback set-tab(int);
+    callback reuse(int);                // put a row's input back into the search bar
+    callback delete-row(int);
+    callback clear-history();
+    callback copy-row(int);
+    callback commit();                  // save the current evaluation to history
+
+    // Math typesetting (screen 11, Phase 8).
+    in-out property <bool> math-has;    // a typeset render is available to show
+    in-out property <image> math-svg;   // the rendered LaTeX/Typst as an SVG image
+    in-out property <int> syntax-mode;  // 0 Plain, 1 LaTeX, 2 Typst
+    callback set-syntax(int);
+    callback copy-latex();
+    callback copy-typst();
+
+    // Graphs (screen 12).
+    in-out property <bool> graphs-open;
+    in-out property <[CalcRow]> saved-graphs;
+    in-out property <string> graph-f;   // "f(x) = sin(x)"
+    in-out property <string> graph-g;   // "g(x) = x / 3"
+    in-out property <string> graph-stats-intersections;
+    in-out property <string> graph-stats-area;
+    in-out property <string> graph-stats-max;
+    // Polylines as SVG path command strings in 0..1 viewbox space (Slint `Path`
+    // has no `for`-generated elements, so the geometry is built in Rust).
+    in-out property <string> graph-f-cmd;
+    in-out property <string> graph-g-cmd;
+    // Intersection markers stay a point model (abs-positioned dots, no Path).
+    in-out property <[ChartPoint]> graph-intersections;
+    callback open-graphs(int);          // open a saved graph by index
+    callback close-graphs();
+}

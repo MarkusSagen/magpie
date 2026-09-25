@@ -1,0 +1,45 @@
+// Single source of truth for the Shortcuts sheet. Every row here must correspond
+// to a real handler (see the key-pressed handlers in views/main.slint, the task
+// Space-toggle, the global summon hotkey, and ⌘, wired in runtime.rs). Keeping
+// them in ONE list means the sheet can't drift from what's actually wired.
+export struct ShortcutRow {
+    group: string,
+    keys: string,
+    desc: string,
+}
+
+export global Shortcuts {
+    out property <[ShortcutRow]> rows: [
+        // Navigation
+        { group: "Navigation", keys: "↑ / ↓", desc: "Move selection" },
+        { group: "Navigation", keys: "⏎", desc: "Paste to the previous app + close" },
+        { group: "Navigation", keys: "⌘⏎", desc: "Paste + keep Magpie open" },
+        { group: "Navigation", keys: "Esc", desc: "Clear search, then close" },
+        { group: "Navigation", keys: "⌘1–9", desc: "Paste the Nth entry" },
+        { group: "Navigation", keys: "⌘⇧Space", desc: "Summon Magpie anywhere" },
+        // Sections
+        { group: "Sections", keys: "G then C/T/N/B/S", desc: "Jump to a section" },
+        { group: "Sections", keys: "⌘[ / ⌘]", desc: "Back / forward through screens" },
+        { group: "Sections", keys: "⌘⌥←", desc: "Jump to the previous screen" },
+        { group: "Sections", keys: "⌘⌥↑ / ⌘⌥↓", desc: "Cycle the section's views" },
+        // Actions
+        { group: "Actions", keys: "⌘K", desc: "Open the actions menu" },
+        { group: "Actions", keys: "⌘F", desc: "Filters (source app / time)" },
+        { group: "Actions", keys: "⌘⇧F", desc: "Find everywhere" },
+        { group: "Actions", keys: "⌘C", desc: "Copy (no paste)" },
+        { group: "Actions", keys: "⌘E", desc: "Edit the entry" },
+        { group: "Actions", keys: "⌘N", desc: "New snippet" },
+        { group: "Actions", keys: "⌘P", desc: "Pin / unpin" },
+        { group: "Actions", keys: "⌘S", desc: "Assign to a ⌘1–9 slot" },
+        { group: "Actions", keys: "⌘G", desc: "Add to merge" },
+        { group: "Actions", keys: "⌘J", desc: "New note from this entry" },
+        { group: "Actions", keys: "⌘V", desc: "Paste clipboard into search" },
+        { group: "Actions", keys: "⌘⌫", desc: "Delete the entry" },
+        // Views
+        { group: "Views", keys: "⌘/  or  ?", desc: "This help sheet" },
+        { group: "Views", keys: "⌘,", desc: "Settings" },
+        { group: "Views", keys: "⌘+ / ⌘− / ⌘0", desc: "Preview text size" },
+        { group: "Views", keys: "Space", desc: "Toggle a task (in a note)" },
+        { group: "Views", keys: "⌘⏎", desc: "Make task (in a note)" },
+    ];
+}

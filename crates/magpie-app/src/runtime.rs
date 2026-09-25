@@ -1,8 +1,10 @@
 use crate::{
-    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, ClipRow, EntryRow, GraphEdge, GraphNode,
-    JournalRow, LauncherWindow, NoteRow, Popover, RefRow, SearchBookmarkRow, SearchNoteRow,
-    SearchTaskRow, SlotItem, TaskRow, TimeEntryRow,
+    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalcRow, CalcStore, ChartPoint, ClipRow,
+    DataColumn, DataStore, EntryRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, NoteRow,
+    Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem,
+    TaskRow, TimeEntryRow,
 };
+use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
 use magpie_app::color_view;
 use magpie_app::config::Config;
@@ -24,7 +26,7 @@ use magpie_platform::os::source_app::ActiveWinSource;
 use magpie_platform::{
     default_app_denylist, default_ignore_regexes, parse_hotkey, CapturePolicy, Clipboard, Watcher,
 };
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -71,6 +73,13 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         theme: cfg.theme.clone(),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
+        data_input: std::sync::Mutex::new(String::new()),
+        data_read_as: std::sync::Mutex::new(magpie_core::table::ReadAs::Auto),
+        data_name: std::sync::Mutex::new(String::new()),
+        data_recent: std::sync::Mutex::new(Vec::new()),
+        data_chart: std::sync::Mutex::new(magpie_app::app_state::ChartState::default()),
+        calc_graph_f: std::sync::Mutex::new(String::new()),
+        calc_graph_g: std::sync::Mutex::new(String::new()),
     })
 }
 
@@ -407,6 +416,695 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
     }
     // Rebuild the virtualized preview for the (possibly new) selection.
     ui.invoke_rebuild_preview();
+
+    // Inline answer card (dates / math / units) for the current query.
+    let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
+    set_answer_card(ui, &query);
+}
+
+/// Map an eval answer kind to the short label shown in the answer card header.
+fn answer_kind_label(kind: &magpie_core::eval::AnswerKind) -> &'static str {
+    use magpie_core::eval::AnswerKind::*;
+    match kind {
+        Date => "Date",
+        DateTime => "Date & time",
+        DateRange => "Date range",
+        Duration => "Duration",
+        Number => "Number",
+        Rational => "Fraction",
+        Percent => "Percent",
+        Unit => "Unit",
+        Error => "Error",
+    }
+}
+
+/// Evaluate `query` and populate the inline answer-card properties, or hide the
+/// card when the query is not answer-like (or evaluates to an error). The selected
+/// format index is only clamped here — it is reset to 0 by `on_search_changed` when
+/// the query text actually changes, so Tab cycling survives background refreshes.
+fn set_answer_card(ui: &LauncherWindow, query: &str) {
+    use magpie_core::eval;
+    let answer = if eval::is_answer_like(query) {
+        eval::evaluate(
+            query,
+            eval::ReferenceNow {
+                epoch_secs: now_ms() / 1000,
+                utc_offset_secs: local_offset_seconds() as i32,
+            },
+        )
+    } else {
+        None
+    };
+    match answer {
+        Some(a) if !matches!(a.kind, eval::AnswerKind::Error) => {
+            let chips: Vec<SharedString> = a
+                .formats
+                .iter()
+                .map(|c| SharedString::from(c.text.clone()))
+                .collect();
+            let n = chips.len() as i32;
+            ui.set_answer_kind(SharedString::from(answer_kind_label(&a.kind)));
+            ui.set_answer_display(SharedString::from(a.display));
+            ui.set_answer_explanation(SharedString::from(a.explanation));
+            ui.set_answer_formats(ModelRc::new(VecModel::from(chips)));
+            if ui.get_answer_format_index() >= n.max(1) {
+                ui.set_answer_format_index(0);
+            }
+            ui.set_has_answer(n > 0);
+        }
+        _ => ui.set_has_answer(false),
+    }
+}
+
+/// A built-in sample dataset (NASA planetary fact sheet) shown the first time the
+/// Data view is opened, so the grid is never empty. Matches reference screen 13.
+const SAMPLE_DATA_CSV: &str = "name,mass_1e24kg,diameter_km,distance_1e6km,period_days,moons\n\
+Mercury,0.330,4879,57.9,88.0,0\n\
+Venus,4.87,12104,108.2,224.7,0\n\
+Earth,5.97,12756,149.6,365.2,1\n\
+Mars,0.642,6792,228.0,687.0,2\n\
+Jupiter,1898,142984,778.5,4331,95\n\
+Saturn,568,120536,1432.0,10747,146\n\
+Uranus,86.8,51118,2867.0,30589,28\n\
+Neptune,102,49528,4515.0,59800,16\n";
+
+fn read_as_from_index(i: i32) -> magpie_core::table::ReadAs {
+    use magpie_core::table::ReadAs;
+    match i {
+        1 => ReadAs::Csv,
+        2 => ReadAs::Json,
+        3 => ReadAs::LaTeX,
+        4 => ReadAs::Typst,
+        5 => ReadAs::Lines,
+        _ => ReadAs::Auto,
+    }
+}
+
+fn index_from_read_as(r: magpie_core::table::ReadAs) -> i32 {
+    use magpie_core::table::ReadAs;
+    match r {
+        ReadAs::Auto => 0,
+        ReadAs::Csv | ReadAs::Tsv => 1,
+        ReadAs::Json => 2,
+        ReadAs::LaTeX => 3,
+        ReadAs::Typst => 4,
+        ReadAs::Lines | ReadAs::Markdown => 5,
+    }
+}
+
+fn column_is_numeric(kind: magpie_core::table::ColumnKind) -> bool {
+    use magpie_core::table::ColumnKind;
+    matches!(kind, ColumnKind::Integer | ColumnKind::Float)
+}
+
+/// Parse `data_input` under the active Read-as and push the grid + recent rail
+/// into the `DataStore` global, then recompute the chart. Shared by the Data
+/// nav arm, the Read-as tabs, and "Open as table".
+fn refresh_data(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::table;
+    let input = state
+        .data_input
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let read_as = state
+        .data_read_as
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(table::ReadAs::Auto);
+    let name = state
+        .data_name
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let ds = ui.global::<DataStore>();
+    ds.set_read_as(index_from_read_as(read_as));
+
+    // Recent rail (session-scoped).
+    if let Ok(recent) = state.data_recent.lock() {
+        let rows: Vec<RecentData> = recent
+            .iter()
+            .map(|d| RecentData {
+                name: SharedString::from(d.name.clone()),
+                meta: SharedString::from(d.meta.clone()),
+                selected: d.name == name,
+            })
+            .collect();
+        ds.set_recent(ModelRc::new(VecModel::from(rows)));
+    }
+
+    match table::parse(&input, read_as) {
+        Ok(t) => {
+            let cols: Vec<DataColumn> = t
+                .columns
+                .iter()
+                .map(|c| DataColumn {
+                    name: SharedString::from(c.name.clone()),
+                    kind: SharedString::from(c.kind.as_str()),
+                    numeric: column_is_numeric(c.kind),
+                    cells: ModelRc::new(VecModel::from(
+                        c.cells
+                            .iter()
+                            .map(|s| SharedString::from(s.clone()))
+                            .collect::<Vec<_>>(),
+                    )),
+                })
+                .collect();
+            ds.set_columns(ModelRc::new(VecModel::from(cols)));
+            ds.set_row_count(t.row_count as i32);
+            ds.set_format(SharedString::from(format!("{} · header row", t.format)));
+        }
+        Err(e) => {
+            ds.set_columns(ModelRc::new(VecModel::from(Vec::<DataColumn>::new())));
+            ds.set_row_count(0);
+            ds.set_format(SharedString::from(format!("error — {e}")));
+        }
+    }
+    compute_chart(ui, state);
+}
+
+/// Recompute the chart points (normalized 0..1, origin bottom-left) + linear fit
+/// from the current table and `data_chart` selection, and push them into DataStore.
+fn compute_chart(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::table;
+    let ds = ui.global::<DataStore>();
+    let mut chart = state
+        .data_chart
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    ds.set_chart_open(chart.open);
+    ds.set_chart_type(chart.kind);
+    ds.set_chart_log(chart.log);
+    if !chart.open {
+        ds.set_chart_points(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        return;
+    }
+    let input = state
+        .data_input
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let read_as = state
+        .data_read_as
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(table::ReadAs::Auto);
+    let Ok(t) = table::parse(&input, read_as) else {
+        ds.set_chart_points(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        return;
+    };
+    let numeric: Vec<usize> = t
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| column_is_numeric(c.kind))
+        .map(|(i, _)| i)
+        .collect();
+    if numeric.len() < 2 {
+        ds.set_chart_points(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        return;
+    }
+    // Ensure x/y point at valid, distinct numeric columns.
+    if !numeric.contains(&chart.x) {
+        chart.x = numeric[0];
+    }
+    if !numeric.contains(&chart.y) || chart.y == chart.x {
+        chart.y = *numeric
+            .iter()
+            .find(|&&i| i != chart.x)
+            .unwrap_or(&numeric[1]);
+    }
+    // A text/name column for point labels: first non-numeric, else none.
+    let label_col = t.columns.iter().position(|c| !column_is_numeric(c.kind));
+    // Save any clamping back.
+    if let Ok(mut g) = state.data_chart.lock() {
+        g.x = chart.x;
+        g.y = chart.y;
+    }
+
+    let xcol = &t.columns[chart.x];
+    let ycol = &t.columns[chart.y];
+    let n = t.row_count;
+    let mut pts: Vec<(f64, f64, String)> = Vec::new();
+    for r in 0..n {
+        let xs = xcol.cells.get(r).map(|s| s.as_str()).unwrap_or("");
+        let ys = ycol.cells.get(r).map(|s| s.as_str()).unwrap_or("");
+        let (Ok(mut xv), Ok(mut yv)) = (xs.parse::<f64>(), ys.parse::<f64>()) else {
+            continue;
+        };
+        if chart.log {
+            if xv <= 0.0 || yv <= 0.0 {
+                continue;
+            }
+            xv = xv.log10();
+            yv = yv.log10();
+        }
+        let label = label_col
+            .and_then(|lc| t.columns[lc].cells.get(r))
+            .cloned()
+            .unwrap_or_default();
+        pts.push((xv, yv, label));
+    }
+    if pts.is_empty() {
+        ds.set_chart_points(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        return;
+    }
+    let (xmin, xmax) = pts
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+    let (ymin, ymax) = pts
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+    let xspan = if xmax > xmin { xmax - xmin } else { 1.0 };
+    let yspan = if ymax > ymin { ymax - ymin } else { 1.0 };
+    // Linear fit (least squares) on the (possibly log-transformed) data.
+    let m = pts.len() as f64;
+    let sx: f64 = pts.iter().map(|p| p.0).sum();
+    let sy: f64 = pts.iter().map(|p| p.1).sum();
+    let sxx: f64 = pts.iter().map(|p| p.0 * p.0).sum();
+    let sxy: f64 = pts.iter().map(|p| p.0 * p.1).sum();
+    let denom = m * sxx - sx * sx;
+    let (slope, fit_txt) = if denom.abs() > f64::EPSILON {
+        let slope = (m * sxy - sx * sy) / denom;
+        let intercept = (sy - slope * sx) / m;
+        // r²
+        let ybar = sy / m;
+        let ss_tot: f64 = pts.iter().map(|p| (p.1 - ybar).powi(2)).sum();
+        let ss_res: f64 = pts
+            .iter()
+            .map(|p| (p.1 - (slope * p.0 + intercept)).powi(2))
+            .sum();
+        let r2 = if ss_tot > 0.0 {
+            1.0 - ss_res / ss_tot
+        } else {
+            1.0
+        };
+        (Some(slope), format!("Fit: slope {slope:.2} · r² {r2:.2}"))
+    } else {
+        (None, String::new())
+    };
+    let _ = slope;
+    let chart_pts: Vec<ChartPoint> = pts
+        .iter()
+        .map(|p| ChartPoint {
+            x: ((p.0 - xmin) / xspan) as f32,
+            y: ((p.1 - ymin) / yspan) as f32,
+            label: SharedString::from(p.2.clone()),
+        })
+        .collect();
+    ds.set_chart_points(ModelRc::new(VecModel::from(chart_pts)));
+    ds.set_chart_x_name(SharedString::from(xcol.name.clone()));
+    ds.set_chart_y_name(SharedString::from(ycol.name.clone()));
+    ds.set_chart_label_name(SharedString::from(
+        label_col
+            .map(|lc| t.columns[lc].name.clone())
+            .unwrap_or_default(),
+    ));
+    ds.set_chart_fit(SharedString::from(fit_txt));
+}
+
+/// Open a string as the current dataset (from a clipboard entry or a recent
+/// rail row), reset the Read-as to Auto, and refresh the Data view.
+fn open_data(ui: &LauncherWindow, state: &AppState, name: &str, input: &str) {
+    use magpie_core::table;
+    if let Ok(mut g) = state.data_input.lock() {
+        *g = input.to_string();
+    }
+    if let Ok(mut g) = state.data_read_as.lock() {
+        *g = table::ReadAs::Auto;
+    }
+    if let Ok(mut g) = state.data_name.lock() {
+        *g = name.to_string();
+    }
+    // Record/refresh the recent rail (most-recent first, de-duplicated by name).
+    if let Ok(t) = table::parse(input, table::ReadAs::Auto) {
+        let meta = format!("{} · {} × {}", t.format, t.row_count, t.column_count());
+        if let Ok(mut recent) = state.data_recent.lock() {
+            recent.retain(|d| d.name != name);
+            recent.insert(
+                0,
+                DataSource {
+                    name: name.to_string(),
+                    meta,
+                    input: input.to_string(),
+                    read_as: table::ReadAs::Auto,
+                },
+            );
+            recent.truncate(8);
+        }
+    }
+    refresh_data(ui, state);
+}
+
+/// Advance the chart's X (or Y) selection to the next numeric column, wrapping.
+fn cycle_chart_col(state: &AppState, is_x: bool) {
+    use magpie_core::table;
+    let input = state
+        .data_input
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let read_as = state
+        .data_read_as
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(table::ReadAs::Auto);
+    let Ok(t) = table::parse(&input, read_as) else {
+        return;
+    };
+    let numeric: Vec<usize> = t
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| column_is_numeric(c.kind))
+        .map(|(i, _)| i)
+        .collect();
+    if numeric.is_empty() {
+        return;
+    }
+    let mut g = state.data_chart.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = if is_x { g.x } else { g.y };
+    let pos = numeric.iter().position(|&i| i == cur).unwrap_or(0);
+    let next = numeric[(pos + 1) % numeric.len()];
+    if is_x {
+        g.x = next;
+    } else {
+        g.y = next;
+    }
+}
+
+/// Seed the Data view with the built-in sample the first time it is opened
+/// (when nothing has been loaded yet this session).
+fn ensure_data_seeded(ui: &LauncherWindow, state: &AppState) {
+    let empty = state
+        .data_input
+        .lock()
+        .map(|g| g.trim().is_empty())
+        .unwrap_or(true);
+    if empty {
+        open_data(ui, state, "planets.csv", SAMPLE_DATA_CSV);
+    } else {
+        refresh_data(ui, state);
+    }
+}
+
+/// Local wall-clock `HH:MM` for a timestamp, for the calculator history rows.
+fn hhmm(ms: i64, offset_secs: i64) -> String {
+    let local = (ms + offset_secs * 1000).div_euclid(1000);
+    let sod = local.rem_euclid(86_400);
+    format!("{:02}:{:02}", sod / 3600, (sod % 3600) / 60)
+}
+
+/// Split a graph equation into its two curves: `sin(x) = x/3` → (`sin(x)`, `x/3`).
+/// A single function (`x^3 - 4x`) returns an empty second side. Each side is left
+/// intact — `Expr::parse` strips any real `f(x) =` / `y =` naming prefix itself.
+fn split_fg(query: &str) -> (String, String) {
+    if let Some(eq) = query.find('=') {
+        let lhs = query[..eq].trim();
+        let rhs = query[eq + 1..].trim();
+        if !lhs.is_empty() && !rhs.is_empty() && lhs != rhs {
+            return (lhs.to_string(), rhs.to_string());
+        }
+        return (
+            if lhs.is_empty() { rhs } else { lhs }.to_string(),
+            String::new(),
+        );
+    }
+    (query.trim().to_string(), String::new())
+}
+
+/// Repopulate the calculator history list + counts + saved-graphs rail from the
+/// store, honoring the active tab filter.
+fn refresh_calc(ui: &LauncherWindow, state: &AppState) {
+    let cs = ui.global::<CalcStore>();
+    let kind_filter = match cs.get_tab() {
+        1 => Some("math"),
+        2 => Some("date"),
+        3 => Some("graph"),
+        _ => None,
+    };
+    let offset = local_offset_seconds();
+    let now = now_ms();
+    let to_row = |e: &magpie_core::calc_history::CalcEntry| CalcRow {
+        id: e.id as i32,
+        kind: SharedString::from(e.kind.clone()),
+        input: SharedString::from(e.input.clone()),
+        result: SharedString::from(e.result.clone()),
+        time: SharedString::from(hhmm(e.created_at_ms, offset)),
+        group: SharedString::from(grouping::section_label(e.pinned, e.created_at_ms, now)),
+        pinned: e.pinned,
+    };
+    let (rows, counts, graphs) = {
+        let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            st.list_calc_history(kind_filter, 500).unwrap_or_default(),
+            st.calc_history_counts().unwrap_or((0, 0, 0, 0)),
+            st.list_calc_history(Some("graph"), 100).unwrap_or_default(),
+        )
+    };
+    let history: Vec<CalcRow> = rows.iter().map(to_row).collect();
+    let n = history.len() as i32;
+    cs.set_history(ModelRc::new(VecModel::from(history)));
+    cs.set_count_all(counts.0 as i32);
+    cs.set_count_math(counts.1 as i32);
+    cs.set_count_date(counts.2 as i32);
+    cs.set_count_graph(counts.3 as i32);
+    cs.set_saved_graphs(ModelRc::new(VecModel::from(
+        graphs.iter().map(to_row).collect::<Vec<_>>(),
+    )));
+    if cs.get_selected() >= n {
+        cs.set_selected(0);
+    }
+}
+
+/// Sample the current graph functions over a fixed window, normalize to 0..1, and
+/// push the polylines + intersection markers + stats into the CalcStore global.
+fn compute_graph(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::plot::{area_between, intersections, sample, Expr};
+    let cs = ui.global::<CalcStore>();
+    let f_src = state
+        .calc_graph_f
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let g_src = state
+        .calc_graph_g
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    cs.set_graph_f(SharedString::from(if f_src.is_empty() {
+        String::new()
+    } else {
+        format!("f(x) = {f_src}")
+    }));
+    cs.set_graph_g(SharedString::from(if g_src.is_empty() {
+        String::new()
+    } else {
+        format!("g(x) = {g_src}")
+    }));
+
+    let (x0, x1, n) = (-5.0_f64, 5.0_f64, 240usize);
+    let f = Expr::parse(&f_src);
+    let g = if g_src.is_empty() {
+        None
+    } else {
+        Expr::parse(&g_src)
+    };
+
+    // Gather finite y across both curves to fix the shared y-range.
+    let f_samples = f.as_ref().map(|e| sample(e, x0, x1, n)).unwrap_or_default();
+    let g_samples = g.as_ref().map(|e| sample(e, x0, x1, n)).unwrap_or_default();
+    let mut ys: Vec<f64> = Vec::new();
+    for s in f_samples.iter().chain(g_samples.iter()) {
+        if let (_, Some(y)) = s {
+            ys.push(*y);
+        }
+    }
+    if ys.is_empty() {
+        cs.set_graph_f_cmd(SharedString::from(""));
+        cs.set_graph_g_cmd(SharedString::from(""));
+        cs.set_graph_intersections(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        cs.set_graph_stats_intersections(SharedString::from("—"));
+        cs.set_graph_stats_area(SharedString::from("—"));
+        cs.set_graph_stats_max(SharedString::from("—"));
+        return;
+    }
+    let ymin = ys.iter().cloned().fold(f64::MAX, f64::min);
+    let ymax = ys.iter().cloned().fold(f64::MIN, f64::max);
+    let yspan = if ymax > ymin { ymax - ymin } else { 1.0 };
+    // Build an SVG polyline command string in 0..1 space (y inverted so higher
+    // values sit toward the top). A `None` sample lifts the pen (new `M`).
+    let to_cmd = |samples: &[(f64, Option<f64>)]| -> String {
+        let mut s = String::new();
+        let mut pen_down = false;
+        for (x, y) in samples {
+            match y {
+                Some(y) => {
+                    let px = (x - x0) / (x1 - x0);
+                    let py = 1.0 - (y - ymin) / yspan;
+                    if pen_down {
+                        s.push_str(&format!("L {px:.4} {py:.4} "));
+                    } else {
+                        s.push_str(&format!("M {px:.4} {py:.4} "));
+                        pen_down = true;
+                    }
+                }
+                None => pen_down = false,
+            }
+        }
+        s
+    };
+    cs.set_graph_f_cmd(SharedString::from(to_cmd(&f_samples)));
+    cs.set_graph_g_cmd(SharedString::from(to_cmd(&g_samples)));
+
+    // Intersections + stats (only meaningful with two curves).
+    if let (Some(f), Some(g)) = (f.as_ref(), g.as_ref()) {
+        let roots = intersections(f, g, x0, x1, 400);
+        let markers: Vec<ChartPoint> = roots
+            .iter()
+            .map(|(x, y)| ChartPoint {
+                x: ((x - x0) / (x1 - x0)) as f32,
+                y: ((y - ymin) / yspan) as f32,
+                label: SharedString::from(""),
+            })
+            .collect();
+        cs.set_graph_intersections(ModelRc::new(VecModel::from(markers)));
+        let roots_txt = if roots.is_empty() {
+            "none in view".to_string()
+        } else {
+            roots
+                .iter()
+                .take(4)
+                .map(|(x, y)| format!("({x:.3}, {y:.3})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        cs.set_graph_stats_intersections(SharedString::from(roots_txt));
+        let area = area_between(f, g, x0, x1, 400);
+        cs.set_graph_stats_area(SharedString::from(format!("{area:.4}  on [−5, 5]")));
+    } else {
+        cs.set_graph_intersections(ModelRc::new(VecModel::from(Vec::<ChartPoint>::new())));
+        cs.set_graph_stats_intersections(SharedString::from("—"));
+        cs.set_graph_stats_area(SharedString::from("—"));
+    }
+    // Max f in view.
+    let fmax = f_samples
+        .iter()
+        .filter_map(|(_, y)| *y)
+        .fold(f64::MIN, f64::max);
+    cs.set_graph_stats_max(SharedString::from(if fmax > f64::MIN {
+        format!("{fmax:.3}")
+    } else {
+        "—".to_string()
+    }));
+}
+
+/// Best-effort LaTeX → Typst conversion for the "Copy Typst" button (subset:
+/// `\frac{a}{b}` → `frac(a, b)`, `\sum`/`\prod`/`\int` → their Typst names,
+/// `^{…}`/`_{…}` → `^(…)`/`_(…)`, and remaining `\cmd` stripped to `cmd`).
+fn latex_to_typst(src: &str) -> String {
+    let mut s = src.to_string();
+    for (a, b) in [
+        ("\\frac", "frac"),
+        ("\\sum", "sum"),
+        ("\\prod", "product"),
+        ("\\int", "integral"),
+        ("\\cdot", " dot "),
+        ("\\times", " times "),
+        ("\\sqrt", "sqrt"),
+        ("\\", ""),
+    ] {
+        s = s.replace(a, b);
+    }
+    s.replace("}{", ", ").replace('{', "(").replace('}', ")")
+}
+
+/// Render the current calculator query as typeset math (screen 11) into the
+/// CalcStore image, honoring the Plain/LaTeX/Typst toggle. `syntax_mode` 0 = Plain
+/// (hide the typeset image and show the plain result), 1 = LaTeX, 2 = Typst.
+fn update_calc_math(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::mathsvg::{render, Syntax};
+    let _ = state;
+    let cs = ui.global::<CalcStore>();
+    let query = ui.get_query().to_string();
+    let mode = cs.get_syntax_mode();
+    let syntax = match mode {
+        1 => Syntax::Latex,
+        2 => Syntax::Typst,
+        _ => Syntax::Plain,
+    };
+    if mode == 0 || query.trim().is_empty() {
+        cs.set_math_has(false);
+        return;
+    }
+    let dark = magpie_app::themes::is_dark(ui.get_theme_index() as usize);
+    let color = if dark { "#ededf0" } else { "#1a1a1a" };
+    match render(&query, syntax, color)
+        .and_then(|svg| slint::Image::load_from_svg_data(svg.as_bytes()).ok())
+    {
+        Some(img) => {
+            cs.set_math_svg(img);
+            cs.set_math_has(true);
+        }
+        None => cs.set_math_has(false),
+    }
+}
+
+/// Save the current search-bar expression to the calculator history. A plottable
+/// expression in `x` becomes a `graph` entry and opens the Graphs view; anything
+/// `eval` can resolve becomes a `math`/`date` entry and its result is copied.
+fn calc_commit(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::eval;
+    let query = ui.get_query().to_string();
+    let q = query.trim();
+    if q.is_empty() {
+        return;
+    }
+    // Graph? (contains a free `x` and parses as a function).
+    if q.contains('x') {
+        let (f, g) = split_fg(q);
+        if magpie_core::plot::Expr::parse(&f).is_some() {
+            if let Ok(mut lock) = state.calc_graph_f.lock() {
+                *lock = f;
+            }
+            if let Ok(mut lock) = state.calc_graph_g.lock() {
+                *lock = g;
+            }
+            if let Ok(st) = state.store.lock() {
+                let _ = st.add_calc_entry("graph", q, "plain", "graph", now_ms());
+            }
+            ui.global::<CalcStore>().set_graphs_open(true);
+            compute_graph(ui, state);
+            refresh_calc(ui, state);
+            return;
+        }
+    }
+    // Otherwise a concrete math/date evaluation.
+    if let Some(ans) = eval::evaluate(
+        q,
+        eval::ReferenceNow {
+            epoch_secs: now_ms() / 1000,
+            utc_offset_secs: local_offset_seconds() as i32,
+        },
+    ) {
+        if matches!(ans.kind, eval::AnswerKind::Error) {
+            return;
+        }
+        let kind = match ans.kind {
+            eval::AnswerKind::Date | eval::AnswerKind::DateTime | eval::AnswerKind::DateRange => {
+                "date"
+            }
+            _ => "math",
+        };
+        if let Ok(st) = state.store.lock() {
+            let _ = st.add_calc_entry(kind, q, "plain", &ans.display, now_ms());
+        }
+        if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+            let _ = clip.set_text(&ans.display);
+        }
+        refresh_calc(ui, state);
+    }
 }
 
 /// The view (if any) the given section is currently showing, for history
@@ -579,6 +1277,16 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
         ("stats", _) => {
             ui.set_view(SharedString::from("stats"));
             refresh_stats(ui, state, ui.get_range_index());
+        }
+        ("data", _) => {
+            ui.set_view(SharedString::from("data"));
+            ensure_data_seeded(ui, state);
+        }
+        ("calculator", _) => {
+            ui.set_view(SharedString::from("calculator"));
+            ui.global::<CalcStore>().set_graphs_open(false);
+            refresh_calc(ui, state);
+            update_calc_math(ui, state);
         }
         _ => {
             // clipboard: everything above is already cleared.
@@ -2025,6 +2733,15 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             }
                         }
                         "mask" => ui.invoke_toggle_screenshare(),
+                        // Transforms (⌘T) palette with a representative input so the
+                        // result pane is populated for screenshots.
+                        "transform" => {
+                            ui.set_transform_input(SharedString::from(
+                                "banana\napple\napple\ncherry\n",
+                            ));
+                            ui.set_transform_selected(0);
+                            ui.set_mode(SharedString::from("transform"));
+                        }
                         "notes" => ui.invoke_set_mode_notes(true),
                         "tasks" => ui.invoke_set_mode_tasks(true),
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
@@ -2058,6 +2775,43 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             let q = SharedString::from("zzqqxnomatch");
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
+                        }
+                        // Inline answer card: type a date expression into the search box.
+                        "answer" => {
+                            let q = SharedString::from("next monday + (195-17)d");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
+                        // Data view: the typed grid (13), optionally with the chart (14).
+                        "data" => {
+                            ui.invoke_set_section(SharedString::from("data"));
+                        }
+                        "data-chart" => {
+                            ui.invoke_set_section(SharedString::from("data"));
+                            ui.global::<DataStore>().invoke_chart_toggle();
+                        }
+                        // Calculator history (11): seed a query so the answer card shows.
+                        "calculator" => {
+                            ui.invoke_set_section(SharedString::from("calculator"));
+                            let q = SharedString::from("17% of 2340 + 3/8");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                            ui.global::<CalcStore>().invoke_commit();
+                        }
+                        // Calculator typesetting (Phase 8): a LaTeX expression.
+                        "calc-latex" => {
+                            ui.invoke_set_section(SharedString::from("calculator"));
+                            let q = SharedString::from("\\sum_{k=1}^{10} k^2 + \\frac{3}{8}");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                        }
+                        // Calculator graphs (12): plot sin(x) = x/3.
+                        "calc-graph" => {
+                            ui.invoke_set_section(SharedString::from("calculator"));
+                            let q = SharedString::from("sin(x) = x/3");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                            ui.global::<CalcStore>().invoke_commit();
                         }
                         // "text"/"link"/"color"/"image"/"file" select that type chip.
                         kind if TYPE_CHIPS.contains(&kind) => {
@@ -2174,6 +2928,20 @@ pub fn start() {
 
     let state = build_state(&cfg);
     let ui = LauncherWindow::new().expect("create window");
+    // Bundle the Graphite UI typefaces (Geist / Geist Mono, OFL) so typography is
+    // identical on every OS. Registered after the backend is initialized (window
+    // creation) via the fontique collection Slint uses for text rendering.
+    {
+        use slint::fontique_010::fontique;
+        let mut fonts = slint::fontique_010::shared_collection();
+        for bytes in [
+            include_bytes!("../fonts/Geist.ttf").as_slice(),
+            include_bytes!("../fonts/GeistMono.ttf").as_slice(),
+        ] {
+            let blob = fontique::Blob::new(std::sync::Arc::new(bytes.to_vec()));
+            let _ = fonts.register_fonts(blob, None);
+        }
+    }
     let weak = ui.as_weak();
     // Apply the persisted theme once, at window creation — see the comment in
     // `show_window` for why this isn't repeated on every summon.
@@ -2224,6 +2992,312 @@ pub fn start() {
         popover.on_dismiss(move || {
             if let Some(p) = p.upgrade() {
                 let _ = p.hide();
+            }
+        });
+    }
+    // Transforms (⌘T) palette. `transform_run` is a pure preview of the selected
+    // transform applied to the input; `transform_action` pastes / copies / saves it.
+    {
+        ui.on_transform_run(move |idx, input| {
+            SharedString::from(magpie_core::transforms::run_index_display(
+                idx as usize,
+                input.as_str(),
+            ))
+        });
+    }
+    {
+        ui.on_transform_stats(move |idx, input| {
+            SharedString::from(magpie_core::transforms::run_index_stats(
+                idx as usize,
+                input.as_str(),
+            ))
+        });
+    }
+    {
+        ui.on_transform_input_summary(move |input| {
+            SharedString::from(magpie_core::transforms::input_summary(input.as_str()))
+        });
+    }
+    // ---- Data view (screens 13/14) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_set_read_as(move |i| {
+            if let Ok(mut g) = s.data_read_as.lock() {
+                *g = read_as_from_index(i);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_data(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_open_recent(move |i| {
+            let src = s
+                .data_recent
+                .lock()
+                .ok()
+                .and_then(|r| r.get(i as usize).cloned());
+            if let (Some(src), Some(ui)) = (src, w.upgrade()) {
+                open_data(&ui, &s, &src.name, &src.input);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_open_from_clip(move || {
+            let recent = current_results(&s, now_ms());
+            if let (Some(e), Some(ui)) = (recent.first(), w.upgrade()) {
+                open_data(&ui, &s, "Clipboard entry", &e.full_text);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.global::<DataStore>().on_export_data(move || {
+            use magpie_core::table;
+            let input = s.data_input.lock().map(|g| g.clone()).unwrap_or_default();
+            let read_as = s
+                .data_read_as
+                .lock()
+                .map(|g| *g)
+                .unwrap_or(table::ReadAs::Auto);
+            if let Ok(t) = table::parse(&input, read_as) {
+                let out = table::export(&t.columns, table::ExportFormat::Csv);
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&out);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_chart_toggle(move || {
+            if let Ok(mut g) = s.data_chart.lock() {
+                g.open = !g.open;
+            }
+            if let Some(ui) = w.upgrade() {
+                compute_chart(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_chart_set_type(move |t| {
+            if let Ok(mut g) = s.data_chart.lock() {
+                g.kind = t;
+            }
+            if let Some(ui) = w.upgrade() {
+                compute_chart(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_chart_cycle_x(move || {
+            cycle_chart_col(&s, true);
+            if let Some(ui) = w.upgrade() {
+                compute_chart(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_chart_cycle_y(move || {
+            cycle_chart_col(&s, false);
+            if let Some(ui) = w.upgrade() {
+                compute_chart(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<DataStore>().on_chart_set_log(move |on| {
+            if let Ok(mut g) = s.data_chart.lock() {
+                g.log = on;
+            }
+            if let Some(ui) = w.upgrade() {
+                compute_chart(&ui, &s);
+            }
+        });
+    }
+    // ---- Calculator (screens 11/12) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_set_tab(move |t| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<CalcStore>().set_tab(t);
+                ui.global::<CalcStore>().set_selected(0);
+                refresh_calc(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_reuse(move |i| {
+            if let Some(ui) = w.upgrade() {
+                let model = ui.global::<CalcStore>().get_history();
+                if let Some(row) = model.row_data(i as usize) {
+                    ui.set_query(row.input.clone());
+                    ui.invoke_search_changed(row.input);
+                }
+                let _ = &s;
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_delete_row(move |i| {
+            if let Some(ui) = w.upgrade() {
+                let model = ui.global::<CalcStore>().get_history();
+                if let Some(row) = model.row_data(i as usize) {
+                    if let Ok(st) = s.store.lock() {
+                        let _ = st.delete_calc_entry(row.id as i64);
+                    }
+                }
+                refresh_calc(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_clear_history(move || {
+            if let Ok(st) = s.store.lock() {
+                let _ = st.clear_calc_history();
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_calc(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_copy_row(move |i| {
+            if let Some(ui) = w.upgrade() {
+                let model = ui.global::<CalcStore>().get_history();
+                if let Some(row) = model.row_data(i as usize) {
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = clip.set_text(&row.result);
+                    }
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_commit(move || {
+            if let Some(ui) = w.upgrade() {
+                calc_commit(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_open_graphs(move |i| {
+            if let Some(ui) = w.upgrade() {
+                let model = ui.global::<CalcStore>().get_saved_graphs();
+                if let Some(row) = model.row_data(i as usize) {
+                    let (f, g) = split_fg(row.input.as_str());
+                    if let Ok(mut lock) = s.calc_graph_f.lock() {
+                        *lock = f;
+                    }
+                    if let Ok(mut lock) = s.calc_graph_g.lock() {
+                        *lock = g;
+                    }
+                    ui.global::<CalcStore>().set_graphs_open(true);
+                    compute_graph(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_close_graphs(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<CalcStore>().set_graphs_open(false);
+                refresh_calc(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_set_syntax(move |m| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<CalcStore>().set_syntax_mode(m);
+                update_calc_math(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_copy_latex(move || {
+            if let Some(ui) = w.upgrade() {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&ui.get_query());
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_copy_typst(move || {
+            if let Some(ui) = w.upgrade() {
+                let typst = latex_to_typst(&ui.get_query());
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&typst);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_transform_action(move |result, action| {
+            let result = result.to_string();
+            if result.is_empty() {
+                return;
+            }
+            match action {
+                1 => {
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = clip.set_text(&result);
+                    }
+                }
+                2 => {
+                    if let Ok(store) = s.store.lock() {
+                        let _ = store.create_snippet(&result, now_ms());
+                    }
+                    if let Some(ui) = w.upgrade() {
+                        refresh(&ui, &s);
+                    }
+                }
+                _ => {
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = clip.set_text(&result);
+                    }
+                    if let Some(ui) = w.upgrade() {
+                        hide_launcher(&ui);
+                    }
+                    let _ = slint::invoke_from_event_loop(|| {
+                        let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                    });
+                }
             }
         });
     }
@@ -2331,7 +3405,19 @@ pub fn start() {
                 u.text = text.to_string();
             }
             if let Some(ui) = w.upgrade() {
+                // New query text → start the answer card at its first format.
+                ui.set_answer_format_index(0);
                 refresh(&ui, &s);
+                // In the calculator, auto-detect the input syntax and re-typeset.
+                if ui.get_view() == "calculator" {
+                    let mode = match magpie_core::mathsvg::detect_syntax(text.as_str()) {
+                        magpie_core::mathsvg::Syntax::Latex => 1,
+                        magpie_core::mathsvg::Syntax::Typst => 2,
+                        magpie_core::mathsvg::Syntax::Plain => 0,
+                    };
+                    ui.global::<CalcStore>().set_syntax_mode(mode);
+                    update_calc_math(&ui, &s);
+                }
             }
         });
     }

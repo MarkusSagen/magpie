@@ -197,7 +197,7 @@ export component NotesView inherits Rectangle {
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -336,7 +336,7 @@ export component NotesView inherits Rectangle {
                         if root.note-suggestions.length > 0: Rectangle {
                             max-height: 160px;
                             background: Theme.bg-elevated;
-                            border-color: Theme.border-strong;
+                            border-color: Theme.line-strong;
                             border-width: 1px;
                             border-radius: Theme.r-sm;
                             VerticalLayout {
@@ -345,7 +345,7 @@ export component NotesView inherits Rectangle {
                                 for name in root.note-suggestions: Rectangle {
                                     height: 24px;
                                     border-radius: 4px;
-                                    background: srow.has-hover ? Theme.border-strong : transparent;
+                                    background: srow.has-hover ? Theme.line-strong : transparent;
                                     srow := TouchArea { clicked => { root.accept-note-suggestion(name); } }
                                     HorizontalLayout {
                                         padding-left: 8px;
@@ -368,7 +368,7 @@ export component NotesView inherits Rectangle {
                                 HorizontalLayout {
                                     padding-left: 10px;
                                     padding-right: 10px;
-                                    Text { text: name; color: Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    Text { text: name; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 }
                                 chip := TouchArea { clicked => { root.open-page(name); } }
                             }
@@ -436,7 +436,7 @@ export component NotesView inherits Rectangle {
                                                 border-radius: Theme.r-sm;
                                                 background: lk.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                                 lk := TouchArea { clicked => { root.link-mention(r.note_id, r.line_index); } }
-                                                Text { text: "Link"; color: Theme.link; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                                Text { text: "Link"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                             }
                                         }
                                     }

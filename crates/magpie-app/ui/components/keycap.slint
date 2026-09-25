@@ -1,0 +1,37 @@
+import { Theme } from "../theme.slint";
+
+// A keyboard-key chip. Mono 11px in an 18px-tall rounded box (`bg-elevated` /
+// `line-strong` border), per the Graphite spec. `strong` uses the primary text
+// colour for a primary action's key.
+export component Keycap inherits Rectangle {
+    in property <string> text;
+    in property <bool> strong;
+    height: 18px;
+    min-width: 18px;
+    background: Theme.bg-elevated;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    border-radius: Theme.r-xs;
+    HorizontalLayout {
+        padding-left: 5px;
+        padding-right: 5px;
+        Text {
+            text: root.text;
+            color: root.strong ? Theme.text : Theme.text-dim;
+            font-family: "Geist Mono";
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The boxless mono hint (sidebar `G x`, idle row shortcuts, row numbers).
+// `bright` lifts it to `text-dim` while ⌘ is held (see the held-modifier layer).
+export component HintText inherits Text {
+    in property <bool> bright;
+    color: root.bright ? Theme.text-dim : Theme.text-ghost;
+    font-family: "Geist Mono";
+    font-size: 11px;
+    letter-spacing: 0.4px;
+}

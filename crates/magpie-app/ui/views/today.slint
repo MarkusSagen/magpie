@@ -57,16 +57,16 @@ export component TodayView inherits Rectangle {
                     if root.active-title != "": Rectangle {
                         height: 30px;
                         border-radius: 6px;
-                        background: Theme.success.with-alpha(0.18);
+                        background: Theme.text-faint.with-alpha(0.18);
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 6px;
-                            Text { text: "▶"; color: Theme.success; font-size: 12px; vertical-alignment: center; }
+                            Text { text: "▶"; color: Theme.text-faint; font-size: 12px; vertical-alignment: center; }
                             Text { text: root.active-title; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
                             Text {
                                 text: Math.floor(root.active-elapsed-sec / 60) + ":" + (Math.mod(root.active-elapsed-sec, 60) < 10 ? "0" : "") + Math.mod(root.active-elapsed-sec, 60);
-                                color: Theme.success;
+                                color: Theme.text-faint;
                                 font-size: 12px;
                                 font-weight: 700;
                                 vertical-alignment: center;

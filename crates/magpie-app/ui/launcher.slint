@@ -7,6 +7,12 @@ import { TypeIcon, ActionIcon } from "components/glyphs.slint";
 import { HBar } from "components/hbar.slint";
 import { PopoverTaskRow } from "components/task_row.slint";
 import { BoardCard } from "components/board_card.slint";
+import { Sidebar } from "components/sidebar.slint";
+// Re-export the Data/Calculator globals so Rust can reach them via `ui.global::<…>()`.
+import { DataStore } from "data_store.slint";
+import { CalcStore } from "calc_store.slint";
+export { DataStore }
+export { CalcStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { BoardView } from "views/board.slint";
@@ -16,6 +22,8 @@ import { TodayView } from "views/today.slint";
 import { JournalView } from "views/journal.slint";
 import { FindView } from "views/find.slint";
 import { HelpView } from "views/help.slint";
+import { SettingsView } from "views/settings.slint";
+import { TransformsView } from "views/transforms.slint";
 import { AccessibilityView } from "views/accessibility.slint";
 import { FiltersView } from "views/filters.slint";
 import { ActionsView } from "views/actions.slint";
@@ -28,6 +36,7 @@ import { StatsView } from "views/stats.slint";
 
 export component LauncherWindow inherits Window {
     title: "Magpie";
+    default-font-family: "Geist";
     preferred-width: 960px;
     min-width: 960px;
     preferred-height: 560px;
@@ -35,7 +44,7 @@ export component LauncherWindow inherits Window {
     forward-focus: main;
 
     // ---- Sidebar navigation (5 sections, Rust-driven router) ----
-    property <length> sidebar-w: 60px;
+    property <length> sidebar-w: 208px;
     in-out property <string> section: "clipboard"; // clipboard|tasks|notes|bookmarks|stats
     in-out property <string> tasks-view: "today"; // today|list|board
     in-out property <string> notes-view: "notes"; // notes|journal|graph
@@ -47,6 +56,20 @@ export component LauncherWindow inherits Window {
     in-out property <int> theme-index: 0;
     // Select a theme by catalogue index (see themes.rs / Theme.palettes).
     callback set-theme(int);
+    // Transforms (⌘T) palette state.
+    in-out property <string> transform-input;
+    in-out property <int> transform-selected;
+    pure callback transform-run(int, string) -> string;
+    pure callback transform-stats(int, string) -> string;
+    pure callback transform-input-summary(string) -> string;
+    callback transform-action(string, int);
+    // Inline answer card (dates / math / units) shown above the clipboard results.
+    in-out property <bool> has-answer;
+    in-out property <string> answer-kind;
+    in-out property <string> answer-display;
+    in-out property <string> answer-explanation;
+    in-out property <[string]> answer-formats;
+    in-out property <int> answer-format-index;
     init => { Theme.index = root.theme-index; }
     changed theme-index => { Theme.index = root.theme-index; }
 
@@ -351,6 +374,13 @@ export component LauncherWindow inherits Window {
     Rectangle {
 
         main := MainView {
+            transform-input <=> root.transform-input;
+            has-answer <=> root.has-answer;
+            answer-kind <=> root.answer-kind;
+            answer-display <=> root.answer-display;
+            answer-explanation <=> root.answer-explanation;
+            answer-formats <=> root.answer-formats;
+            answer-format-index <=> root.answer-format-index;
             action-selected <=> root.action-selected;
             actions: root.actions;
             actions-backspace() => { root.actions-backspace(); }
@@ -603,128 +633,21 @@ export component LauncherWindow inherits Window {
         }
 
         // ---- Left sidebar: 5 section entry points (clipboard/tasks/notes/
-        sidebar := Rectangle {
+        sidebar := Sidebar {
             x: 0;
             y: 0;
-            width: root.sidebar-w;
             height: root.height;
-            background: Theme.bg-sidebar;
-            VerticalLayout {
-                padding-top: 12px;
-                padding-bottom: 12px;
-                spacing: 2px;
-                for s in [
-                    { id: "clipboard", label: "Clip", icon: Icons.tab-clipboard, accent: Theme.sec-clip },
-                    { id: "tasks", label: "Tasks", icon: Icons.tab-tasks, accent: Theme.sec-tasks },
-                    { id: "notes", label: "Notes", icon: Icons.tab-notes, accent: Theme.sec-notes },
-                    { id: "bookmarks", label: "Links", icon: Icons.type-link, accent: Theme.sec-links },
-                    { id: "stats", label: "Stats", icon: Icons.tab-stats, accent: Theme.sec-stats },
-                ]: Rectangle {
-                    height: 54px;
-                    // Active section = a solid fill in the section's accent color
-                    background: root.section == s.id ? s.accent : (sbnav.has-hover ? Theme.bg-elevated : transparent);
-                    sbnav := TouchArea { clicked => { root.set-section(s.id); } }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            alignment: center;
-                            Image {
-                                source: s.icon;
-                                width: 18px;
-                                height: 18px;
-                                image-fit: contain;
-                                colorize: root.section == s.id ? #16161a : Theme.text-dim;
-                            }
-                        }
-                        Text {
-                            text: s.label;
-                            font-size: 9px;
-                            horizontal-alignment: center;
-                            color: root.section == s.id ? #16161a : Theme.text-dim;
-                        }
-                    }
-                }
-                Rectangle { vertical-stretch: 1; }
-                // ---- Theme picker: bottom of the sidebar. Opens a popup of all
-                Rectangle {
-                    height: 40px;
-                    background: themeta.has-hover ? Theme.bg-elevated : transparent;
-                    themeta := TouchArea { clicked => { themepop.show(); } }
-                    Image {
-                        source: Icons.theme;
-                        width: 16px;
-                        height: 16px;
-                        image-fit: contain;
-                        colorize: Theme.text-dim;
-                    }
-                    themepop := PopupWindow {
-                        x: parent.width + 6px;
-                        y: parent.height - self.height;
-                        width: 210px;
-                        height: min(Theme.palettes.length * 34px + 12px, 360px);
-                        Rectangle {
-                            background: Theme.bg-panel;
-                            border-color: Theme.border-strong;
-                            border-width: 1px;
-                            border-radius: 10px;
-                            Flickable {
-                                viewport-height: Theme.palettes.length * 34px + 12px;
-                                VerticalLayout {
-                                    padding: 6px;
-                                    spacing: 2px;
-                                    for pal[i] in Theme.palettes: Rectangle {
-                                        height: 30px;
-                                        border-radius: 6px;
-                                        background: root.theme-index == i
-                                            ? Theme.bg-elevated
-                                            : (themerowta.has-hover ? Theme.bg-elevated : transparent);
-                                        themerowta := TouchArea {
-                                            clicked => { root.set-theme(i); themepop.close(); }
-                                        }
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            spacing: 8px;
-                                            alignment: start;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                // Swatch: the palette's app bg with an accent ring.
-                                                Rectangle {
-                                                    width: 16px; height: 16px;
-                                                    border-radius: 4px;
-                                                    background: pal.bg-app;
-                                                    border-color: pal.accent;
-                                                    border-width: 2px;
-                                                }
-                                            }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Text {
-                                                    text: pal.name;
-                                                    color: Theme.text;
-                                                    font-size: Theme.fs-body;
-                                                    overflow: elide;
-                                                }
-                                            }
-                                            Rectangle { horizontal-stretch: 1; }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                // Selected marker: a drawn accent dot (no glyphs).
-                                                Rectangle {
-                                                    width: 8px; height: 8px;
-                                                    border-radius: 4px;
-                                                    background: root.theme-index == i ? Theme.accent : transparent;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            section: root.section;
+            cmd-held: root.cmd-held;
+            screenshare: root.screenshare;
+            show-calc-data: true;
+            show-data: true;
+            theme-index: root.theme-index;
+            set-section(s) => { root.set-section(s); }
+            set-theme(i) => { root.set-theme(i); }
+            open-shortcuts => { root.mode = "help"; }
+            toggle-mask => { root.toggle-screenshare(); }
+            open-settings => { root.mode = "settings"; }
         }
 
         // ---- Find everywhere (⌘⇧F): unified search over notes/tasks/bookmarks.
@@ -745,6 +668,20 @@ export component LauncherWindow inherits Window {
         // ---- Help modal (centered overlay) ----
         if root.mode == "help": HelpView {
             mode <=> root.mode;
+        }
+        if root.mode == "settings": SettingsView {
+            mode <=> root.mode;
+            theme-index: root.theme-index;
+            set-theme(i) => { root.set-theme(i); }
+        }
+        if root.mode == "transform": TransformsView {
+            mode <=> root.mode;
+            transform-selected <=> root.transform-selected;
+            transform-input: root.transform-input;
+            transform-run(a0, a1) => { return root.transform-run(a0, a1); }
+            transform-stats(a0, a1) => { return root.transform-stats(a0, a1); }
+            transform-input-summary(a0) => { return root.transform-input-summary(a0); }
+            transform-action(a0, a1) => { root.transform-action(a0, a1); }
         }
 
         // ---- Accessibility permission modal (macOS auto-paste) ----

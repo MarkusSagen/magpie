@@ -38,6 +38,51 @@ pub struct AppState {
     /// Screens undone via `⌘[` (`⌘]` pops here), most-recent last. Cleared on
     /// any *new* navigation so it only ever replays an undone `⌘[`.
     pub nav_fwd: Mutex<Vec<(String, String)>>,
+    /// Data view (screen 13/14): the raw text of the currently-open dataset, the
+    /// active "Read as" override, its display name, and the session's recent-data
+    /// rail. Not persisted — durable recent-data storage waits on the Phase 7
+    /// migration slot (see the redesign plan), so this is intentionally in-memory.
+    pub data_input: Mutex<String>,
+    pub data_read_as: Mutex<magpie_core::table::ReadAs>,
+    pub data_name: Mutex<String>,
+    pub data_recent: Mutex<Vec<DataSource>>,
+    pub data_chart: Mutex<ChartState>,
+    /// Calculator Graphs view (screen 12): the two functions currently plotted.
+    /// `graph_g` empty = a single-function plot. Set when a graph is opened.
+    pub calc_graph_f: Mutex<String>,
+    pub calc_graph_g: Mutex<String>,
+}
+
+/// One entry in the Data view's session recent-data rail.
+#[derive(Debug, Clone)]
+pub struct DataSource {
+    pub name: String,
+    pub meta: String,
+    pub input: String,
+    pub read_as: magpie_core::table::ReadAs,
+}
+
+/// Chart-panel state for the Data view (screen 14). `x`/`y` index into the parsed
+/// table's numeric columns; `kind` is 0 Line, 1 Bar, 2 Scatter, 3 Hist.
+#[derive(Debug, Clone)]
+pub struct ChartState {
+    pub open: bool,
+    pub kind: i32,
+    pub x: usize,
+    pub y: usize,
+    pub log: bool,
+}
+
+impl Default for ChartState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            kind: 2,
+            x: 0,
+            y: 0,
+            log: false,
+        }
+    }
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
@@ -84,6 +129,13 @@ mod tests {
             theme: "dark".into(),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
+            data_input: std::sync::Mutex::new(String::new()),
+            data_read_as: std::sync::Mutex::new(magpie_core::table::ReadAs::Auto),
+            data_name: std::sync::Mutex::new(String::new()),
+            data_recent: std::sync::Mutex::new(Vec::new()),
+            data_chart: std::sync::Mutex::new(crate::app_state::ChartState::default()),
+            calc_graph_f: std::sync::Mutex::new(String::new()),
+            calc_graph_g: std::sync::Mutex::new(String::new()),
         }
     }
 

@@ -1,0 +1,261 @@
+import { Theme } from "../theme.slint";
+import { Keycap } from "../components/keycap.slint";
+import { DataStore } from "../data_store.slint";
+
+// Data view (screens 13 + 14): a session recent-data rail, a "Read as" control,
+// a typed grid, and an optional chart panel. All state lives in the `DataStore`
+// global (set by Rust `refresh_data` / `compute_chart`); this file is pure
+// presentation.
+export component DataView inherits HorizontalLayout {
+    property <length> row-h: 40px;
+    spacing: 0;
+
+    // ---- Left rail: recent data (session-scoped) ----
+    Rectangle {
+        width: 196px;
+        background: Theme.bg-sidebar;
+        Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+            Text { text: "Recent data"; color: Theme.text-dim; font-size: Theme.fs-xs; font-weight: 600; }
+            for r[i] in DataStore.recent: Rectangle {
+                height: 54px;
+                border-radius: Theme.r-md;
+                background: r.selected ? Theme.bg-elevated : (rta.has-hover ? Theme.bg-elevated : transparent);
+                rta := TouchArea { clicked => { DataStore.open-recent(i); } }
+                VerticalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: r.name; color: Theme.text; font-size: Theme.fs-body; font-weight: 500; overflow: elide; }
+                    Text { text: r.meta; color: Theme.text-faint; font-size: Theme.fs-xs; overflow: elide; }
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+            Text { text: "Kept for 30 days"; color: Theme.text-faint; font-size: Theme.fs-xs; }
+        }
+    }
+
+    // ---- Main column ----
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // Read-as control + detected format + Export + Chart.
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                background: Theme.bg-sidebar;
+                border-radius: Theme.r-sm;
+                width: 270px;
+                HorizontalLayout {
+                    padding: 3px;
+                    spacing: 1px;
+                    for label[i] in ["Auto", "CSV", "JSON", "LaTeX", "Typst", "Lines"]: Rectangle {
+                        width: 43px;
+                        height: 28px;
+                        border-radius: Theme.r-xs;
+                        background: i == DataStore.read-as ? Theme.bg-elevated : (rat.has-hover ? Theme.bg-elevated : transparent);
+                        rat := TouchArea { clicked => { DataStore.set-read-as(i); } }
+                        Text { text: label; color: i == DataStore.read-as ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+            VerticalLayout { alignment: center; horizontal-stretch: 1;
+                Text { text: DataStore.format; color: Theme.text-faint; font-size: Theme.fs-xs; overflow: elide; } }
+            Rectangle {
+                width: 78px; height: 34px;
+                border-radius: Theme.r-sm; border-width: 1px; border-color: Theme.line;
+                background: exta.has-hover ? Theme.bg-elevated : transparent;
+                exta := TouchArea { clicked => { DataStore.export-data(); } }
+                Text { text: "Export"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            Rectangle {
+                width: 78px; height: 34px;
+                border-radius: Theme.r-sm; border-width: 1px;
+                border-color: DataStore.chart-open ? Theme.accent : Theme.line;
+                background: DataStore.chart-open ? Theme.bg-elevated : (chta.has-hover ? Theme.bg-elevated : transparent);
+                chta := TouchArea { clicked => { DataStore.chart-toggle(); } }
+                Text { text: "Chart"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+
+        // Paste / drop hint.
+        Rectangle {
+            height: 56px;
+            border-radius: Theme.r-md;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px;
+                spacing: 10px;
+                VerticalLayout { alignment: center;
+                    Text { text: "+"; color: Theme.text-faint; font-size: 20px; } }
+                VerticalLayout { alignment: center;
+                    Text { text: "Paste ⌘V or drop a file · CSV, TSV, JSON, Markdown, LaTeX, Typst, plain lines";
+                        color: Theme.text-dim; font-size: Theme.fs-body; } }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout { alignment: center;
+                    Text { text: "From clipboard entry"; color: Theme.text-dim; font-size: Theme.fs-body; } }
+                VerticalLayout { alignment: center; Keycap { text: "⌘K"; } }
+                VerticalLayout { alignment: center;
+                    Text { text: "→ Open as table"; color: Theme.text-dim; font-size: Theme.fs-body; } }
+            }
+            dza := TouchArea { clicked => { DataStore.open-from-clip(); } }
+        }
+
+        // ---- The typed grid ----
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 180px;
+            clip: true;
+            Flickable {
+                viewport-width: max(self.width, 120px * DataStore.columns.length + 56px);
+                HorizontalLayout {
+                    spacing: 0;
+                    // Row-number gutter.
+                    VerticalLayout {
+                        width: 44px;
+                        Rectangle { height: 44px; }
+                        for r in DataStore.row-count: Rectangle {
+                            height: root.row-h;
+                            Text { text: r + 1; color: Theme.text-faint; font-size: Theme.fs-sm;
+                                horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    for col[c] in DataStore.columns: VerticalLayout {
+                        min-width: 120px;
+                        horizontal-stretch: 1;
+                        Rectangle {
+                            height: 44px;
+                            HorizontalLayout {
+                                padding-left: 12px; padding-right: 12px; spacing: 6px;
+                                alignment: col.numeric ? end : start;
+                                Text { text: col.numeric ? "#" : "Aa"; color: Theme.text-faint;
+                                    font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Text { text: col.name; color: Theme.text-dim; font-size: Theme.fs-body;
+                                    font-weight: 500; vertical-alignment: center; overflow: elide; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                        }
+                        for cell in col.cells: Rectangle {
+                            height: root.row-h;
+                            HorizontalLayout {
+                                padding-left: 12px; padding-right: 12px;
+                                Text { text: cell; color: Theme.text;
+                                    font-family: col.numeric ? "Geist Mono" : "Geist";
+                                    font-size: Theme.fs-body;
+                                    horizontal-alignment: col.numeric ? right : left;
+                                    vertical-alignment: center; overflow: elide;
+                                    horizontal-stretch: 1; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line.with-alpha(0.5); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Chart panel (screen 14) ----
+        if DataStore.chart-open: Rectangle {
+            height: 280px;
+            vertical-stretch: 0;
+            Rectangle { y: 0; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                padding-top: 14px;
+                spacing: 18px;
+                VerticalLayout {
+                    width: 320px;
+                    spacing: 12px;
+                    Rectangle {
+                        background: Theme.bg-sidebar; border-radius: Theme.r-sm;
+                        height: 34px;
+                        HorizontalLayout {
+                            padding: 3px; spacing: 2px;
+                            for label[i] in ["Line", "Bar", "Scatter", "Hist"]: Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: Theme.r-xs;
+                                background: i == DataStore.chart-type ? Theme.bg-elevated : (ctt.has-hover ? Theme.bg-elevated : transparent);
+                                ctt := TouchArea { clicked => { DataStore.chart-set-type(i); } }
+                                Text { text: label; color: i == DataStore.chart-type ? Theme.text : Theme.text-dim;
+                                    font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "X"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            height: 28px; border-radius: Theme.r-xs;
+                            background: cxa.has-hover ? Theme.bg-elevated : transparent;
+                            cxa := TouchArea { clicked => { DataStore.chart-cycle-x(); } }
+                            HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                                Text { text: DataStore.chart-x-name; color: Theme.text; font-family: "Geist Mono";
+                                    font-size: Theme.fs-sm; vertical-alignment: center; } }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Y"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            height: 28px; border-radius: Theme.r-xs;
+                            background: cya.has-hover ? Theme.bg-elevated : transparent;
+                            cya := TouchArea { clicked => { DataStore.chart-cycle-y(); } }
+                            HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                                Text { text: DataStore.chart-y-name; color: Theme.text; font-family: "Geist Mono";
+                                    font-size: Theme.fs-sm; vertical-alignment: center; } }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Labels"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: DataStore.chart-label-name; color: Theme.text-dim; font-family: "Geist Mono";
+                            font-size: Theme.fs-sm; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Log scale"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            width: 40px; height: 22px; border-radius: 11px;
+                            background: DataStore.chart-log ? Theme.accent : Theme.bg-elevated;
+                            Rectangle {
+                                width: 16px; height: 16px; border-radius: 8px; background: Theme.on-accent;
+                                x: DataStore.chart-log ? parent.width - self.width - 3px : 3px;
+                            }
+                            lga := TouchArea { clicked => { DataStore.chart-set-log(!DataStore.chart-log); } }
+                        }
+                    }
+                    if DataStore.chart-fit != "": Text { text: DataStore.chart-fit; color: Theme.text-faint; font-size: Theme.fs-sm; }
+                    Rectangle { vertical-stretch: 1; }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    canvas := Rectangle {
+                        for p[i] in DataStore.chart-points: Rectangle {
+                            property <length> px: p.x * (canvas.width - 40px) + 20px;
+                            property <length> py: (1 - p.y) * (canvas.height - 40px) + 10px;
+                            property <bool> bars: DataStore.chart-type == 1 || DataStore.chart-type == 3;
+                            x: bars ? px - 6px : px - 4px;
+                            y: bars ? py : canvas.height - 30px;
+                            width: bars ? 12px : 8px;
+                            height: bars ? (canvas.height - 30px - py) : 8px;
+                            border-radius: bars ? 2px : 4px;
+                            background: Theme.accent;
+                        }
+                        for p[i] in DataStore.chart-points: Text {
+                            text: p.label;
+                            color: Theme.text-dim;
+                            font-size: Theme.fs-xs;
+                            x: p.x * (canvas.width - 40px) + 20px + 8px;
+                            y: (1 - p.y) * (canvas.height - 40px) + 10px - 6px;
+                            visible: (DataStore.chart-type == 0 || DataStore.chart-type == 2) && p.label != "";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

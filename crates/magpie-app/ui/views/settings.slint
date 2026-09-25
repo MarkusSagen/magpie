@@ -1,0 +1,86 @@
+import { Theme, Pal } from "../theme.slint";
+import { Palette } from "../types.slint";
+
+// Settings → Appearance (screen 09). Opened via ⌘, and the sidebar Settings row.
+// The theme grid is functional; Follow system / Density / Text size are shown for
+// parity with the mockup (wiring them is a later pass).
+export component SettingsView inherits Rectangle {
+    in-out property <string> mode;
+    in property <int> theme-index;
+    callback set-theme(int);
+    background: Theme.scrim;
+    TouchArea { clicked => { root.mode = "list"; } }
+    Rectangle {
+        width: 720px;
+        height: 520px;
+        background: Theme.bg-app;
+        border-radius: Theme.r-lg;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        TouchArea {}  // swallow clicks on the panel
+        VerticalLayout {
+            padding: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                Text { text: "Settings"; color: Theme.text; font-size: Theme.fs-title; font-weight: 600; horizontal-stretch: 1; }
+                Text { text: "Esc"; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+            }
+            Text { text: "Appearance"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+            Text { text: "Theme"; color: Theme.text-dim; font-size: Theme.fs-body; }
+
+            // 9-theme grid (rows of 3): each card previews the palette; selected = accent border.
+            for r in [0, 1, 2]: HorizontalLayout {
+                spacing: 12px;
+                for c in [0, 1, 2]: Rectangle {
+                    property <int> idx: r * 3 + c;
+                    property <Palette> pal: Theme.palettes[idx];
+                    height: 84px;
+                    border-radius: Theme.r-md;
+                    border-width: root.theme-index == idx ? 2px : 1px;
+                    border-color: root.theme-index == idx ? Theme.accent : Theme.line-strong;
+                    background: pal.bg-app;
+                    cardta := TouchArea { clicked => { root.set-theme(idx); } }
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        // mini window: sidebar strip + accent dot + text lines
+                        HorizontalLayout {
+                            spacing: 6px;
+                            height: 34px;
+                            Rectangle { width: 20px; background: pal.bg-sidebar; border-radius: 3px; }
+                            Rectangle {
+                                background: pal.bg-panel; border-radius: 3px; horizontal-stretch: 1;
+                                HorizontalLayout {
+                                    padding: 5px; spacing: 4px; alignment: start;
+                                    VerticalLayout { alignment: center;
+                                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: pal.accent; } }
+                                    VerticalLayout { alignment: center;
+                                        Rectangle { width: 40px; height: 4px; border-radius: 2px; background: pal.text-dim; } }
+                                }
+                            }
+                        }
+                        Text { text: pal.name; color: pal.text; font-size: Theme.fs-sm; overflow: elide; }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                height: 26px;
+                Text { text: "Follow system appearance"; color: Theme.text-dim; font-size: Theme.fs-body; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: "Off"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                height: 26px;
+                Text { text: "Density"; color: Theme.text-dim; font-size: Theme.fs-body; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: "Comfortable"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                height: 26px;
+                Text { text: "Text size"; color: Theme.text-dim; font-size: Theme.fs-body; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: "Default"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

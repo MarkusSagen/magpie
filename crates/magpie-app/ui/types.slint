@@ -159,6 +159,43 @@ export struct SearchBookmarkRow {
     title: string,
 }
 
+// One typed column of a parsed Data table (screen 13). `cells` holds one display
+// string per row; `numeric` right-aligns cells and marks the column chartable.
+export struct DataColumn {
+    name: string,
+    kind: string,   // "integer" | "float" | "date" | "bool" | "text"
+    numeric: bool,
+    cells: [string],
+}
+
+// One row of calculator history (screen 11). `kind` is math|date|graph (drives the
+// row glyph + tab filter); `group` is the day bucket ("Today"/"Yesterday"/…) used
+// for section headers.
+export struct CalcRow {
+    id: int,
+    kind: string,
+    input: string,
+    result: string,
+    time: string,
+    group: string,
+    pinned: bool,
+}
+
+// A recent-data entry in the Data view's left rail (session-scoped).
+export struct RecentData {
+    name: string,
+    meta: string,   // e.g. "File · CSV · 8 × 6"
+    selected: bool,
+}
+
+// One plotted point for the Data chart (screen 14), pre-normalized to 0..1 with
+// the origin at the bottom-left; `label` is the optional point label.
+export struct ChartPoint {
+    x: float,
+    y: float,
+    label: string,
+}
+
 // Accent + the text colour that is legible ON the accent. White-on-accent only
 // reaches ~2.9:1, so filled controls use `on-accent` for their label.
 // Theme tokens (light + dark). `dark` is wired from the `LauncherWindow` root
@@ -170,35 +207,24 @@ export struct SearchBookmarkRow {
 // One named colour theme. Every colour token the UI consumes lives here, so a
 // new theme is just one more entry in `Theme.palettes` (order MUST match the
 // Rust registry in `themes.rs`). `dark` drives the native window chrome.
+// Graphite token set (one accent, neutral greys). `bg-elevated-2` and
+// `text-ghost` are derived in `Theme` from these base tokens.
 export struct Palette {
     name: string,
     dark: bool,
-    // surfaces
+    // surfaces (darkest → lightest)
+    bg-sidebar: color,
     bg-app: color,
     bg-panel: color,
     bg-elevated: color,
-    bg-sidebar: color,
-    border: color,
-    border-strong: color,
-    // text
+    line: color,
+    line-strong: color,
+    // text (brightest → faintest)
     text: color,
     text-dim: color,
     text-faint: color,
-    // brand + semantic
+    // the single accent + destructive
     accent: color,
     on-accent: color,
     danger: color,
-    warn: color,
-    success: color,
-    link: color,
-    // priority pills
-    prio-high: color,
-    prio-med: color,
-    prio-low: color,
-    // section accents
-    sec-clip: color,
-    sec-tasks: color,
-    sec-notes: color,
-    sec-links: color,
-    sec-stats: color,
 }

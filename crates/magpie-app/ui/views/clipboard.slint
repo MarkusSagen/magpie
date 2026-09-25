@@ -6,6 +6,7 @@ import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { AnswerCard } from "../components/answer_card.slint";
 
 export component ClipboardView inherits VerticalLayout {
     callback activate(int);
@@ -48,7 +49,22 @@ export component ClipboardView inherits VerticalLayout {
     callback toggle-screenshare();
     in-out property <int> type-index;
     in-out property <string> view;
+    in property <bool> has-answer;
+    in property <string> answer-kind;
+    in property <string> answer-display;
+    in property <string> answer-explanation;
+    in property <[string]> answer-formats;
+    in property <int> answer-format-index;
                 spacing: Theme.sp2;
+
+                // Inline answer card (dates / math / units) above the results.
+                if root.has-answer: AnswerCard {
+                    kind: root.answer-kind;
+                    display: root.answer-display;
+                    explanation: root.answer-explanation;
+                    formats: root.answer-formats;
+                    format-index: root.answer-format-index;
+                }
 
                 // Row 1 — filter + sort the clipboard list.
                 HorizontalLayout {
@@ -56,51 +72,24 @@ export component ClipboardView inherits VerticalLayout {
                     // Order must match `viewmodel::type_filter_from_index` /
                     // `runtime::TYPE_CHIPS`.
                     for label[i] in ["All", "Text", "Link", "Email", "Color", "Image", "File"]: Rectangle {
-                        height: 26px;
-                        width: 52px;
-                        background: i == root.type-index ? Theme.accent : (fta.has-hover ? Theme.border-strong : Theme.bg-elevated);
+                        height: 28px;
+                        width: 54px;
+                        background: i == root.type-index ? Theme.bg-elevated : (fta.has-hover ? Theme.bg-elevated : transparent);
                         border-radius: Theme.r-sm;
                         fta := TouchArea { clicked => { root.type-index = i; root.set-type-filter(i); } }
-                        Text { text: label; color: i == root.type-index ? Theme.on-accent : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: i == root.type-index ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-body; font-weight: i == root.type-index ? 500 : 400;
+                            horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     for label[i] in ["Recent", "Most copied"]: Rectangle {
-                        height: 26px;
-                        width: i == 0 ? 62px : 92px;
-                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        height: 28px;
+                        width: i == 0 ? 66px : 96px;
+                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : transparent);
                         border-radius: Theme.r-sm;
                         sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
-                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                }
-
-                // Row 2 — utilities not covered by the left sidebar (screenshare
-                // mask, keyboard-shortcut help). Section navigation (Today/
-                // Journal/Notes/Tasks/Bookmarks/Board/Graph/Stats) now lives in
-                // the sidebar + its per-section view-switchers (Task 4).
-                HorizontalLayout {
-                    spacing: 6px;
-                    Rectangle { horizontal-stretch: 1; }
-                    Rectangle {
-                        width: 84px;
-                        height: 26px;
-                        background: root.screenshare ? Theme.danger : (lockta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                        border-radius: Theme.r-sm;
-                        lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: 4px;
-                            Image { source: Icons.lock; colorize: root.screenshare ? Theme.on-accent : Theme.text; width: 12px; height: 12px; image-fit: contain; }
-                            Text { text: root.screenshare ? "Masked" : "Mask"; color: root.screenshare ? Theme.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
-                        }
-                    }
-                    Rectangle {
-                        width: 34px;
-                        height: 26px;
-                        background: helpta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
-                        border-radius: Theme.r-sm;
-                        helpta := TouchArea { clicked => { root.mode = "help"; } }
-                        Text { text: "?"; color: Theme.text; font-size: Theme.fs-body; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: i == root.sort-index ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
 
@@ -244,7 +233,7 @@ export component ClipboardView inherits VerticalLayout {
                                     font-size: Theme.fs-sm;
                                     font-weight: 600;
                                 }
-                                Rectangle { height: 1px; background: Theme.border; }
+                                Rectangle { height: 1px; background: Theme.line; }
                             }
                             Rectangle {
                             height: 52px;
@@ -266,7 +255,7 @@ export component ClipboardView inherits VerticalLayout {
                                     if i < 9: Text {
                                         y: 9px;
                                         text: i + 1;
-                                        color: root.cmd-held ? Theme.accent : Theme.border-strong;
+                                        color: root.cmd-held ? Theme.accent : Theme.line-strong;
                                         font-size: 12px;
                                         horizontal-alignment: center;
                                     }
@@ -304,7 +293,10 @@ export component ClipboardView inherits VerticalLayout {
                                     HorizontalLayout {
                                         spacing: 6px;
                                         if row.pinned: Image { source: Icons.act-pin; colorize: Theme.text-dim; width: 11px; height: 11px; image-fit: contain; }
-                                        Text { text: row.title; color: Theme.text; font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        Text { text: row.title;
+                                            // Links light up in the accent colour on hover.
+                                            color: (row.kind == "link" && rowta.has-hover) ? Theme.accent : Theme.text;
+                                            font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
                                         if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     }
                                     Text { text: row.subtitle; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
@@ -380,7 +372,7 @@ export component ClipboardView inherits VerticalLayout {
                         Rectangle {
                             width: parent.width;
                             border-radius: 3px;
-                            background: sbta.pressed ? Theme.border-strong.brighter(0.3) : (sbta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                            background: sbta.pressed ? Theme.line-strong.brighter(0.3) : (sbta.has-hover ? Theme.line-strong.brighter(0.15) : Theme.line-strong);
                             height: max(30px, sb.height * (list.visible-height / list.viewport-height));
                             y: -list.viewport-y / list.viewport-height * sb.height;
                         }
@@ -512,7 +504,7 @@ export component ClipboardView inherits VerticalLayout {
                                         Rectangle {
                                             width: parent.width;
                                             border-radius: 3px;
-                                            background: pvta.pressed ? Theme.border-strong.brighter(0.3) : (pvta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                                            background: pvta.pressed ? Theme.line-strong.brighter(0.3) : (pvta.has-hover ? Theme.line-strong.brighter(0.15) : Theme.line-strong);
                                             height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
                                             y: -plist.viewport-y / plist.viewport-height * pv.height;
                                         }
@@ -545,7 +537,7 @@ export component ClipboardView inherits VerticalLayout {
                                 spacing: 5px;
                                 vertical-stretch: 0;
                                 alignment: start;
-                                Rectangle { height: 1px; background: Theme.border; }
+                                Rectangle { height: 1px; background: Theme.line; }
                                 Text { text: "Information"; color: Theme.text-dim; font-size: Theme.fs-body; }
                                 HorizontalLayout {
                                     height: 16px;
@@ -560,7 +552,18 @@ export component ClipboardView inherits VerticalLayout {
                                     height: 16px;
                                     spacing: 12px;
                                     Text { text: "Content type"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].kind; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                    Text {
+                                        text: entries[root.selected].kind == "git_remote" ? "Git remote"
+                                            : entries[root.selected].kind == "link" ? "Link"
+                                            : entries[root.selected].kind == "email" ? "Email"
+                                            : entries[root.selected].kind == "color" ? "Color"
+                                            : entries[root.selected].kind == "image" ? "Image"
+                                            : entries[root.selected].kind == "file" ? "File"
+                                            : entries[root.selected].kind == "rtf" ? "Rich text"
+                                            : entries[root.selected].kind == "html" ? "HTML"
+                                            : "Text";
+                                        color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right;
+                                    }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
@@ -609,7 +612,7 @@ export component ClipboardView inherits VerticalLayout {
                                 for t in root.selected-tags: Rectangle {
                                     height: 22px;
                                     width: 74px;
-                                    background: chipta.has-hover ? Theme.border-strong : Theme.bg-elevated;
+                                    background: chipta.has-hover ? Theme.line-strong : Theme.bg-elevated;
                                     border-radius: 11px;
                                     chipta := TouchArea { clicked => { root.remove-tag(root.selected, t); } }
                                     Text {
@@ -647,38 +650,4 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                // Bottom action bar.
-                Rectangle {
-                    height: 34px;
-                    background: Theme.bg-sidebar;
-                    border-radius: Theme.r-md;
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 12px;
-                        // "From <app>" — a bare app name here read as a stray word.
-                        Text {
-                            text: (entries.length > 0 && root.selected < entries.length) ? "From " + entries[root.selected].source : "";
-                            color: Theme.text-dim;
-                            font-size: Theme.fs-sm;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        // With nothing selected these keys do nothing, so don't
-                        // advertise them — the bar used to promise "⏎ Paste to X"
-                        // over an empty list.
-                        if entries.length > 0 && root.target-has-icon: Rectangle {
-                            width: 14px;
-                            Image { source: root.target-icon; width: 14px; height: 14px; }
-                        }
-                        if entries.length > 0: Text {
-                            text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
-                            color: Theme.text-dim;
-                            font-size: Theme.fs-sm;
-                            vertical-alignment: center;
-                        }
-                        if entries.length > 0: Text { text: "⌘C Copy   ⌘K Actions"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
-                        if entries.length == 0: Text { text: "⌘/ Shortcuts"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
-                    }
-                }
             }

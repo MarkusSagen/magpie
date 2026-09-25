@@ -63,6 +63,13 @@ fn state() -> AppState {
         theme: "dark".into(),
         nav_back: Mutex::new(Vec::new()),
         nav_fwd: Mutex::new(Vec::new()),
+        data_input: Mutex::new(String::new()),
+        data_read_as: Mutex::new(magpie_core::table::ReadAs::Auto),
+        data_name: Mutex::new(String::new()),
+        data_recent: Mutex::new(Vec::new()),
+        data_chart: Mutex::new(magpie_app::app_state::ChartState::default()),
+        calc_graph_f: Mutex::new(String::new()),
+        calc_graph_g: Mutex::new(String::new()),
     }
 }
 

@@ -10,7 +10,7 @@ import { BoardCard } from "../components/board_card.slint";
 export component WelcomeView inherits Rectangle {
     callback dismiss-welcome();
     in-out property <bool> show-welcome;
-        background: #000000cc;
+        background: Theme.scrim;
         TouchArea { clicked => { root.dismiss-welcome(); } } // click backdrop to dismiss
         Rectangle {
             width: 460px;
@@ -18,7 +18,7 @@ export component WelcomeView inherits Rectangle {
             background: Theme.bg-app;
             border-radius: 14px;
             border-width: 1px;
-            border-color: Theme.border-strong;
+            border-color: Theme.line-strong;
             // Swallow clicks on the card so they don't dismiss.
             TouchArea {}
             VerticalLayout {

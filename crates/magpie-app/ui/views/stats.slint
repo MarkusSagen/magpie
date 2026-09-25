@@ -142,8 +142,8 @@ export component StatsView inherits VerticalLayout {
                                     height: 18px;
                                     width: 52px;
                                     border-radius: 9px;
-                                    background: Theme.link.with-alpha(0.25);
-                                    Text { text: "running"; color: Theme.link; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    background: Theme.text-dim.with-alpha(0.25);
+                                    Text { text: "running"; color: Theme.text-dim; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 if !e.running: Text { text: e.duration; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 Rectangle {

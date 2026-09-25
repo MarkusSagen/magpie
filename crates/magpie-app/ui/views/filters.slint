@@ -19,7 +19,7 @@ export component FiltersView inherits Rectangle {
     callback set-time-filter(int);
     in-out property <int> sort-index;
     in-out property <int> time-index;
-            background: #000000aa;
+            background: Theme.scrim;
             TouchArea { clicked => { root.mode = "list"; } }
             Rectangle {
                 width: 460px;
@@ -27,7 +27,7 @@ export component FiltersView inherits Rectangle {
                 background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: Theme.border-strong;
+                border-color: Theme.line-strong;
                 VerticalLayout {
                     padding: 14px;
                     spacing: 10px;

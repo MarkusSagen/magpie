@@ -6,6 +6,7 @@ import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { Keycap } from "../components/keycap.slint";
 
 export component ActionsView inherits Rectangle {
     in-out property <int> action-selected;
@@ -13,7 +14,7 @@ export component ActionsView inherits Rectangle {
     in-out property <string> actions-query;
     in-out property <string> mode;
     callback run-action(string);
-            background: #000000aa;
+            background: Theme.scrim;
             TouchArea { clicked => { root.mode = "list"; } }
             Rectangle {
                 width: 440px;
@@ -21,7 +22,7 @@ export component ActionsView inherits Rectangle {
                 background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: Theme.border-strong;
+                border-color: Theme.line-strong;
                 VerticalLayout {
                     padding: 10px;
                     spacing: 8px;
@@ -34,7 +35,7 @@ export component ActionsView inherits Rectangle {
                         background: Theme.bg-sidebar;
                         border-radius: 8px;
                         border-width: 1px;
-                        border-color: Theme.border;
+                        border-color: Theme.line;
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
@@ -69,9 +70,17 @@ export component ActionsView inherits Rectangle {
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 spacing: 10px;
-                                ActionIcon { id: a.id; width: 22px; height: 18px; tint: a.id == "delete" ? Theme.danger : Theme.text; }
-                                Text { text: a.label; color: a.id == "delete" ? Theme.danger : Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
-                                Text { text: a.key; color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
+                                // Fixed, vertically-centred icon cell so every glyph lines up.
+                                VerticalLayout {
+                                    alignment: center;
+                                    width: 16px;
+                                    ActionIcon { id: a.id; width: 16px; height: 16px; tint: a.id == "delete" ? Theme.danger : Theme.text-dim; }
+                                }
+                                Text { text: a.label; color: a.id == "delete" ? Theme.danger : Theme.text; font-size: Theme.fs-body; vertical-alignment: center; horizontal-stretch: 1; }
+                                if a.key != "": VerticalLayout {
+                                    alignment: center;
+                                    Keycap { text: a.key; }
+                                }
                             }
                         }
                     }

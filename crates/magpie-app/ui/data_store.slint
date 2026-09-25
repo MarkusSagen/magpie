@@ -1,0 +1,32 @@
+import { DataColumn, RecentData, ChartPoint } from "types.slint";
+
+// Data view state (screens 13/14). A global so Rust can set it once
+// (`ui.global::<DataStore>()`) and the DataView reads it directly, instead of
+// threading ~20 properties through MainView. Mirrors the pattern used by `Theme`.
+export global DataStore {
+    // Table.
+    in-out property <[DataColumn]> columns;
+    in-out property <int> row-count;
+    in-out property <string> format;        // detected format caption, e.g. "CSV · header row"
+    in-out property <int> read-as;          // 0 Auto,1 CSV,2 JSON,3 LaTeX,4 Typst,5 Lines
+    in-out property <[RecentData]> recent;
+    callback set-read-as(int);
+    callback open-recent(int);
+    callback open-from-clip();
+    callback export-data();
+
+    // Chart.
+    in-out property <bool> chart-open;
+    in-out property <int> chart-type;       // 0 Line,1 Bar,2 Scatter,3 Hist
+    in-out property <[ChartPoint]> chart-points;
+    in-out property <string> chart-x-name;
+    in-out property <string> chart-y-name;
+    in-out property <string> chart-label-name;
+    in-out property <bool> chart-log;
+    in-out property <string> chart-fit;
+    callback chart-toggle();
+    callback chart-set-type(int);
+    callback chart-cycle-x();
+    callback chart-cycle-y();
+    callback chart-set-log(bool);
+}

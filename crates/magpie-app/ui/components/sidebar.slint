@@ -1,0 +1,212 @@
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { Palette } from "../types.slint";
+import { HintText } from "keycap.slint";
+
+// One navigation row: icon + label + `G x` hint. Active = `bg-elevated` fill.
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <string> hint;
+    in property <bool> active;
+    in property <bool> cmd-held;
+    callback clicked();
+    height: 30px;
+    border-radius: Theme.r-sm;
+    background: root.active ? Theme.bg-elevated : (ta.has-hover ? Theme.bg-elevated : transparent);
+    ta := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 16px;
+                height: 16px;
+                image-fit: contain;
+                colorize: root.active ? Theme.text : Theme.text-faint;
+            }
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.text : Theme.text-dim;
+            font-size: Theme.fs-body;
+            font-weight: root.active ? 500 : 400;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            HintText { text: root.hint; bright: root.cmd-held; }
+        }
+    }
+}
+
+// The left navigation rail (208px, Graphite). Rendered once at the window root.
+export component Sidebar inherits Rectangle {
+    in property <string> section;           // clipboard|tasks|notes|bookmarks|stats
+    in property <bool> cmd-held;
+    in property <bool> screenshare;         // Mask state
+    in property <bool> show-calc-data;      // reveal Calculator (feature flag)
+    in property <bool> show-data;           // reveal Data (screens 13/14)
+    in property <int> theme-index;
+    callback set-section(string);
+    callback set-theme(int);
+    callback open-shortcuts();
+    callback open-settings();
+    callback toggle-mask();
+    width: 208px;
+    background: Theme.bg-sidebar;
+    // hairline right border
+    Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 14px;
+        padding-bottom: 12px;
+        spacing: 2px;
+
+        // Traffic-light clearance + wordmark.
+        Rectangle { height: 20px; }
+        HorizontalLayout {
+            padding-left: 4px;
+            spacing: 8px;
+            height: 26px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 18px; height: 18px; border-radius: 5px; background: Theme.text;
+                    Text { text: "M"; color: Theme.bg-sidebar; font-size: 11px; font-weight: 700;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Text { text: "Magpie"; color: Theme.text; font-size: Theme.fs-body; font-weight: 600; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout {
+                alignment: center;
+                HintText { text: "⌘⇧Space"; bright: root.cmd-held; }
+            }
+        }
+        Rectangle { height: 8px; }
+
+        NavItem {
+            label: "Clipboard"; icon: Icons.tab-clipboard; hint: "G C"; cmd-held: root.cmd-held;
+            active: root.section == "clipboard"; clicked => { root.set-section("clipboard"); }
+        }
+        NavItem {
+            label: "Tasks"; icon: Icons.tab-tasks; hint: "G T"; cmd-held: root.cmd-held;
+            active: root.section == "tasks"; clicked => { root.set-section("tasks"); }
+        }
+        NavItem {
+            label: "Notes"; icon: Icons.tab-notes; hint: "G N"; cmd-held: root.cmd-held;
+            active: root.section == "notes"; clicked => { root.set-section("notes"); }
+        }
+        NavItem {
+            label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
+            active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
+        }
+        if root.show-calc-data: NavItem {
+            label: "Calculator"; icon: Icons.tab-stats; hint: "G ="; cmd-held: root.cmd-held;
+            active: root.section == "calculator"; clicked => { root.set-section("calculator"); }
+        }
+        if root.show-data: NavItem {
+            label: "Data"; icon: Icons.tab-stats; hint: "G D"; cmd-held: root.cmd-held;
+            active: root.section == "data"; clicked => { root.set-section("data"); }
+        }
+        NavItem {
+            label: "Stats"; icon: Icons.tab-stats; hint: "G S"; cmd-held: root.cmd-held;
+            active: root.section == "stats"; clicked => { root.set-section("stats"); }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        // Bottom: Shortcuts / Settings + status row.
+        NavItem {
+            label: "Shortcuts"; icon: Icons.search; hint: "⌘/"; cmd-held: root.cmd-held;
+            active: false; clicked => { root.open-shortcuts(); }
+        }
+        NavItem {
+            label: "Settings"; icon: Icons.theme; hint: "⌘,"; cmd-held: root.cmd-held;
+            active: false; clicked => { root.open-settings(); }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 8px;
+            height: 26px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle { width: 6px; height: 6px; border-radius: 3px;
+                    background: root.screenshare ? Theme.text-faint : Theme.accent; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Text { text: root.screenshare ? "Masked" : "Capturing";
+                    color: Theme.text-faint; font-size: Theme.fs-xs; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            maskbtn := Rectangle {
+                width: 22px; height: 22px; border-radius: Theme.r-xs;
+                background: mta.has-hover ? Theme.bg-elevated : transparent;
+                mta := TouchArea { clicked => { root.toggle-mask(); } }
+                Image { source: Icons.lock; width: 14px; height: 14px; image-fit: contain;
+                    colorize: root.screenshare ? Theme.accent : Theme.text-faint; }
+            }
+        }
+
+        // Theme picker (opened from Settings row) — until the full Settings screen.
+        settingspop := PopupWindow {
+            x: 210px;
+            y: parent.height - 360px;
+            width: 210px;
+            height: min(Theme.palettes.length * 34px + 12px, 360px);
+            Rectangle {
+                background: Theme.bg-panel;
+                border-color: Theme.line-strong;
+                border-width: 1px;
+                border-radius: Theme.r-lg;
+                Flickable {
+                    viewport-height: Theme.palettes.length * 34px + 12px;
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 2px;
+                        for pal[i] in Theme.palettes: Rectangle {
+                            height: 30px;
+                            border-radius: Theme.r-sm;
+                            background: root.theme-index == i ? Theme.bg-elevated
+                                : (throw.has-hover ? Theme.bg-elevated : transparent);
+                            throw := TouchArea { clicked => { root.set-theme(i); settingspop.close(); } }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle { width: 16px; height: 16px; border-radius: Theme.r-xs;
+                                        background: pal.bg-app; border-color: pal.accent; border-width: 2px; }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Text { text: pal.name; color: Theme.text; font-size: Theme.fs-body; overflow: elide; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle { width: 8px; height: 8px; border-radius: 4px;
+                                        background: root.theme-index == i ? Theme.accent : transparent; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

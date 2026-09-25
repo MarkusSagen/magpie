@@ -6,8 +6,12 @@ import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { Keycap } from "../components/keycap.slint";
 import { ClipboardView } from "clipboard.slint";
 import { StatsView } from "stats.slint";
+import { DataView } from "data.slint";
+import { CalcView } from "calculator.slint";
+import { CalcStore } from "../calc_store.slint";
 
 export component MainView inherits VerticalLayout {
     in-out property <int> action-selected;
@@ -102,6 +106,18 @@ export component MainView inherits VerticalLayout {
     in-out property <int> type-index;
     in-out property <string> view;
     callback zoom-preview(int);
+    // Transforms (⌘T) palette.
+    in-out property <string> transform-input;
+    in-out property <int> transform-selected;
+    pure callback transform-run(int, string) -> string;
+    callback transform-action(string, int);
+    // Inline answer card (dates / math / units).
+    in-out property <bool> has-answer;
+    in-out property <string> answer-kind;
+    in-out property <string> answer-display;
+    in-out property <string> answer-explanation;
+    in-out property <[string]> answer-formats;
+    in-out property <int> answer-format-index;
     forward-focus: searchinput;
     public function focus-input() { searchinput.focus(); }
             // Inset to the right of the sidebar via left padding (see the note
@@ -116,15 +132,21 @@ export component MainView inherits VerticalLayout {
             // shortcuts). It owns keyboard focus; nav/our ⌘-shortcuts are
             // intercepted in key-pressed, everything else falls through to editing.
             Rectangle {
-                height: 44px;
-                background: Theme.bg-panel;
-                border-radius: Theme.r-md;
-                border-width: 1px;
-                border-color: searchinput.has-focus ? Theme.border-strong : Theme.border;
+                height: 56px;
+                // Graphite top bar: borderless search with a bottom hairline.
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 12px;
-                    spacing: Theme.sp2;
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: Icons.search;
+                            width: 16px; height: 16px; image-fit: contain;
+                            colorize: Theme.text-faint;
+                        }
+                    }
                     Rectangle {
                         horizontal-stretch: 1;
                         if root.query == "": Text {
@@ -154,6 +176,25 @@ export component MainView inherits VerticalLayout {
                                 // ---- overlays / non-list modes: swallow, route to overlay ----
                                 if root.mode == "help" {
                                     if event.text == Key.Escape || event.text == "?" || (event.modifiers.control && event.text == "/") { root.mode = "list"; }
+                                    return accept;
+                                }
+                                if root.mode == "settings" {
+                                    if event.text == Key.Escape || (event.modifiers.control && event.text == ",") { root.mode = "list"; }
+                                    return accept;
+                                }
+                                if root.mode == "transform" {
+                                    if event.text == Key.Escape { root.mode = "list"; return accept; }
+                                    if event.text == Key.UpArrow { if root.transform-selected > 0 { root.transform-selected -= 1; } return accept; }
+                                    if event.text == Key.DownArrow { if root.transform-selected < 8 { root.transform-selected += 1; } return accept; }
+                                    if event.text == Key.Return {
+                                        root.transform-action(root.transform-run(root.transform-selected, root.transform-input), event.modifiers.alt ? 2 : 0);
+                                        if !event.modifiers.alt { root.mode = "list"; }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "c" {
+                                        root.transform-action(root.transform-run(root.transform-selected, root.transform-input), 1);
+                                        return accept;
+                                    }
                                     return accept;
                                 }
                                 if root.mode == "search" {
@@ -223,11 +264,60 @@ export component MainView inherits VerticalLayout {
                                     if event.text == "n" { root.nav-section("notes"); return accept; }
                                     if event.text == "b" { root.nav-section("bookmarks"); return accept; }
                                     if event.text == "s" { root.nav-section("stats"); return accept; }
+                                    if event.text == "d" { root.nav-section("data"); return accept; }
+                                    if event.text == "=" { root.nav-section("calculator"); return accept; }
                                     return accept;
                                 }
                                 if !event.modifiers.control && event.text == "g" && root.query == "" {
                                     root.nav-leader = true;
                                     return accept;
+                                }
+                                // ---- calculator view: ↵ commit/copy, Tab reuse, ⌘⌫ delete ----
+                                if root.view == "calculator" {
+                                    if CalcStore.graphs-open {
+                                        if event.text == Key.Escape { CalcStore.close-graphs(); return accept; }
+                                    }
+                                    if event.text == Key.UpArrow {
+                                        if CalcStore.selected > 0 { CalcStore.selected -= 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.DownArrow {
+                                        if CalcStore.selected < CalcStore.history.length - 1 { CalcStore.selected += 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Tab {
+                                        if CalcStore.history.length > 0 { CalcStore.reuse(CalcStore.selected); }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.Backspace {
+                                        if CalcStore.history.length > 0 { CalcStore.delete-row(CalcStore.selected); }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        CalcStore.commit();
+                                        return accept;
+                                    }
+                                    if event.text == Key.Escape {
+                                        if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
+                                    }
+                                    // everything else falls through to native text editing
+                                }
+                                // ---- inline answer card: Tab cycles format, ↵ pastes, ⌘C copies ----
+                                if root.has-answer && root.answer-formats.length > 0 {
+                                    if event.text == Key.Tab {
+                                        root.answer-format-index = Math.mod(root.answer-format-index + 1, root.answer-formats.length);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        // Evaluating in the search bar also lands in calc history.
+                                        CalcStore.commit();
+                                        root.transform-action(root.answer-formats[root.answer-format-index], 0);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "c" {
+                                        root.transform-action(root.answer-formats[root.answer-format-index], 1);
+                                        return accept;
+                                    }
                                 }
                                 // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
                                 if event.text == Key.UpArrow {
@@ -273,6 +363,8 @@ export component MainView inherits VerticalLayout {
                                     }
                                     if event.text == "f" { root.open-search(); return accept; }
                                     if event.text == "/" { root.mode = "help"; return accept; }
+                                    if event.text == "," { root.mode = "settings"; return accept; }
+                                    if event.text == "t" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; return accept; }
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
@@ -305,11 +397,35 @@ export component MainView inherits VerticalLayout {
                             }
                         }
                     }
+                    // Filter button — opens the Filters popover (⌘F).
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            border-radius: 7px;
+                            background: filterta.has-hover ? Theme.bg-elevated : transparent;
+                            filterta := TouchArea { clicked => { root.open-search(); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                VerticalLayout { alignment: center;
+                                    Text { text: "Filter"; color: Theme.text-dim; font-size: Theme.fs-body; } }
+                                VerticalLayout { alignment: center; Keycap { text: "⌘F"; } }
+                            }
+                        }
+                    }
                 }
             }
 
             // ---- List view ----
             if root.view == "list": ClipboardView {
+                has-answer: root.has-answer;
+                answer-kind: root.answer-kind;
+                answer-display: root.answer-display;
+                answer-explanation: root.answer-explanation;
+                answer-formats: root.answer-formats;
+                answer-format-index: root.answer-format-index;
                 activate(a0) => { root.activate(a0); }
                 add-tag(a0, a1) => { root.add-tag(a0, a1); }
                 add-tag-text <=> root.add-tag-text;
@@ -368,6 +484,64 @@ export component MainView inherits VerticalLayout {
                 time-week-total: root.time-week-total;
                 totals-line: root.totals-line;
                 view <=> root.view;
+            }
+
+            // ---- Data view (screens 13/14): reads the DataStore global ----
+            if root.view == "data": DataView { }
+
+            // ---- Calculator view (screens 11/12): reads the CalcStore global ----
+            if root.view == "calculator": CalcView {
+                answer-has: root.has-answer;
+                answer-kind: root.answer-kind;
+                answer-display: root.answer-display;
+                answer-explanation: root.answer-explanation;
+                answer-formats: root.answer-formats;
+                answer-format-index: root.answer-format-index;
+            }
+
+            // ---- Bottom hint bar: context + next actions with keycaps ----
+            // Hidden in Calculator view — CalcView carries its own footer.
+            if root.view != "calculator": Rectangle {
+                height: 40px;
+                Rectangle { y: 0; height: 1px; background: Theme.line; }
+                // Answer-card footer: paste the selected format, cycle with Tab, copy.
+                if root.has-answer && root.answer-formats.length > 0: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Answers for dates, math and units appear above your results";
+                            color: Theme.text-faint; font-size: 12px; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: "Paste " + root.answer-formats[root.answer-format-index];
+                            color: Theme.text; font-size: 12.5px; font-weight: 500; overflow: elide; } }
+                    VerticalLayout { alignment: center; Keycap { text: "↵"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Next format"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "Tab"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Copy"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘C"; } }
+                }
+                if !(root.has-answer && root.answer-formats.length > 0): HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: root.entries.length + " items"; color: Theme.text-faint; font-size: 12px; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: root.target-app != "" ? "Paste to " + root.target-app : "Paste";
+                            color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "↵"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Copy"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘C"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Actions"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘K"; } }
+                }
             }
 
         }
