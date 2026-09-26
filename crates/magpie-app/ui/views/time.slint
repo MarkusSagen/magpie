@@ -1,0 +1,199 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Keycap } from "../components/keycap.slint";
+import { TimeRow, TimeProjectBar } from "../types.slint";
+import { TimeStore } from "../time_store.slint";
+
+// Time tracking v2 (screen 24): entries grouped by day (left) + a Pomodoro ring
+// and a This-week per-project card (right). Builds on the existing time_entries +
+// org CLOCK logging. State lives in the TimeStore global.
+export component TimeView inherits VerticalLayout {
+    spacing: 12px;
+
+    // 1 Hz tick that drives the Pomodoro countdown + running-elapsed while active.
+    Timer {
+        interval: 1s;
+        running: TimeStore.pomo-running || TimeStore.running;
+        triggered => { TimeStore.pomo-tick(); }
+    }
+
+    // Running-timer bar.
+    if TimeStore.running: Rectangle {
+        height: 44px;
+        background: Theme.bg-panel;
+        border-radius: Theme.r-md;
+        border-width: 1px;
+        border-color: Theme.line;
+        HorizontalLayout {
+            padding-left: 12px; padding-right: 8px; spacing: 10px;
+            Rectangle { width: 8px; height: 8px; y: (parent.height - 8px) / 2; border-radius: 4px; background: Theme.accent; }
+            Text { text: TimeStore.running-desc; color: Theme.text; font-size: Theme.fs-body; font-weight: 500;
+                vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+            if TimeStore.running-project != "": Rectangle {
+                background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 26px; y: (parent.height - 26px) / 2;
+                HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                    Text { text: TimeStore.running-project; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } } }
+            Text { text: TimeStore.running-elapsed; color: Theme.text; font-family: "Geist Mono"; font-size: 20px;
+                font-weight: 700; vertical-alignment: center; }
+            Rectangle {
+                width: 84px; height: 30px; y: (parent.height - 30px) / 2; border-radius: Theme.r-sm;
+                border-width: 1px; border-color: Theme.accent;
+                stbt := TouchArea { clicked => { TimeStore.stop-timer(); } }
+                HorizontalLayout { alignment: center; spacing: 6px;
+                    Rectangle { width: 9px; height: 9px; y: (parent.height - 9px)/2; background: Theme.text; }
+                    Text { text: "Stop"; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; } }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 16px;
+        vertical-stretch: 1;
+
+        // ---- entries ----
+        VerticalLayout {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            spacing: 4px;
+            ListView {
+                vertical-stretch: 1;
+                for row[i] in TimeStore.rows: Rectangle {
+                    height: row.is-day-header ? 34px : 44px;
+                    background: (!row.is-day-header && row.running) ? Theme.bg-elevated : transparent;
+                    border-radius: Theme.r-sm;
+                    if row.is-day-header: HorizontalLayout {
+                        padding-left: 4px; padding-right: 8px;
+                        Text { text: row.day-label; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600;
+                            vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: row.day-total; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            vertical-alignment: center; }
+                    }
+                    if !row.is-day-header: HorizontalLayout {
+                        padding-left: 12px; padding-right: 10px; spacing: 10px;
+                        Text { text: row.desc; color: Theme.text; font-size: Theme.fs-body; vertical-alignment: center;
+                            overflow: elide; horizontal-stretch: 1; }
+                        if row.project != "": Text { text: row.project; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        if row.tag != "": Text { text: row.tag; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Text { text: row.span; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Text { text: row.duration; color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-body;
+                            vertical-alignment: center; width: 84px; horizontal-alignment: right; }
+                        Rectangle { width: 24px; height: 24px; y: (parent.height - 24px)/2; border-radius: Theme.r-xs;
+                            background: cbt.has-hover ? Theme.bg-elevated : transparent;
+                            Text { text: "▶"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            cbt := TouchArea { clicked => { TimeStore.continue-row(i); } } }
+                    }
+                }
+            }
+            // Actions.
+            HorizontalLayout {
+                spacing: 16px;
+                Text { text: "Every entry is also written to its note as an org CLOCK line";
+                    color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-stretch: 1; }
+                Rectangle { height: 28px; width: 96px; border-radius: Theme.r-sm; background: cla.has-hover ? Theme.bg-elevated : transparent;
+                    cla := TouchArea { clicked => { TimeStore.continue-last(); } }
+                    Text { text: "Continue"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { height: 28px; width: 92px; border-radius: Theme.r-sm; background: aea.has-hover ? Theme.bg-elevated : transparent;
+                    aea := TouchArea { clicked => { TimeStore.add-entry(); } }
+                    Text { text: "Add entry"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { height: 28px; width: 80px; border-radius: Theme.r-sm; background: rea.has-hover ? Theme.bg-elevated : transparent;
+                    rea := TouchArea { clicked => { TimeStore.report(); } }
+                    Text { text: "Report"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+            }
+        }
+
+        // ---- right column: pomodoro + this week ----
+        VerticalLayout {
+            width: 340px;
+            spacing: 12px;
+
+            // Pomodoro card.
+            Rectangle {
+                background: Theme.bg-panel; border-radius: Theme.r-lg; border-width: 1px; border-color: Theme.line;
+                height: 320px;
+                VerticalLayout {
+                    padding: 18px; spacing: 10px;
+                    HorizontalLayout {
+                        Text { text: "Pomodoro"; color: Theme.text; font-size: Theme.fs-body; font-weight: 600;
+                            vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "25 / 5 · long break 15"; color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    }
+                    // Ring: an accent arc over a track. `pomo-progress` drives the arc via
+                    // a conic-ish approximation (two half-rings would need Path; keep a
+                    // simple radial track + a big remaining readout).
+                    Rectangle {
+                        height: 180px;
+                        Rectangle {
+                            width: 168px; height: 168px; x: (parent.width - 168px) / 2;
+                            border-radius: 84px; border-width: 10px;
+                            border-color: Theme.bg-elevated;
+                        }
+                        // Progress ring (accent) — width grows with progress as a simple bar
+                        // beneath the readout; a full arc needs Path (deferred).
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: TimeStore.pomo-remaining; color: Theme.text; font-size: 40px; font-weight: 700;
+                                horizontal-alignment: center; }
+                            Text { text: (TimeStore.pomo-phase == 0 ? "Focus" : (TimeStore.pomo-phase == 1 ? "Break" : "Long break"))
+                                    + " · " + TimeStore.pomo-cycle + " of " + TimeStore.pomo-cycles-total;
+                                color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; }
+                        }
+                    }
+                    // Progress bar under the readout.
+                    Rectangle {
+                        height: 4px; background: Theme.bg-elevated; border-radius: 2px;
+                        Rectangle { x: 0; width: parent.width * TimeStore.pomo-progress; height: parent.height;
+                            border-radius: 2px; background: Theme.accent; }
+                    }
+                    // Cycle dots.
+                    HorizontalLayout {
+                        alignment: center; spacing: 8px;
+                        for d in [1, 2, 3, 4]: Rectangle {
+                            width: 8px; height: 8px; border-radius: 4px;
+                            background: d <= TimeStore.pomo-cycle ? Theme.accent : Theme.bg-elevated;
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center; spacing: 10px;
+                        Rectangle { width: 96px; height: 32px; border-radius: Theme.r-sm; border-width: 1px; border-color: Theme.line;
+                            background: pta.has-hover ? Theme.bg-elevated : transparent;
+                            pta := TouchArea { clicked => { TimeStore.pomo-toggle(); } }
+                            Text { text: TimeStore.pomo-running ? "Pause" : "Start"; color: Theme.text; font-size: Theme.fs-sm;
+                                horizontal-alignment: center; vertical-alignment: center; } }
+                        Rectangle { width: 96px; height: 32px; border-radius: Theme.r-sm;
+                            background: ska.has-hover ? Theme.bg-elevated : transparent;
+                            ska := TouchArea { clicked => { TimeStore.pomo-skip(); } }
+                            Text { text: "Skip"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                    }
+                }
+            }
+
+            // This week card.
+            Rectangle {
+                background: Theme.bg-panel; border-radius: Theme.r-lg; border-width: 1px; border-color: Theme.line;
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 18px; spacing: 12px;
+                    HorizontalLayout {
+                        Text { text: "This week"; color: Theme.text; font-size: Theme.fs-body; font-weight: 600;
+                            vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: TimeStore.week-total; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                    }
+                    for p[i] in TimeStore.week-projects: VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            Text { text: p.name; color: p.accent ? Theme.text : Theme.text-dim; font-size: Theme.fs-body;
+                                vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                            Text { text: p.total; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            height: 4px; background: Theme.bg-elevated; border-radius: 2px;
+                            Rectangle { x: 0; width: parent.width * p.bar; height: parent.height; border-radius: 2px;
+                                background: p.accent ? Theme.accent : Theme.line-strong; }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+    }
+}

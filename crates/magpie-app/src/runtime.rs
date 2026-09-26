@@ -4,7 +4,7 @@ use crate::{
     EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
     NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchFile, SearchLine,
     SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem, SnippetRow, SnippetsStore,
-    TaskRow, TimeEntryRow, WorldClockRow, WorldClockStore,
+    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -84,6 +84,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         key_monitor: std::sync::Mutex::new(None),
         expand_buffer: std::sync::Mutex::new(String::new()),
         expand_keywords: std::sync::Mutex::new(Vec::new()),
+        pomodoro: std::sync::Mutex::new(magpie_app::app_state::PomodoroState::default()),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -1852,6 +1853,13 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             ui.set_board_mode(true);
             refresh_board(ui, state);
         }
+        ("tasks", "time") => {
+            // The Time tab lives inside the Tasks overlay (gated on tasks-view).
+            ui.set_tasks_view(SharedString::from("time"));
+            ui.set_tasks_mode(true);
+            refresh_tasks(ui, state);
+            refresh_time(ui, state);
+        }
         ("tasks", _) => {
             // "list", or any unrecognized view — the flat Tasks list.
             ui.set_tasks_view(SharedString::from("list"));
@@ -2560,6 +2568,225 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     } else {
         ss.set_has_selection(false);
     }
+}
+
+/// Local `HH:MM` for an epoch-ms instant.
+fn hhmm_local(ms: i64) -> String {
+    let local = ms / 1000 + local_offset_seconds();
+    let sod = local.rem_euclid(86_400);
+    format!("{:02}:{:02}", sod / 3600, (sod % 3600) / 60)
+}
+
+/// `H:MM:SS` duration for a millisecond span.
+fn hms(ms: i64) -> String {
+    let s = (ms / 1000).max(0);
+    format!("{}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+}
+
+/// Local day-number (days since epoch) for an instant.
+fn local_day(ms: i64) -> i64 {
+    (ms / 1000 + local_offset_seconds()).div_euclid(86_400)
+}
+
+/// Day label for the entries list: Today / Yesterday / full date.
+fn day_label(day: i64, today: i64) -> String {
+    if day == today {
+        "Today".into()
+    } else if day == today - 1 {
+        "Yesterday".into()
+    } else {
+        magpie_core::calendar::full_date(day)
+    }
+}
+
+/// A `#project`/`#tag` split from a task title (first `#word` → project, next → tag).
+fn project_and_tag(title: &str) -> (String, String) {
+    let tags: Vec<&str> = title
+        .split_whitespace()
+        .filter_map(|w| w.strip_prefix('#'))
+        .collect();
+    let project = tags.first().map(|s| s.to_string()).unwrap_or_default();
+    let tag = tags.get(1).map(|s| format!("#{s}")).unwrap_or_default();
+    (project, tag)
+}
+
+/// Rebuild the Time tab (screen 24) into `TimeStore`: the running-timer bar, entries
+/// grouped by day, the This-week per-project card, and the current Pomodoro state.
+fn refresh_time(ui: &LauncherWindow, state: &AppState) {
+    let now = now_ms();
+    let ts = ui.global::<crate::TimeStore>();
+    let (entries, active, by_task, week_total) = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        let week_start = now - 7 * 86_400_000;
+        (
+            store.recent_time_entries(80).unwrap_or_default(),
+            store.active_timer().ok().flatten(),
+            store.time_by_task(week_start, now).unwrap_or_default(),
+            store.time_total_since(week_start, now).unwrap_or(0),
+        )
+    };
+
+    // Running-timer bar.
+    if let Some(a) = &active {
+        let (proj, tag) = project_and_tag(&a.task_title);
+        ts.set_running(true);
+        ts.set_running_desc(a.task_title.clone().into());
+        ts.set_running_project(proj.into());
+        ts.set_running_tag(tag.into());
+        ts.set_running_elapsed(hms(now - a.start_ms).into());
+    } else {
+        ts.set_running(false);
+    }
+
+    // Entries grouped by local day (newest first).
+    let today = local_day(now);
+    let mut rows: Vec<crate::TimeRow> = Vec::new();
+    let mut cur_day = i64::MIN;
+    // Group totals: precompute per-day sums.
+    let mut day_ms: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for e in &entries {
+        let end = e.end_ms.unwrap_or(now);
+        *day_ms.entry(local_day(e.start_ms)).or_insert(0) += (end - e.start_ms).max(0);
+    }
+    let blank_row = |desc: String| crate::TimeRow {
+        is_day_header: false,
+        day_label: SharedString::new(),
+        day_total: SharedString::new(),
+        desc: desc.into(),
+        project: SharedString::new(),
+        tag: SharedString::new(),
+        span: SharedString::new(),
+        duration: SharedString::new(),
+        running: false,
+    };
+    let _ = blank_row;
+    for e in &entries {
+        let d = local_day(e.start_ms);
+        if d != cur_day {
+            cur_day = d;
+            rows.push(crate::TimeRow {
+                is_day_header: true,
+                day_label: day_label(d, today).into(),
+                day_total: hms(*day_ms.get(&d).unwrap_or(&0)).into(),
+                desc: SharedString::new(),
+                project: SharedString::new(),
+                tag: SharedString::new(),
+                span: SharedString::new(),
+                duration: SharedString::new(),
+                running: false,
+            });
+        }
+        let (proj, tag) = project_and_tag(&e.task_title);
+        let end = e.end_ms.unwrap_or(now);
+        let span = format!(
+            "{} — {}",
+            hhmm_local(e.start_ms),
+            if e.end_ms.is_some() {
+                hhmm_local(end)
+            } else {
+                "now".into()
+            }
+        );
+        rows.push(crate::TimeRow {
+            is_day_header: false,
+            day_label: SharedString::new(),
+            day_total: SharedString::new(),
+            desc: e.task_title.clone().into(),
+            project: proj.into(),
+            tag: tag.into(),
+            span: span.into(),
+            duration: hms(end - e.start_ms).into(),
+            running: e.end_ms.is_none(),
+        });
+    }
+    ts.set_rows(ModelRc::new(VecModel::from(rows)));
+
+    // This-week per-project card (aggregate `time_by_task` by derived project).
+    let mut proj_ms: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for (_key, title, ms) in &by_task {
+        let (proj, _) = project_and_tag(title);
+        let name = if proj.is_empty() { title.clone() } else { proj };
+        *proj_ms.entry(name).or_insert(0) += *ms;
+    }
+    let mut projects: Vec<(String, i64)> = proj_ms.into_iter().collect();
+    projects.sort_by_key(|p| std::cmp::Reverse(p.1));
+    let max = projects.first().map(|p| p.1).unwrap_or(1).max(1) as f32;
+    let active_proj = active
+        .as_ref()
+        .map(|a| project_and_tag(&a.task_title).0)
+        .unwrap_or_default();
+    let bars: Vec<crate::TimeProjectBar> = projects
+        .iter()
+        .take(6)
+        .map(|(name, ms)| crate::TimeProjectBar {
+            name: name.clone().into(),
+            total: {
+                let m = ms / 60000;
+                format!("{}h {:02}m", m / 60, m % 60).into()
+            },
+            bar: (*ms as f32 / max).min(1.0),
+            accent: !active_proj.is_empty() && *name == active_proj,
+        })
+        .collect();
+    ts.set_week_projects(ModelRc::new(VecModel::from(bars)));
+    let wm = week_total / 60000;
+    ts.set_week_total(format!("{}:{:02}", wm / 60, wm % 60).into());
+
+    push_pomodoro(ui, state);
+}
+
+/// Continue tracking: start a timer for the row's task (or, when `row_index` points
+/// at a header/blank row — e.g. Continue-last — the most recent entry).
+fn continue_time_entry(w: &slint::Weak<LauncherWindow>, state: &AppState, row_index: i32) {
+    let from_row = w.upgrade().and_then(|ui| {
+        ui.global::<TimeStore>()
+            .get_rows()
+            .row_data(row_index.max(0) as usize)
+            .map(|r| r.desc.to_string())
+            .filter(|t| !t.is_empty())
+    });
+    let title = from_row.or_else(|| {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store
+            .recent_time_entries(1)
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .map(|e| e.task_title)
+    });
+    if let Some(title) = title {
+        {
+            let store = match state.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            let _ = store.start_timer(&title, &title, None, now_ms());
+        }
+        if let Some(ui) = w.upgrade() {
+            refresh_time(&ui, state);
+        }
+    }
+}
+
+/// Push the current Pomodoro state into `TimeStore`.
+fn push_pomodoro(ui: &LauncherWindow, state: &AppState) {
+    use magpie_app::app_state::PomodoroState;
+    let p = state.pomodoro.lock().map(|g| g.clone()).unwrap_or_default();
+    let ts = ui.global::<crate::TimeStore>();
+    let len = PomodoroState::phase_len(p.phase).max(1);
+    ts.set_pomo_running(p.running);
+    ts.set_pomo_phase(p.phase);
+    ts.set_pomo_remaining(
+        format!("{:02}:{:02}", p.remaining_sec / 60, p.remaining_sec % 60).into(),
+    );
+    ts.set_pomo_progress(((len - p.remaining_sec) as f32 / len as f32).clamp(0.0, 1.0));
+    ts.set_pomo_cycle(p.cycle);
+    ts.set_pomo_cycles_total(4);
 }
 
 /// Refresh the cached `(keyword, snippet_id)` list the expand-as-you-type monitor
@@ -4266,6 +4493,35 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Time tracking v2 (Phase 17): seed a running timer, open Time tab.
+                        "time" => {
+                            if let Ok(store) = st.store.lock() {
+                                let base = now_ms();
+                                // A couple of finished entries + a running one.
+                                let _ = store.start_timer(
+                                    "Standup #Studio555",
+                                    "Standup #Studio555",
+                                    None,
+                                    base - 9_000_000,
+                                );
+                                let _ = store.stop_active(base - 8_100_000);
+                                let _ = store.start_timer(
+                                    "Phase 9 — data import #magpie",
+                                    "Phase 9 — data import #magpie",
+                                    None,
+                                    base - 7_000_000,
+                                );
+                                let _ = store.stop_active(base - 200_000);
+                                let _ = store.start_timer(
+                                    "Graphite 9b — task card redesign #magpie #ui",
+                                    "Graphite 9b — task card redesign #magpie #ui",
+                                    None,
+                                    base - 2_520_000,
+                                );
+                            }
+                            ui.invoke_set_section(SharedString::from("tasks"));
+                            ui.invoke_set_task_view(SharedString::from("time"));
+                        }
                         // File search (Phase 15): search the repo for a term.
                         "files" => {
                             {
@@ -5001,6 +5257,106 @@ pub fn start() {
         let w = ui.as_weak();
         ui.global::<SearchStore>().on_apply_replace(move || {
             apply_sed_replace(&w, &s);
+        });
+    }
+    // ---- Time tracking v2 (screen 24) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_stop_timer(move || {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = store.stop_active(now_ms());
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_time(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_continue_last(move || {
+            continue_time_entry(&w, &s, 0);
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_continue_row(move |i| {
+            continue_time_entry(&w, &s, i);
+        });
+    }
+    {
+        ui.global::<TimeStore>().on_add_entry(move || {
+            // Manual-entry form is deferred; entries come from the task timer.
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_report(move || {
+            if let Some(ui) = w.upgrade() {
+                nav_to(&ui, &s, "stats", "");
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_pomo_toggle(move || {
+            {
+                let mut p = s.pomodoro.lock().unwrap_or_else(|e| e.into_inner());
+                p.running = !p.running;
+            }
+            if let Some(ui) = w.upgrade() {
+                push_pomodoro(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_pomo_skip(move || {
+            {
+                let mut p = s.pomodoro.lock().unwrap_or_else(|e| e.into_inner());
+                p.advance();
+            }
+            if let Some(ui) = w.upgrade() {
+                push_pomodoro(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_pomo_tick(move || {
+            let mut phase_ended = false;
+            {
+                let mut p = s.pomodoro.lock().unwrap_or_else(|e| e.into_inner());
+                if p.running {
+                    p.remaining_sec -= 1;
+                    if p.remaining_sec <= 0 {
+                        let finished_focus = p.phase == 0;
+                        p.advance();
+                        phase_ended = true;
+                        let _ = finished_focus;
+                    }
+                }
+            }
+            if phase_ended {
+                magpie_platform::notify("Pomodoro", "Phase complete");
+            }
+            if let Some(ui) = w.upgrade() {
+                push_pomodoro(&ui, &s);
+                // Keep the running-timer elapsed live while on the Time tab.
+                if ui.get_tasks_view() == "time" {
+                    refresh_time(&ui, &s);
+                }
+            }
         });
     }
     // ---- Data view (screens 13/14) ----

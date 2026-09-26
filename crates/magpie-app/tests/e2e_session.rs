@@ -72,6 +72,7 @@ fn state() -> AppState {
         key_monitor: std::sync::Mutex::new(None),
         expand_buffer: std::sync::Mutex::new(String::new()),
         expand_keywords: std::sync::Mutex::new(Vec::new()),
+        pomodoro: std::sync::Mutex::new(magpie_app::app_state::PomodoroState::default()),
         nav_back: Mutex::new(Vec::new()),
         nav_fwd: Mutex::new(Vec::new()),
         data_input: Mutex::new(String::new()),

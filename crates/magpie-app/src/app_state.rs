@@ -55,6 +55,8 @@ pub struct AppState {
     pub key_monitor: Mutex<Option<magpie_platform::KeyMonitor>>,
     pub expand_buffer: Mutex<String>,
     pub expand_keywords: Mutex<Vec<(String, i64)>>,
+    /// Pomodoro timer (Phase 17) — a self-contained countdown, ticked 1 Hz.
+    pub pomodoro: Mutex<PomodoroState>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -74,6 +76,59 @@ pub struct AppState {
     /// `graph_g` empty = a single-function plot. Set when a graph is opened.
     pub calc_graph_f: Mutex<String>,
     pub calc_graph_g: Mutex<String>,
+}
+
+/// Pomodoro countdown state (screen 24). Focus 25 / break 5 / long break 15 every 4.
+#[derive(Debug, Clone)]
+pub struct PomodoroState {
+    /// 0 focus, 1 short break, 2 long break.
+    pub phase: i32,
+    pub remaining_sec: i64,
+    pub running: bool,
+    /// Focus session number within the current set (1..=4).
+    pub cycle: i32,
+}
+
+impl Default for PomodoroState {
+    fn default() -> Self {
+        Self {
+            phase: 0,
+            remaining_sec: 25 * 60,
+            running: false,
+            cycle: 1,
+        }
+    }
+}
+
+impl PomodoroState {
+    /// Seconds in a phase (focus 25m, short break 5m, long break 15m).
+    pub fn phase_len(phase: i32) -> i64 {
+        match phase {
+            1 => 5 * 60,
+            2 => 15 * 60,
+            _ => 25 * 60,
+        }
+    }
+    /// Advance to the next phase: focus → break (long every 4th), break → focus.
+    pub fn advance(&mut self) {
+        if self.phase == 0 {
+            // Just finished a focus session.
+            if self.cycle >= 4 {
+                self.phase = 2; // long break
+            } else {
+                self.phase = 1; // short break
+            }
+        } else {
+            // Finished a break → next focus.
+            if self.phase == 2 {
+                self.cycle = 1;
+            } else {
+                self.cycle += 1;
+            }
+            self.phase = 0;
+        }
+        self.remaining_sec = Self::phase_len(self.phase);
+    }
 }
 
 /// File-search session state (screens 19/21/22/23).
@@ -179,6 +234,7 @@ mod tests {
             key_monitor: std::sync::Mutex::new(None),
             expand_buffer: std::sync::Mutex::new(String::new()),
             expand_keywords: std::sync::Mutex::new(Vec::new()),
+            pomodoro: std::sync::Mutex::new(crate::app_state::PomodoroState::default()),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

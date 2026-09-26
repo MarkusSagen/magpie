@@ -338,3 +338,22 @@ export struct SearchTreeRow {
     is-file: bool,
     viewed: bool,
 }
+
+// ---- Time tracking v2 (Phase 17, PNG 24) ----
+export struct TimeRow {
+    is-day-header: bool,
+    day-label: string,      // "Today" / "Yesterday" / "Mon 22 Sep"
+    day-total: string,      // "4:22:13" (header rows)
+    desc: string,
+    project: string,        // "magpie" (may be "")
+    tag: string,            // "#ui" (may be "")
+    span: string,           // "13:58 — now"
+    duration: string,       // "0:42:13"
+    running: bool,
+}
+export struct TimeProjectBar {
+    name: string,
+    total: string,          // "22h 05m"
+    bar: float,             // 0..1
+    accent: bool,
+}
