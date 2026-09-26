@@ -281,3 +281,24 @@ export struct WorldClockRow {
     hours: [int],          // 24 local-hour labels, aligned to the home day
     shades: [int],         // 24 shade bands: 0 night, 1 awake, 2 work
 }
+
+// ---- Notes v2 rich Markdown preview (Phase 14, PNG 18) ----
+// One inline span. `kind`: 0 text, 1 bold, 2 italic, 3 code, 4 wiki, 5 url,
+// 6 prio, 7 date, 8 tag, 9 recur.
+export struct MdSpan {
+    kind: int,
+    text: string,
+    href: string,
+    domain: string,
+    prio: int,       // 1 low, 2 med, 3 high (kind 6)
+    icon: image,     // favicon for a URL span (kind 5), when cached
+    has-icon: bool,
+}
+// One rendered line. `block`: 0 plain, 1 h1, 2 h2, 3 h3, 4 bullet, 5 numbered,
+// 6 quote, 7 task.
+export struct MdLineVM {
+    block: int,
+    done: bool,
+    marker: string,   // "1." for numbered
+    spans: [MdSpan],
+}

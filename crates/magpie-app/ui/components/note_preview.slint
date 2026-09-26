@@ -1,0 +1,139 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { MdLineVM, MdSpan } from "../types.slint";
+import { NoteRender } from "../note_render_store.slint";
+
+// One inline span, rendered by kind. A HorizontalLayout so it sizes to its (single
+// active) child and the parent lays spans out left-to-right; fixed-height chips are
+// centred by the layout (no manual x/y, which would drop them out of flow).
+component SpanView inherits HorizontalLayout {
+    in property <MdSpan> sp;
+    in property <bool> dim;      // struck/faint (done task)
+    in property <length> text-size;
+    in property <bool> heading;
+    alignment: start;
+    // text / bold / italic
+    if sp.kind <= 2: Text {
+        text: sp.text;
+        color: root.dim ? Theme.text-faint : Theme.text;
+        font-size: root.text-size;
+        font-weight: (sp.kind == 1 || root.heading) ? 700 : 400;
+        font-italic: sp.kind == 2;
+        vertical-alignment: center;
+    }
+    // inline code pill
+    if sp.kind == 3: Rectangle {
+        background: Theme.bg-elevated;
+        border-radius: Theme.r-xs;
+        height: 22px;
+        HorizontalLayout {
+            padding-left: 8px; padding-right: 8px;
+            Text { text: sp.text; color: Theme.text; font-family: "Geist Mono";
+                font-size: Theme.fs-sm; vertical-alignment: center; }
+        }
+    }
+    // wiki note chip
+    if sp.kind == 4: Rectangle {
+        background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 24px;
+        HorizontalLayout {
+            padding-left: 8px; padding-right: 8px; spacing: 5px;
+            Image { source: Icons.tab-notes; colorize: Theme.accent; width: 12px;
+                height: 12px; image-fit: contain; }
+            Text { text: sp.text; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+        }
+        TouchArea { clicked => { NoteRender.open-wiki(sp.text); } }
+    }
+    // url favicon chip
+    if sp.kind == 5: Rectangle {
+        background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 24px;
+        HorizontalLayout {
+            padding-left: 8px; padding-right: 8px; spacing: 5px;
+            Image { source: sp.has-icon ? sp.icon : Icons.type-link;
+                colorize: sp.has-icon ? #00000000 : Theme.accent;
+                width: 12px; height: 12px; image-fit: contain; }
+            Text { text: sp.domain + " ↗"; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+        }
+        TouchArea { clicked => { NoteRender.open-url(sp.href); } }
+    }
+    // priority bars
+    if sp.kind == 6: Rectangle {
+        width: 22px; height: 24px;
+        HorizontalLayout {
+            alignment: center; spacing: 2px;
+            for b in [1, 2, 3]: VerticalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 4px;
+                    height: b * 5px;
+                    border-radius: 1px;
+                    background: b <= sp.prio ? Theme.text-dim : Theme.line;
+                }
+            }
+        }
+    }
+    // date chip
+    if sp.kind == 7: Rectangle {
+        background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 24px;
+        HorizontalLayout { padding-left: 8px; padding-right: 8px;
+            Text { text: sp.text; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+    }
+    // tag
+    if sp.kind == 8: Text {
+        text: "#" + sp.text; color: Theme.text-faint; font-size: root.text-size; vertical-alignment: center;
+    }
+    // recur chip
+    if sp.kind == 9: Rectangle {
+        background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 24px;
+        HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 4px;
+            Text { text: "↻ " + sp.text; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+    }
+}
+
+// Rich Markdown preview (screen 18): every line rendered with its block style and
+// inline spans. Links stand out in the accent colour. Rendering only — editing
+// happens in the raw editor.
+export component NotePreview inherits ListView {
+    for line[li] in NoteRender.lines: Rectangle {
+        height: line.block == 1 ? 46px
+            : (line.block == 2 ? 40px
+            : (line.block == 3 ? 34px
+            : (line.spans.length == 0 ? 12px : 30px)));
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            // ---- block prefix ----
+            if line.block == 4: Text {  // bullet
+                text: "•"; color: Theme.text-faint; font-size: 16px; vertical-alignment: center; width: 12px;
+                horizontal-alignment: center;
+            }
+            if line.block == 5: Text {  // numbered
+                text: line.marker; color: Theme.text-faint; font-size: Theme.fs-body; vertical-alignment: center; width: 22px;
+            }
+            if line.block == 6: Rectangle { // quote bar
+                width: 3px; background: Theme.line-strong;
+            }
+            if line.block == 7: Rectangle { // checkbox
+                width: 18px; height: 18px;
+                border-radius: 5px;
+                border-width: 1.5px;
+                border-color: line.done ? Theme.text-faint : Theme.line-strong;
+                background: line.done ? Theme.text-faint : transparent;
+                if line.done: Image { source: Icons.tab-tasks; colorize: Theme.bg-app; width: 12px; height: 12px;
+                    x: 3px; y: 3px; image-fit: contain; }
+            }
+            // ---- inline spans ----
+            HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                for sp[si] in line.spans: SpanView {
+                    sp: sp;
+                    dim: line.block == 7 && line.done;
+                    heading: line.block >= 1 && line.block <= 3;
+                    text-size: line.block == 1 ? 26px : (line.block == 2 ? 21px : (line.block == 3 ? 17px : Theme.fs-body));
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+    }
+}

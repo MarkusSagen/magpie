@@ -6,6 +6,8 @@ import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { NotePreview } from "../components/note_preview.slint";
+import { NoteRender } from "../note_render_store.slint";
 
 export component NotesView inherits Rectangle {
     callback focus-search();
@@ -83,7 +85,8 @@ export component NotesView inherits Rectangle {
                         return accept;
                     }
                     if e.text == Key.Return {
-                        ned.focus();
+                        // Enter edit mode (the raw editor); Preview is the default.
+                        NoteRender.preview = false;
                         return accept;
                     }
                     return reject;
@@ -235,6 +238,19 @@ export component NotesView inherits Rectangle {
                         HorizontalLayout {
                             spacing: Theme.sp2;
                             Text { text: root.note-provenance; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                            // Rendered preview ⇄ raw editor toggle (screen 18).
+                            Rectangle {
+                                width: 92px;
+                                height: 26px;
+                                border-radius: Theme.r-sm;
+                                background: pvtgl.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                pvtgl := TouchArea { clicked => { NoteRender.toggle-preview(); } }
+                                HorizontalLayout {
+                                    alignment: center; spacing: 4px;
+                                    Text { text: NoteRender.preview ? "Edit" : "Preview"; color: Theme.text;
+                                        font-size: Theme.fs-sm; vertical-alignment: center; }
+                                }
+                            }
                             // Promote the line the cursor is on to a `- [ ]` task
                             // (same as ⌘⏎ in the editor).
                             Rectangle {
@@ -242,7 +258,7 @@ export component NotesView inherits Rectangle {
                                 height: 26px;
                                 border-radius: Theme.r-sm;
                                 background: mktask.has-hover ? Theme.bg-elevated : Theme.bg-panel;
-                                mktask := TouchArea { clicked => { root.promote-line(ned.cursor-position-byte-offset); } }
+                                mktask := TouchArea { clicked => { root.promote-line(root.note-caret); } }
                                 HorizontalLayout {
                                     alignment: center;
                                     spacing: 4px;
@@ -251,9 +267,13 @@ export component NotesView inherits Rectangle {
                                 }
                             }
                         }
+                        // Rendered preview (screen 18) — the rich line model.
+                        if NoteRender.preview: NotePreview {
+                            vertical-stretch: 1;
+                        }
                         // Editor — a plain TextInput (not std TextEdit, which renders
                         // invisibly on the dark pane) with an explicit text colour.
-                        Flickable {
+                        if !NoteRender.preview: Flickable {
                             vertical-stretch: 1;
                             viewport-width: self.width;
                             viewport-height: ned.preferred-height;

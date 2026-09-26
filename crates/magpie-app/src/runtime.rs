@@ -1,9 +1,9 @@
 use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
-    EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, NoteRow, Popover,
-    RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
-    TimeEntryRow, WorldClockRow, WorldClockStore,
+    EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
+    NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow,
+    SearchTaskRow, SlotItem, TaskRow, TimeEntryRow, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -2018,8 +2018,9 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
             .collect::<Vec<_>>(),
     )));
     ui.set_note_id(open_id);
-    ui.set_note_body(SharedString::from(body));
+    ui.set_note_body(SharedString::from(body.clone()));
     ui.set_note_provenance(SharedString::from(prov));
+    refresh_note_render(ui, &body);
     // A stale `[[…` popup from the previously-open note shouldn't linger.
     ui.set_note_suggestions(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
     ui.set_note_links(ModelRc::new(VecModel::from(
@@ -2295,6 +2296,100 @@ fn refresh_journal(ui: &LauncherWindow, state: &AppState) {
 /// Provenance line. Phase 1 keeps it simple: whether the note was captured from a
 /// clip or authored in Magpie, plus the creation date. (Enriching "captured" with
 /// the exact source app name — via an app-id→name lookup — is a later refinement.)
+/// Build the rich-Markdown line model (screen 18) from a note body and push it
+/// into `NoteRender`. Pure rendering via `magpie_core::md_render`; URL favicons are
+/// not loaded here (the chip falls back to a link glyph).
+fn refresh_note_render(ui: &LauncherWindow, body: &str) {
+    use magpie_core::md_render::{self, Block, Span};
+    let lines: Vec<MdLineVM> = md_render::render_note(body)
+        .into_iter()
+        .map(|line| {
+            let (block, done, marker) = match &line.block {
+                Block::Plain => (0, false, String::new()),
+                Block::H1 => (1, false, String::new()),
+                Block::H2 => (2, false, String::new()),
+                Block::H3 => (3, false, String::new()),
+                Block::Bullet => (4, false, String::new()),
+                Block::Numbered(m) => (5, false, m.clone()),
+                Block::Quote => (6, false, String::new()),
+                Block::Task { done } => (7, *done, String::new()),
+            };
+            let spans: Vec<MdSpan> = line
+                .spans
+                .into_iter()
+                .map(|s| {
+                    let mut vm = MdSpan {
+                        kind: 0,
+                        text: SharedString::new(),
+                        href: SharedString::new(),
+                        domain: SharedString::new(),
+                        prio: 0,
+                        icon: slint::Image::default(),
+                        has_icon: false,
+                    };
+                    match s {
+                        Span::Text(t) => {
+                            vm.kind = 0;
+                            vm.text = t.into();
+                        }
+                        Span::Bold(t) => {
+                            vm.kind = 1;
+                            vm.text = t.into();
+                        }
+                        Span::Italic(t) => {
+                            vm.kind = 2;
+                            vm.text = t.into();
+                        }
+                        Span::Code(t) => {
+                            vm.kind = 3;
+                            vm.text = t.into();
+                        }
+                        Span::Wiki(t) => {
+                            vm.kind = 4;
+                            vm.text = t.into();
+                        }
+                        Span::Url {
+                            href,
+                            label,
+                            domain,
+                        } => {
+                            vm.kind = 5;
+                            vm.text = label.into();
+                            vm.href = href.into();
+                            vm.domain = domain.into();
+                        }
+                        Span::Prio(p) => {
+                            vm.kind = 6;
+                            vm.prio = p as i32;
+                        }
+                        Span::DateChip(d) => {
+                            vm.kind = 7;
+                            vm.text = d.into();
+                        }
+                        Span::Tag(t) => {
+                            vm.kind = 8;
+                            vm.text = t.into();
+                        }
+                        Span::Recur(r) => {
+                            vm.kind = 9;
+                            vm.text = r.into();
+                        }
+                    }
+                    vm
+                })
+                .collect();
+            MdLineVM {
+                block,
+                done,
+                marker: marker.into(),
+                spans: ModelRc::new(VecModel::from(spans)),
+            }
+        })
+        .collect();
+    ui.global::<NoteRender>()
+        .set_lines(ModelRc::new(VecModel::from(lines)));
+}
+
 fn note_provenance(n: &magpie_core::Note) -> String {
     let when = abs_date(n.created_at_ms);
     if n.source_entry_id.is_some() {
@@ -3487,6 +3582,22 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_mode(SharedString::from("transform"));
                         }
                         "notes" => ui.invoke_set_mode_notes(true),
+                        // Notes v2 rich preview (Phase 14): seed a note exercising
+                        // headings, checkboxes, task tokens, wiki/url chips, code
+                        // and a blockquote, then open it (preview is the default).
+                        "notes-rich" => {
+                            let body = "# Magpie roadmap\n\n## This week\n\n- [x] Split launcher.slint into components\n- [ ] Graphite tokens and palette !high @mon #ui\n- [ ] Shared search bar component @fri #ui +1w\n- [ ] Favicons and titles for links #clipboard\n\n## Notes\n\n- Design lives in [[Graphite redesign]] and on the canvas\n- Repo https://github.com/MarkusSagen/magpie\n- Run the gate before every commit: `cargo test --workspace`\n\n> One accent, one job.";
+                            if let Ok(store) = st.store.lock() {
+                                if let Ok(n) = store.upsert_note_by_name("Magpie roadmap", now_ms())
+                                {
+                                    let _ = store.update_note_body(n.id, body, now_ms());
+                                    drop(store);
+                                    ui.invoke_set_mode_notes(true);
+                                    ui.set_note_id(n.id as i32);
+                                }
+                            }
+                            refresh_notes(&ui, &st);
+                        }
                         "tasks" => ui.invoke_set_mode_tasks(true),
                         "bookmarks" => ui.invoke_set_mode_bookmarks(true),
                         "today" => ui.invoke_set_mode_today(true),
@@ -3877,6 +3988,55 @@ pub fn start() {
                     if let Ok(mut clip) = magpie_platform::platform_clipboard() {
                         let _ = clip.set_text(&summary);
                     }
+                }
+            }
+        });
+    }
+    // ---- Notes v2 rich preview (screen 18) ----
+    {
+        let w = ui.as_weak();
+        ui.global::<NoteRender>().on_toggle_preview(move || {
+            if let Some(ui) = w.upgrade() {
+                let nr = ui.global::<NoteRender>();
+                let now_preview = !nr.get_preview();
+                nr.set_preview(now_preview);
+                if now_preview {
+                    // Rebuild from the (possibly just-edited) body.
+                    let body = ui.get_note_body();
+                    refresh_note_render(&ui, body.as_str());
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<NoteRender>().on_open_wiki(move |name| {
+            if let Some(ui) = w.upgrade() {
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store
+                        .upsert_note_by_name(name.as_str(), now_ms())
+                        .ok()
+                        .map(|n| n.id as i32)
+                };
+                if let Some(id) = id {
+                    ui.set_note_id(id);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<NoteRender>().on_open_url(move |href| {
+            if let Some(ui) = w.upgrade() {
+                let url = href.to_string();
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    open_url_and_hide(&ui, &url);
                 }
             }
         });

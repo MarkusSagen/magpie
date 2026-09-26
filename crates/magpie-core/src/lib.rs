@@ -27,6 +27,7 @@ pub mod favorites;
 pub mod holidays;
 pub mod mask_support;
 pub mod mathsvg;
+pub mod md_render;
 pub mod merge;
 pub mod metrics;
 pub mod model;
