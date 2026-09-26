@@ -29,6 +29,10 @@ ignore = "0.4"
 grep-searcher = "0.1"
 grep-regex = "0.1"
 grep-matcher = "0.1"
+# Live project file sync (Phase 18b): filesystem-event watcher for the specific
+# project task files (FSEvents/kqueue/inotify). Watched non-recursively per project
+# dir, so it never crawls whole roots.
+notify = "6"
 
 [build-dependencies]
 slint-build = "1.8"

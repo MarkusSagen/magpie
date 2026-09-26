@@ -75,6 +75,7 @@ fn state() -> AppState {
         pomodoro: std::sync::Mutex::new(magpie_app::app_state::PomodoroState::default()),
         projects_roots: Vec::new(),
         project_scan: std::sync::Mutex::new(magpie_app::app_state::ProjectScanState::default()),
+        project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
         popover_default_tab: 3,
         open_with: std::collections::BTreeMap::new(),
         popover_pinned: std::sync::atomic::AtomicBool::new(false),

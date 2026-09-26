@@ -60,6 +60,8 @@ pub struct AppState {
     /// Local projects (Phase 18): scan roots (session-immutable) + the last scan.
     pub projects_roots: Vec<String>,
     pub project_scan: Mutex<ProjectScanState>,
+    /// How overlapping project-file edits resolve (Phase 18b): Ask or FileWins.
+    pub project_conflict_policy: magpie_core::projects::ConflictPolicy,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
@@ -102,6 +104,9 @@ pub struct ProjectScanState {
     pub selected: i32,
     /// Ignored folders (display form), mirrors `Config::projects_ignored`.
     pub ignored: Vec<String>,
+    /// Sync snapshot per task file (`file_abs` → exact bytes read at scan): the merge
+    /// pivot whose line indices match the displayed tasks (Phase 18b).
+    pub file_snapshots: std::collections::HashMap<std::path::PathBuf, String>,
 }
 
 /// Pomodoro countdown state (screen 24). Focus 25 / break 5 / long break 15 every 4.
@@ -263,6 +268,7 @@ mod tests {
             pomodoro: std::sync::Mutex::new(crate::app_state::PomodoroState::default()),
             projects_roots: Vec::new(),
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
+            project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),

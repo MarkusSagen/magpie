@@ -109,6 +109,14 @@ pub struct Config {
     /// `tools`, `favorites`). Persisted so the sidebar reopens as left off.
     #[serde(default)]
     pub sidebar_collapsed_groups: Vec<String>,
+    /// How to resolve an overlapping edit when syncing a project file: `ask` (hold
+    /// the file + surface the conflict, default) or `file` (the disk always wins).
+    #[serde(default = "default_project_sync_conflict")]
+    pub project_sync_conflict: String,
+}
+
+fn default_project_sync_conflict() -> String {
+    "ask".into()
 }
 
 fn default_popover_width() -> i64 {
@@ -165,6 +173,7 @@ impl Default for Config {
             popover_width: default_popover_width(),
             popover_height: default_popover_height(),
             sidebar_collapsed_groups: Vec::new(),
+            project_sync_conflict: default_project_sync_conflict(),
         }
     }
 }

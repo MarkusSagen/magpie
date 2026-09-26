@@ -91,6 +91,11 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
             ignored: cfg.projects_ignored.clone(),
             ..Default::default()
         }),
+        project_conflict_policy: if cfg.project_sync_conflict == "file" {
+            magpie_core::projects::ConflictPolicy::FileWins
+        } else {
+            magpie_core::projects::ConflictPolicy::Ask
+        },
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
             "today" => 1,
@@ -2615,6 +2620,50 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
 }
 
 /// Rescan (optionally) and populate the Projects view (screens 25/26).
+/// Toggle a project task line through the 3-way merge (Phase 18b). The merge pivot is
+/// the scan snapshot (the exact bytes the UI showed, so its line index aligns), and it
+/// reconciles against the current disk bytes so a concurrent external edit isn't
+/// clobbered. Writes the merged result, advances the stored baseline, and returns true
+/// if an unresolved conflict was held (Ask policy) so the caller can notify.
+fn toggle_project_task(
+    state: &AppState,
+    root: &std::path::Path,
+    rel: &str,
+    file_abs: &std::path::Path,
+    line: usize,
+) -> bool {
+    let disk = match std::fs::read_to_string(file_abs) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let baseline = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        g.file_snapshots.get(file_abs).cloned()
+    }
+    .unwrap_or_else(|| disk.clone());
+    let mine = match magpie_core::projects::toggle_task_line(&baseline, line) {
+        Some(m) => m,
+        None => return false, // not a checkbox line
+    };
+    let r = magpie_core::projects::reconcile_file(
+        &baseline,
+        &mine,
+        &disk,
+        state.project_conflict_policy,
+    );
+    if let Some(w) = &r.write {
+        if std::fs::write(file_abs, w).is_err() {
+            return false;
+        }
+    }
+    if let Some(nb) = &r.new_baseline {
+        let root_s = root.to_string_lossy().to_string();
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = store.set_project_baseline(&root_s, rel, nb, now_ms());
+    }
+    !r.conflicts.is_empty()
+}
+
 fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
     let ps = ui.global::<ProjectsStore>();
     ps.set_scanning(format!("Scanning {}", state.projects_roots.join(", ")).into());
@@ -2629,12 +2678,13 @@ fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
             .unwrap_or_default();
         std::thread::spawn(move || {
             // Include repos so editor/repo-only folders land in the Found inbox.
-            let hits = magpie_app::projects::scan(&roots, 4, true, &ignored);
+            let (hits, snapshots) = magpie_app::projects::scan(&roots, 4, true, &ignored);
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
                     {
                         let mut g = st.project_scan.lock().unwrap_or_else(|e| e.into_inner());
                         g.hits = hits;
+                        g.file_snapshots = snapshots;
                     }
                     populate_projects(&ui, &st);
                 }
@@ -4453,6 +4503,90 @@ fn spawn_vault_watcher(
     });
 }
 
+/// Live project-file watcher (Phase 18b): watches each syncable project's task-file
+/// directories with filesystem events (`notify`, non-recursive so it never crawls a
+/// whole root) and refreshes the Projects view when a file changes on disk. The
+/// watch set is re-synced from the latest scan every couple of seconds, so opening or
+/// ignoring projects updates what's watched. Idle (watches nothing) until the user
+/// has opened Projects at least once.
+fn spawn_project_watcher(state: Arc<AppState>, weak: slint::Weak<LauncherWindow>) {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    std::thread::spawn(move || {
+        let log_path = data_dir().join("logs").join("magpie.log");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = match notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                magpie_app::diagnostics::log_line(
+                    &log_path,
+                    &format!("project watcher init failed: {e}"),
+                );
+                return;
+            }
+        };
+        let mut watched: std::collections::HashSet<std::path::PathBuf> = Default::default();
+        loop {
+            // Re-sync the watch set from the current syncable projects.
+            let desired: std::collections::HashSet<std::path::PathBuf> = {
+                let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                let mut dirs = std::collections::HashSet::new();
+                for h in g.hits.iter().filter(|h| h.syncable()) {
+                    dirs.insert(h.path.clone());
+                    let magpie = h.path.join(".magpie");
+                    if magpie.is_dir() {
+                        dirs.insert(magpie);
+                    }
+                }
+                dirs
+            };
+            for d in desired.difference(&watched).cloned().collect::<Vec<_>>() {
+                if watcher.watch(&d, RecursiveMode::NonRecursive).is_ok() {
+                    watched.insert(d);
+                }
+            }
+            for d in watched.difference(&desired).cloned().collect::<Vec<_>>() {
+                let _ = watcher.unwatch(&d);
+                watched.remove(&d);
+            }
+
+            // Wait for an event, timing out so the watch set is re-synced periodically.
+            match rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(Ok(ev)) => {
+                    if !matches!(
+                        ev.kind,
+                        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                    ) {
+                        continue;
+                    }
+                    // Coalesce a burst of events (editor save = write + rename + chmod).
+                    while rx.recv_timeout(Duration::from_millis(200)).is_ok() {}
+                    let w = weak.clone();
+                    let s = state.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w.upgrade() {
+                            // Only re-scan when the Projects view is showing, so an
+                            // unrelated background save never triggers a root walk.
+                            if ui.get_section().as_str() == "projects" {
+                                refresh_projects(&ui, &s, true);
+                            }
+                        }
+                    });
+                }
+                Ok(Err(e)) => {
+                    magpie_app::diagnostics::log_line(
+                        &log_path,
+                        &format!("project watch error: {e}"),
+                    );
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+}
+
 /// Local UTC offset in seconds, via `date +%z` (no dependency). 0 on failure/non-unix.
 fn local_offset_seconds() -> i64 {
     #[cfg(unix)]
@@ -4793,9 +4927,11 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             );
                             write("rust-playground/TODO.md", "- [ ] try axum\n");
                             let base_s = base.to_string_lossy().to_string();
-                            let hits = magpie_app::projects::scan(&[base_s], 4, true, &[]);
+                            let (hits, snapshots) =
+                                magpie_app::projects::scan(&[base_s], 4, true, &[]);
                             if let Ok(mut g) = st.project_scan.lock() {
                                 g.hits = hits;
+                                g.file_snapshots = snapshots;
                             }
                             ui.set_section(SharedString::from("projects"));
                             ui.set_view(SharedString::from("projects"));
@@ -5830,7 +5966,8 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.global::<ProjectsStore>().on_toggle_task(move |idx| {
-            // Line-level checkbox toggle written back to the source file.
+            // Line-level checkbox toggle, reconciled through the 3-way merge so a
+            // concurrent disk edit isn't clobbered (Phase 18b).
             let target = {
                 let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
                 let sel = w
@@ -5838,17 +5975,27 @@ pub fn start() {
                     .map(|ui| ui.global::<ProjectsStore>().get_selected())
                     .unwrap_or(0);
                 let syncable: Vec<_> = g.hits.iter().filter(|h| h.syncable()).collect();
-                syncable
-                    .get(sel.max(0) as usize)
-                    .and_then(|h| h.tasks.get(idx as usize))
-                    .map(|t| (t.file_abs.clone(), t.line))
+                syncable.get(sel.max(0) as usize).and_then(|h| {
+                    h.tasks.get(idx as usize).map(|t| {
+                        (
+                            h.path.clone(),
+                            t.file_rel.clone(),
+                            t.file_abs.clone(),
+                            t.line,
+                        )
+                    })
+                })
             };
-            if let Some((file, line)) = target {
-                if let Ok(content) = std::fs::read_to_string(&file) {
-                    if let Some(new) = magpie_core::projects::toggle_task_line(&content, line) {
-                        let _ = std::fs::write(&file, new);
-                    }
-                }
+            let conflicted = if let Some((root, rel, file, line)) = target {
+                toggle_project_task(&s, &root, &rel, &file, line)
+            } else {
+                false
+            };
+            if conflicted {
+                magpie_platform::notify(
+                    "Magpie — file changed on disk",
+                    "Your change wasn't applied because this task was also edited on disk. Reopen the file to reconcile.",
+                );
             }
             if let Some(ui) = w.upgrade() {
                 refresh_projects(&ui, &s, true);
@@ -8073,6 +8220,10 @@ pub fn start() {
             );
         }
     }
+    // Live project file sync (Phase 18b): watch the syncable projects' task files and
+    // refresh the Projects view when they change on disk. Idle until a scan populates
+    // projects, and only ever watches specific project dirs (never whole roots).
+    spawn_project_watcher(state.clone(), weak.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
     // Keep the tray icon alive for the whole run. It lives in a thread-local

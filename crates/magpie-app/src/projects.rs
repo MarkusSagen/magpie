@@ -5,7 +5,7 @@
 
 use ignore::WalkBuilder;
 use magpie_core::projects::{markers_for, Marker};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// One task read from a project file.
@@ -53,12 +53,9 @@ fn git_branch(dir: &Path) -> String {
     String::new()
 }
 
-/// Parse `- [ ]`/`- [x]` task lines out of a file's content (line-indexed).
-fn read_tasks(file_abs: &Path, file_rel: &str) -> Vec<ProjTask> {
-    let content = match std::fs::read_to_string(file_abs) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
+/// Parse `- [ ]`/`- [x]` task lines out of a file's `content` (line-indexed). Pure so
+/// the exact bytes the caller keeps as a sync snapshot match the parsed line indices.
+fn parse_tasks(content: &str, file_abs: &Path, file_rel: &str) -> Vec<ProjTask> {
     let mut out = Vec::new();
     for (i, raw) in content.lines().enumerate() {
         let t = raw.trim_start();
@@ -106,12 +103,16 @@ fn is_marker_name(name: &str) -> bool {
 /// Scan `roots` (to `depth`) and return detected projects, sorted by name.
 /// `include_repos` keeps bare git/editor-only folders (off by default they'd bury
 /// the real projects); `ignored` paths (display form) are excluded.
+///
+/// Also returns a snapshot map (`file_abs` → exact bytes read) for each syncable
+/// task file, so the two-way sync can use the bytes the UI's line indices refer to
+/// as the merge pivot (Phase 18b).
 pub fn scan(
     roots: &[String],
     depth: usize,
     include_repos: bool,
     ignored: &[String],
-) -> Vec<ProjectHit> {
+) -> (Vec<ProjectHit>, HashMap<PathBuf, String>) {
     // dir → set of marker child names.
     let mut per_dir: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     for root in roots {
@@ -136,6 +137,7 @@ pub fn scan(
     }
 
     let mut hits: Vec<ProjectHit> = Vec::new();
+    let mut snapshots: HashMap<PathBuf, String> = HashMap::new();
     for (dir, names) in per_dir {
         let markers = markers_for(&names);
         if markers.is_empty() {
@@ -155,14 +157,23 @@ pub fn scan(
             .unwrap_or_else(|| display.clone());
         let mut tasks = Vec::new();
         if syncable {
+            // Dedupe by canonical path so a case-insensitive filesystem (macOS/Windows)
+            // doesn't read the same `TODO.md` twice as `todo.md`.
+            let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
             for (rel, abs) in [
                 ("TODO.md", dir.join("TODO.md")),
                 ("todo.md", dir.join("todo.md")),
                 ("TODO.txt", dir.join("TODO.txt")),
                 (".magpie/tasks.md", dir.join(".magpie/tasks.md")),
             ] {
-                if abs.exists() {
-                    tasks.extend(read_tasks(&abs, rel));
+                if let Ok(canon) = std::fs::canonicalize(&abs) {
+                    if !seen.insert(canon) {
+                        continue; // already read under another case
+                    }
+                }
+                if let Ok(content) = std::fs::read_to_string(&abs) {
+                    tasks.extend(parse_tasks(&content, &abs, rel));
+                    snapshots.insert(abs.clone(), content);
                 }
             }
         }
@@ -175,7 +186,7 @@ pub fn scan(
         });
     }
     hits.sort_by_key(|h| h.name.to_lowercase());
-    hits
+    (hits, snapshots)
 }
 
 /// Display a path with `~` for the home directory.
@@ -186,4 +197,116 @@ pub fn display_path(p: &Path) -> String {
         }
     }
     p.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use magpie_core::projects::{reconcile_file, toggle_task_line, ConflictPolicy};
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("magpie-proj-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn scan_captures_snapshot_and_tasks() {
+        let root = tmp("scan-snap");
+        let proj = root.join("acme");
+        std::fs::create_dir_all(&proj).unwrap();
+        let todo = proj.join("TODO.md");
+        std::fs::write(&todo, "# Tasks\n- [ ] a\n- [x] b\n").unwrap();
+
+        let (hits, snapshots) = scan(&[root.to_string_lossy().to_string()], 4, true, &[]);
+        let _ = &todo;
+        let hit = hits.iter().find(|h| h.name == "acme").expect("acme found");
+        assert!(hit.syncable());
+        assert_eq!(hit.tasks.len(), 2);
+        // The snapshot is the exact bytes whose line indices the tasks reference. Look
+        // it up by the scan's own path (temp dirs are symlinked on macOS).
+        let a = hit.tasks.iter().find(|t| t.title == "a").unwrap();
+        assert_eq!(a.line, 1); // "a" is on line 1 (0-based), matching the snapshot
+        assert_eq!(
+            snapshots.get(&a.file_abs).map(String::as_str),
+            Some("# Tasks\n- [ ] a\n- [x] b\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn snapshot_pivot_toggle_writes_disk() {
+        // Mirrors toggle_project_task: pivot = snapshot, reconcile against fresh disk.
+        let root = tmp("toggle-clean");
+        let proj = root.join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        let todo = proj.join("TODO.md");
+        std::fs::write(&todo, "- [ ] a\n- [ ] b\n").unwrap();
+
+        let _ = &todo;
+        let (_hits, snapshots) = scan(&[root.to_string_lossy().to_string()], 4, true, &[]);
+        let (key, baseline) = snapshots.iter().next().unwrap();
+        let baseline = baseline.clone();
+        let disk = std::fs::read_to_string(key).unwrap();
+        let mine = toggle_task_line(&baseline, 1).unwrap(); // toggle "b"
+        let r = reconcile_file(&baseline, &mine, &disk, ConflictPolicy::Ask);
+        assert!(r.conflicts.is_empty());
+        std::fs::write(key, r.write.as_ref().unwrap()).unwrap();
+        assert_eq!(std::fs::read_to_string(key).unwrap(), "- [ ] a\n- [x] b\n");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stale_snapshot_conflicts_when_same_line_edited_on_disk() {
+        // The UI showed the snapshot; disk edited the SAME line before the toggle.
+        let root = tmp("toggle-conflict");
+        let proj = root.join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        let todo = proj.join("TODO.md");
+        std::fs::write(&todo, "- [ ] task\n").unwrap();
+
+        let _ = &todo;
+        let (_hits, snapshots) = scan(&[root.to_string_lossy().to_string()], 4, true, &[]);
+        let (key, baseline) = snapshots.iter().next().unwrap();
+        let (key, baseline) = (key.clone(), baseline.clone());
+        // Disk edited the task's text after the scan.
+        std::fs::write(&key, "- [ ] task renamed\n").unwrap();
+        let disk = std::fs::read_to_string(&key).unwrap();
+        let mine = toggle_task_line(&baseline, 0).unwrap();
+        let r = reconcile_file(&baseline, &mine, &disk, ConflictPolicy::Ask);
+        assert_eq!(r.conflicts.len(), 1, "same-line edit + toggle conflicts");
+        assert!(r.write.is_none(), "Ask holds the file (no clobber)");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn disk_insert_above_toggle_merges_silently() {
+        // Disk added a task at the top after the scan; Magpie toggled a lower task.
+        let root = tmp("toggle-insert");
+        let proj = root.join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        let todo = proj.join("TODO.md");
+        std::fs::write(&todo, "- [ ] a\n- [ ] b\n").unwrap();
+
+        let _ = &todo;
+        let (_hits, snapshots) = scan(&[root.to_string_lossy().to_string()], 4, true, &[]);
+        let (key, baseline) = snapshots.iter().next().unwrap();
+        let (key, baseline) = (key.clone(), baseline.clone());
+        std::fs::write(&key, "- [ ] zero\n- [ ] a\n- [ ] b\n").unwrap(); // inserted on disk
+        let disk = std::fs::read_to_string(&key).unwrap();
+        let mine = toggle_task_line(&baseline, 0).unwrap(); // toggle "a" (line 0 in snapshot)
+        let r = reconcile_file(&baseline, &mine, &disk, ConflictPolicy::Ask);
+        assert!(r.conflicts.is_empty(), "insert-above is non-overlapping");
+        assert_eq!(
+            r.write.as_deref(),
+            Some("- [ ] zero\n- [x] a\n- [ ] b\n"),
+            "both the disk insert and the toggle land"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
