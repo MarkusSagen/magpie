@@ -98,3 +98,32 @@ pub fn set_appearance(dark: bool) {
 /// No-op fallback: Windows/Linux window chrome follows the desktop theme.
 #[cfg(not(target_os = "macos"))]
 pub fn set_appearance(_dark: bool) {}
+
+/// Usable size of the main screen in logical points, and the height reserved at the
+/// top by the menu bar — `(width, height, menubar_height)`. Used to dock the pinned
+/// clipboard side panel to the right edge below the menu bar. Call on the main
+/// thread. Returns `None` if no screen can be resolved.
+#[cfg(target_os = "macos")]
+pub fn main_screen_size() -> Option<(i32, i32, i32)> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let mtm = MainThreadMarker::new()?;
+    let screen = NSScreen::mainScreen(mtm)?;
+    // `frame` is the full screen; `visibleFrame` excludes the menu bar (and Dock).
+    // The menu bar height is the gap between the two at the top.
+    let frame = screen.frame();
+    let visible = screen.visibleFrame();
+    let w = frame.size.width as i32;
+    let h = frame.size.height as i32;
+    // In Cocoa's bottom-left origin, the menu bar eats the top: its height is the
+    // full height minus the visible frame's top edge.
+    let menubar = (frame.size.height - (visible.origin.y + visible.size.height)).max(0.0) as i32;
+    Some((w, h, menubar))
+}
+
+/// No-op fallback: other platforms don't dock the panel to the menu-bar edge.
+#[cfg(not(target_os = "macos"))]
+pub fn main_screen_size() -> Option<(i32, i32, i32)> {
+    None
+}

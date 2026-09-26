@@ -23,7 +23,7 @@ pub use os::notify::{
     request_notification_authorization, schedule_notification, set_notification_click_handler,
 };
 pub use os::paste::send_backspaces;
-pub use os::window::{hide_and_yield_focus, raise_to_front, set_appearance};
+pub use os::window::{hide_and_yield_focus, main_screen_size, raise_to_front, set_appearance};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 pub use watcher::Watcher;

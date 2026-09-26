@@ -94,6 +94,25 @@ pub struct Config {
     /// `open -a <App>` (or a bundle path). Missing category → the system default.
     #[serde(default)]
     pub open_with: std::collections::BTreeMap<String, String>,
+    /// The quick-clipboard popover is pinned as a persistent side panel: it docks
+    /// to the right screen edge and re-opens automatically on launch. When false
+    /// it's the transient, tray-anchored popover. Toggled by the pin button.
+    #[serde(default)]
+    pub popover_pinned: bool,
+    /// Persisted popover panel size in logical pixels (driven by the resize grip).
+    /// Clamped by `panel::clamp_size` on load and on every resize.
+    #[serde(default = "default_popover_width")]
+    pub popover_width: i64,
+    #[serde(default = "default_popover_height")]
+    pub popover_height: i64,
+}
+
+fn default_popover_width() -> i64 {
+    360
+}
+
+fn default_popover_height() -> i64 {
+    440
 }
 
 fn default_popover_tab() -> String {
@@ -138,6 +157,9 @@ impl Default for Config {
             command_packs_seeded: false,
             popover_default_tab: default_popover_tab(),
             open_with: std::collections::BTreeMap::new(),
+            popover_pinned: false,
+            popover_width: default_popover_width(),
+            popover_height: default_popover_height(),
         }
     }
 }

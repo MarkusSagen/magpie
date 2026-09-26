@@ -20,6 +20,7 @@ pub mod link_meta;
 pub mod mask_view;
 pub mod merge_view;
 pub mod notes_view;
+pub mod panel;
 pub mod paste_action;
 pub mod projects;
 pub mod reminders;

@@ -11,8 +11,12 @@ export component Popover inherits Window {
     no-frame: true;
     default-font-family: "Geist";
     always-on-top: true;
-    width: 360px;
-    height: 440px;
+    // Size is driven from Rust (`set_size`, from the persisted panel dimensions and
+    // the resize grip); these are just the first-shown fallbacks + usable bounds.
+    preferred-width: 360px;
+    preferred-height: 440px;
+    min-width: 280px;
+    min-height: 320px;
     background: transparent;
     forward-focus: fs;
 
@@ -45,6 +49,15 @@ export component Popover inherits Window {
     callback open-task-note(int);
     callback open-full();
     callback dismiss();
+
+    // Pin the panel to the screen edge / persist it across launches.
+    in-out property <bool> pinned: false;
+    callback toggle-pin();
+    // Live resize from the corner grip: `resize-start` snapshots the current size in
+    // Rust; `resize-by` reports the cumulative drag delta from the press point.
+    callback resize-start();
+    callback resize-by(length, length);
+    callback resize-end();
 
     // Rounded panel — the window itself is transparent + frameless, so this draws
     // the visible chrome (border + fill + padding).
@@ -88,26 +101,42 @@ export component Popover inherits Window {
                 // overlays the whole cell and the click lands on the icon.
                 HorizontalLayout {
                     spacing: 16px;
-                    alignment: start;
-                    for i in [0, 1, 2, 3]: Rectangle {
-                        width: 30px;
-                        height: 28px;
-                        VerticalLayout {
-                            spacing: 3px;
-                            alignment: center;
-                            Image {
-                                source: i == 0 ? Icons.tab-tasks
-                                    : i == 1 ? Icons.tab-today
-                                    : i == 2 ? Icons.tab-daily
-                                    : Icons.tab-clipboard;
-                                colorize: root.tab == i ? Pal.accent : Theme.text-faint;
-                                width: 22px;
-                                height: 22px;
-                                image-fit: contain;
+                    HorizontalLayout {
+                        spacing: 16px;
+                        for i in [0, 1, 2, 3]: Rectangle {
+                            width: 30px;
+                            height: 28px;
+                            VerticalLayout {
+                                spacing: 3px;
+                                alignment: center;
+                                Image {
+                                    source: i == 0 ? Icons.tab-tasks
+                                        : i == 1 ? Icons.tab-today
+                                        : i == 2 ? Icons.tab-daily
+                                        : Icons.tab-clipboard;
+                                    colorize: root.tab == i ? Pal.accent : Theme.text-faint;
+                                    width: 22px;
+                                    height: 22px;
+                                    image-fit: contain;
+                                }
+                                Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
                             }
-                            Rectangle { height: 2px; background: root.tab == i ? Pal.accent : transparent; }
+                            ta := TouchArea { clicked => { root.tab = i; } }
                         }
-                        ta := TouchArea { clicked => { root.tab = i; } }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Pin toggle: docks the panel to the screen edge + persists it.
+                    pin := Rectangle {
+                        width: 26px;
+                        height: 28px;
+                        Image {
+                            source: Icons.act-pin;
+                            colorize: root.pinned ? Pal.accent : (pinta.has-hover ? Theme.text : Theme.text-faint);
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        pinta := TouchArea { clicked => { root.toggle-pin(); } }
                     }
                 }
 
@@ -257,6 +286,36 @@ export component Popover inherits Window {
                         vertical-alignment: center;
                     }
                 }
+            }
+        }
+
+        // Bottom-right resize grip: drag to resize the panel live. `resize-start`
+        // snapshots the size on press; `moved` reports the cumulative drag delta.
+        grip := TouchArea {
+            width: 18px;
+            height: 18px;
+            x: parent.width - self.width - 3px;
+            y: parent.height - self.height - 3px;
+            mouse-cursor: nwse-resize;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.resize-start();
+                }
+                if (e.kind == PointerEventKind.up) {
+                    root.resize-end();
+                }
+            }
+            moved => {
+                root.resize-by(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+            // Three diagonal ticks (monochrome, no asset), brighter on hover.
+            for d in [{ x: 11px, y: 4px }, { x: 4px, y: 11px }, { x: 11px, y: 11px }]: Rectangle {
+                x: d.x;
+                y: d.y;
+                width: 3px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: grip.has-hover ? Theme.text-dim : Theme.text-faint;
             }
         }
     }

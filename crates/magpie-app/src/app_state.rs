@@ -64,6 +64,12 @@ pub struct AppState {
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
     pub open_with: std::collections::BTreeMap<String, String>,
+    /// Quick-clipboard popover pinned as a persistent, docked side panel.
+    pub popover_pinned: std::sync::atomic::AtomicBool,
+    /// Persisted popover panel size (logical px), driven by the resize grip.
+    pub popover_size: Mutex<(i32, i32)>,
+    /// Panel size snapshot taken when a grip resize begins (press point).
+    pub popover_resize_anchor: Mutex<(i32, i32)>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -259,6 +265,9 @@ mod tests {
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
+            popover_pinned: std::sync::atomic::AtomicBool::new(false),
+            popover_size: std::sync::Mutex::new((360, 440)),
+            popover_resize_anchor: std::sync::Mutex::new((360, 440)),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

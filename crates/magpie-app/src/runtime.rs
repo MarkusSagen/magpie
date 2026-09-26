@@ -98,6 +98,15 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
             _ => 3, // clipboard (default)
         },
         open_with: cfg.open_with.clone(),
+        popover_pinned: std::sync::atomic::AtomicBool::new(cfg.popover_pinned),
+        popover_size: std::sync::Mutex::new(magpie_app::panel::clamp_size(
+            cfg.popover_width as i32,
+            cfg.popover_height as i32,
+        )),
+        popover_resize_anchor: std::sync::Mutex::new(magpie_app::panel::clamp_size(
+            cfg.popover_width as i32,
+            cfg.popover_height as i32,
+        )),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -3681,6 +3690,34 @@ fn refresh_graph(ui: &LauncherWindow, state: &AppState) {
     ui.set_graph_total(total);
 }
 
+/// Size + position the popover before showing it: apply the persisted panel size,
+/// then dock a pinned panel to the right screen edge (below the menu bar) or, when
+/// unpinned, anchor it under the tray icon (`tray_anchor`, physical px). Pass
+/// `tray_anchor = None` to reposition in place (e.g. when toggling the pin).
+fn present_popover(popover: &Popover, state: &AppState, tray_anchor: Option<(i32, i32)>) {
+    let (w, h) = state.popover_size.lock().map(|g| *g).unwrap_or((360, 440));
+    popover
+        .window()
+        .set_size(slint::LogicalSize::new(w as f32, h as f32));
+    let pinned = state
+        .popover_pinned
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if pinned {
+        if let Some((sw, sh, menubar)) = magpie_platform::main_screen_size() {
+            let (x, y) = magpie_app::panel::dock_right((sw, sh), (w, h), menubar);
+            popover
+                .window()
+                .set_position(slint::LogicalPosition::new(x as f32, y as f32));
+            return;
+        }
+    }
+    if let Some((tx, ty)) = tray_anchor {
+        popover
+            .window()
+            .set_position(slint::PhysicalPosition::new(tx, ty));
+    }
+}
+
 /// Rebuild the popover's Tasks tab: every **open** (`!done`) task across all
 /// notes, grouped/sorted, mapped to `TaskRow`s exactly as `refresh_tasks` does.
 /// Poison-tolerant lock so a panic elsewhere can't take the popover down.
@@ -5007,6 +5044,7 @@ pub fn start() {
     // Created here (before the theme-toggle handler) so the toggle can update both.
     let popover = Popover::new().expect("create popover");
     popover.set_theme_index(theme_idx as i32);
+    popover.set_pinned(cfg.popover_pinned);
 
     // Match the native window chrome (titlebar / traffic-light strip) to the
     // theme, so a light theme isn't undercut by a dark OS titlebar.
@@ -5045,6 +5083,70 @@ pub fn start() {
             if let Some(p) = p.upgrade() {
                 let _ = p.hide();
             }
+        });
+    }
+    // Pin the quick-clipboard panel: dock it to the screen edge + persist so it
+    // re-opens on the next launch. Unpinning leaves it where it is (transient again).
+    {
+        let p = popover.as_weak();
+        let s = state.clone();
+        popover.on_toggle_pin(move || {
+            let now = !s.popover_pinned.load(std::sync::atomic::Ordering::Relaxed);
+            s.popover_pinned
+                .store(now, std::sync::atomic::Ordering::Relaxed);
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            cfg.popover_pinned = now;
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
+            if let Some(p) = p.upgrade() {
+                p.set_pinned(now);
+                // Re-dock immediately when pinned; leave the position alone when
+                // unpinning (no tray anchor here, so pass None).
+                if now {
+                    present_popover(&p, &s, None);
+                }
+            }
+        });
+    }
+    // Resize grip: snapshot the size on press, resize live during the drag, persist
+    // once on release.
+    {
+        let s = state.clone();
+        popover.on_resize_start(move || {
+            let cur = s.popover_size.lock().map(|g| *g).unwrap_or((360, 440));
+            if let Ok(mut a) = s.popover_resize_anchor.lock() {
+                *a = cur;
+            }
+        });
+    }
+    {
+        let p = popover.as_weak();
+        let s = state.clone();
+        popover.on_resize_by(move |dx, dy| {
+            let anchor = s
+                .popover_resize_anchor
+                .lock()
+                .map(|a| *a)
+                .unwrap_or((360, 440));
+            let (w, h) = magpie_app::panel::clamp_size(anchor.0 + dx as i32, anchor.1 + dy as i32);
+            if let Ok(mut sz) = s.popover_size.lock() {
+                *sz = (w, h);
+            }
+            if let Some(p) = p.upgrade() {
+                p.window()
+                    .set_size(slint::LogicalSize::new(w as f32, h as f32));
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        popover.on_resize_end(move || {
+            let (w, h) = s.popover_size.lock().map(|g| *g).unwrap_or((360, 440));
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            cfg.popover_width = w as i64;
+            cfg.popover_height = h as i64;
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
         });
     }
     // Transforms (⌘T) palette. `transform_run` is a pure preview of the selected
@@ -7957,6 +8059,25 @@ pub fn start() {
     // loop; see the `TRAY` thread_local for why (`TrayIcon` isn't `Send`).
     TRAY.with(|t| *t.borrow_mut() = build_tray(weak.clone(), state.clone(), popover.as_weak()));
 
+    // If the panel was pinned last session, re-open it docked once the loop starts.
+    // Don't raise-to-front here — re-opening on launch must not steal focus.
+    if state
+        .popover_pinned
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        let pw = popover.as_weak();
+        let s = state.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(p) = pw.upgrade() {
+                refresh_popover(&p, &s);
+                p.set_tab(s.popover_default_tab);
+                p.set_pinned(true);
+                present_popover(&p, &s, None);
+                let _ = p.show();
+            }
+        });
+    }
+
     // Live menu-bar timer: while a task timer is running, show its elapsed
     // time as the tray title ("▶ 12:34"); clear it when nothing is running.
     // A background thread (not a Slint `Timer`) because a plain Slint timer
@@ -8265,9 +8386,12 @@ fn build_tray(
                                 // Open on the user's preferred tab (clipboard by default) —
                                 // this popover is the quick, from-anywhere clipboard menu.
                                 p.set_tab(s.popover_default_tab);
-                                p.window().set_position(slint::WindowPosition::Physical(
-                                    slint::PhysicalPosition::new(px, py),
-                                ));
+                                p.set_pinned(
+                                    s.popover_pinned.load(std::sync::atomic::Ordering::Relaxed),
+                                );
+                                // Apply the persisted size and, when pinned, dock to the
+                                // screen edge; otherwise anchor under the tray icon.
+                                present_popover(&p, &s, Some((px, py)));
                                 let _ = p.show();
                                 magpie_platform::raise_to_front();
                             }
