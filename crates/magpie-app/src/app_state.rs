@@ -49,6 +49,12 @@ pub struct AppState {
     /// order, for index→action). `search_gen` cancels a stale background run.
     pub search: Mutex<SearchState>,
     pub search_gen: std::sync::atomic::AtomicU64,
+    /// Expand-as-you-type (Phase 16b): the running global key monitor (when enabled),
+    /// a small in-memory rolling buffer of recent chars (never persisted), and a
+    /// cached `(keyword, snippet_id)` list for suffix matching.
+    pub key_monitor: Mutex<Option<magpie_platform::KeyMonitor>>,
+    pub expand_buffer: Mutex<String>,
+    pub expand_keywords: Mutex<Vec<(String, i64)>>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -170,6 +176,9 @@ mod tests {
             wc_chosen_hour: std::sync::Mutex::new(-1),
             search: std::sync::Mutex::new(crate::app_state::SearchState::default()),
             search_gen: std::sync::atomic::AtomicU64::new(0),
+            key_monitor: std::sync::Mutex::new(None),
+            expand_buffer: std::sync::Mutex::new(String::new()),
+            expand_keywords: std::sync::Mutex::new(Vec::new()),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

@@ -17,10 +17,12 @@ pub use os::accessibility::{
 pub use os::db_key::db_key;
 pub use os::entropy::{random_bytes, random_u64};
 pub use os::factory::{platform_autostart, platform_clipboard};
+pub use os::keymonitor::{secure_input_enabled, KeyMonitor};
 pub use os::notify::{
     cancel_scheduled_reminders, install_notification_delegate, notify,
     request_notification_authorization, schedule_notification, set_notification_click_handler,
 };
+pub use os::paste::send_backspaces;
 pub use os::window::{hide_and_yield_focus, raise_to_front, set_appearance};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};

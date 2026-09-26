@@ -81,6 +81,9 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         wc_chosen_hour: std::sync::Mutex::new(-1),
         search: std::sync::Mutex::new(magpie_app::app_state::SearchState::default()),
         search_gen: std::sync::atomic::AtomicU64::new(0),
+        key_monitor: std::sync::Mutex::new(None),
+        expand_buffer: std::sync::Mutex::new(String::new()),
+        expand_keywords: std::sync::Mutex::new(Vec::new()),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -2488,6 +2491,7 @@ fn import_snippets(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>, espan
             let _ = store.add_snippet(&s.name, &s.keyword, &s.body, &s.kind, now_ms());
         }
     }
+    refresh_expand_keywords(state);
     if let Some(ui) = w.upgrade() {
         refresh_snippets(&ui, state);
     }
@@ -2555,6 +2559,121 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
         ss.set_detail_preview(preview.into());
     } else {
         ss.set_has_selection(false);
+    }
+}
+
+/// Refresh the cached `(keyword, snippet_id)` list the expand-as-you-type monitor
+/// matches against (called on start and whenever snippets change).
+fn refresh_expand_keywords(state: &AppState) {
+    let kws: Vec<(String, i64)> = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store
+            .list_snippets()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| !s.keyword.is_empty())
+            .map(|s| (s.keyword, s.id))
+            .collect()
+    };
+    if let Ok(mut g) = state.expand_keywords.lock() {
+        *g = kws;
+    }
+}
+
+/// Start the global expand-as-you-type key monitor (Phase 16b). Listen-only; keeps
+/// a small in-memory rolling buffer; on a snippet-keyword suffix match it erases the
+/// keyword and pastes the expansion on the main thread. Pauses during secure input.
+/// Returns whether the monitor actually started (needs macOS Input Monitoring).
+fn start_expand_monitor(ui: &slint::Weak<LauncherWindow>, state: &Arc<AppState>) -> bool {
+    if state
+        .key_monitor
+        .lock()
+        .map(|g| g.is_some())
+        .unwrap_or(false)
+    {
+        return true; // already running
+    }
+    refresh_expand_keywords(state);
+    let st = state.clone();
+    let w = ui.clone();
+    let monitor = magpie_platform::KeyMonitor::start(move |c| {
+        // Runs on the tap thread. Pause entirely while secure input is active.
+        if magpie_platform::secure_input_enabled() {
+            if let Ok(mut b) = st.expand_buffer.lock() {
+                b.clear();
+            }
+            return;
+        }
+        let matched: Option<(usize, i64)> = {
+            let mut b = st.expand_buffer.lock().unwrap_or_else(|e| e.into_inner());
+            match c {
+                '\u{8}' => {
+                    b.pop();
+                    None
+                }
+                '\n' | ' ' => {
+                    b.clear();
+                    None
+                }
+                _ => {
+                    b.push(c);
+                    let count = b.chars().count();
+                    if count > 64 {
+                        *b = b.chars().skip(count - 64).collect();
+                    }
+                    let kws = st.expand_keywords.lock().unwrap_or_else(|e| e.into_inner());
+                    kws.iter()
+                        .find(|(kw, _)| b.ends_with(kw.as_str()))
+                        .map(|(kw, id)| (kw.chars().count(), *id))
+                }
+            }
+        };
+        if let Some((kw_len, id)) = matched {
+            if let Ok(mut b) = st.expand_buffer.lock() {
+                b.clear();
+            }
+            let st2 = st.clone();
+            let w2 = w.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let body = {
+                    let store = match st2.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store.get_snippet(id).ok().flatten().map(|s| s.body)
+                };
+                if let Some(body) = body {
+                    let expanded = expand_snippet(&st2, &body).text;
+                    // Erase the typed keyword, then paste the expansion.
+                    let _ = magpie_platform::send_backspaces(kw_len);
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = clip.set_text(&expanded);
+                    }
+                    let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                }
+                let _ = w2;
+            });
+        }
+    });
+    let started = monitor.is_some();
+    if let Ok(mut g) = state.key_monitor.lock() {
+        *g = monitor;
+    }
+    started
+}
+
+/// Stop the expand-as-you-type monitor and clear the rolling buffer.
+fn stop_expand_monitor(state: &AppState) {
+    if let Ok(mut g) = state.key_monitor.lock() {
+        if let Some(m) = g.take() {
+            m.stop();
+        }
+    }
+    if let Ok(mut b) = state.expand_buffer.lock() {
+        b.clear();
     }
 }
 
@@ -4630,6 +4749,7 @@ pub fn start() {
                 if id.is_some() {
                     ui.global::<SnippetsStore>().set_selected(0);
                     refresh_snippets(&ui, &s);
+                    refresh_expand_keywords(&s);
                 }
             }
         });
@@ -4657,13 +4777,25 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
+        let wk = ui.as_weak();
         ui.global::<SnippetsStore>().on_toggle_expand(move || {
             if let Some(ui) = w.upgrade() {
                 let ss = ui.global::<SnippetsStore>();
-                ss.set_expand_as_you_type(!ss.get_expand_as_you_type());
-                // System-wide expand-as-you-type is the Phase 16b opt-in spike; the
-                // toggle only reflects intent here (no global keyboard hook yet).
-                let _ = &s;
+                let want = !ss.get_expand_as_you_type();
+                let actual = if want {
+                    // Start the global monitor; only reflect ON if it actually started
+                    // (macOS needs Input Monitoring — the toggle stays off otherwise).
+                    start_expand_monitor(&wk, &s)
+                } else {
+                    stop_expand_monitor(&s);
+                    false
+                };
+                ss.set_expand_as_you_type(actual);
+                // Persist the intent.
+                let cfg_path = data_dir().join("config.toml");
+                let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+                cfg.expand_as_you_type = actual;
+                let _ = magpie_app::config::save(&cfg, &cfg_path);
             }
         });
     }
@@ -7182,6 +7314,15 @@ pub fn start() {
                 }
             });
         });
+    }
+
+    // Expand-as-you-type (Phase 16b): reflect the saved preference in the toggle and,
+    // if it was on, start the global monitor now (needs macOS Input Monitoring).
+    if cfg.expand_as_you_type {
+        let started = start_expand_monitor(&weak, &state);
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<SnippetsStore>().set_expand_as_you_type(started);
+        }
     }
 
     // Opt-in dev hooks (MAGPIE_SHOW_ON_LAUNCH / MAGPIE_UI_TOUR); no-op otherwise.

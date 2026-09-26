@@ -70,6 +70,10 @@ pub struct Config {
     /// Add/remove them. Empty → a starter set on first load.
     #[serde(default)]
     pub world_clock_cities: Vec<String>,
+    /// Expand snippet keywords system-wide as you type (Phase 16b). OFF by default;
+    /// needs macOS Input Monitoring + Accessibility. Experimental.
+    #[serde(default)]
+    pub expand_as_you_type: bool,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -104,6 +108,7 @@ impl Default for Config {
             holiday_region: String::new(),
             world_clock_home: String::new(),
             world_clock_cities: Vec::new(),
+            expand_as_you_type: false,
         }
     }
 }
