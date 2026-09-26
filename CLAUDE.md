@@ -8,15 +8,26 @@ FTS5). Single static binary.
 
 ## Toolchain — read this first
 
-The repo pins Rust `1.97.1` via `rust-toolchain.toml`, and the user's shell +
-`just` use it through rustup. **But an agent/CI harness may export
-`RUSTUP_TOOLCHAIN=1.96.0`, which *masks* `rust-toolchain.toml`.** To reproduce the
-user's toolchain exactly, strip that env var:
+The repo pins Rust `1.97.1` via `rust-toolchain.toml`, and only `1.97.1` is
+installed in rustup now (the old 1.83/1.93.1/1.96.0/`stable` toolchains were
+removed; mise no longer manages rust). **Prefer `just` for every cargo command** —
+its `{{cargo}}` recipe is the one bulletproof invocation. Equivalently:
 
 ```bash
-env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo <cmd>     # matches `just`
-rustup run 1.97.1 cargo <cmd>                         # equivalent
+rustup run 1.97.1 cargo <cmd>            # sets RUSTUP_TOOLCHAIN=1.97.1 → robust
+RUSTUP_TOOLCHAIN=1.97.1 ~/.cargo/bin/cargo <cmd>   # same effect
 ```
+
+**DO NOT use `env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo` any more.** It routes
+through the rustup *proxy*, which honors a **dependency's** vendored
+`rust-toolchain.toml` — and `convert_case-0.10.0` (pulled in transitively by
+Slint's `derive_more`) ships one pinning `channel = "1.83.0"`. On a *fresh*
+`convert_case` compile the proxy then builds it under 1.83 (mixed-toolchain
+`E0514`/`E0599` failures), or — now that 1.83 is uninstalled — tries to
+auto-download it. Pinning `RUSTUP_TOOLCHAIN=1.97.1` (what `just`, `rustup run`, and
+the justfile's `RUSTC=`-pinned recipe all do) overrides that vendored pin. This is
+invisible while `convert_case` stays cached and only bites after a `cargo clean` /
+`clean -p convert_case`.
 
 `just run` = `cargo run -p magpie-app` (fresh **debug** build — you always get
 current source, never a stale release binary).
@@ -24,9 +35,9 @@ current source, never a stale release binary).
 ## The gate (run before every commit)
 
 ```bash
-env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo test --workspace
-env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo clippy --all-targets -- -D warnings
-env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo fmt --check
+just test                                       # = cargo test --workspace
+just clippy   # or: rustup run 1.97.1 cargo clippy --all-targets -- -D warnings
+just fmt-check                                   # or: rustup run 1.97.1 cargo fmt --check
 ```
 
 `clippy` is `-D warnings` (deny). **Always `cargo fmt` before committing** — edits

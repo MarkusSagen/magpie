@@ -53,6 +53,10 @@ bin-size: release
 fmt:
     {{cargo}} fmt --all
 
+# Non-mutating format check (for the pre-commit gate / CI).
+fmt-check:
+    {{cargo}} fmt --all --check
+
 clippy:
     {{cargo}} clippy --workspace --all-targets -- -D warnings
 
