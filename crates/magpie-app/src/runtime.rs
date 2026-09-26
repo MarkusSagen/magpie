@@ -2,9 +2,10 @@ use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
-    NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchFile, SearchLine,
-    SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem, SnippetRow, SnippetsStore,
-    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
+    NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore, RecentData, RefRow,
+    SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
+    SearchTreeRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore,
+    WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -85,6 +86,11 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         expand_buffer: std::sync::Mutex::new(String::new()),
         expand_keywords: std::sync::Mutex::new(Vec::new()),
         pomodoro: std::sync::Mutex::new(magpie_app::app_state::PomodoroState::default()),
+        projects_roots: cfg.projects_roots.clone(),
+        project_scan: std::sync::Mutex::new(magpie_app::app_state::ProjectScanState {
+            ignored: cfg.projects_ignored.clone(),
+            ..Default::default()
+        }),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -1905,6 +1911,10 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             ui.set_view(SharedString::from("snippets"));
             refresh_snippets(ui, state);
         }
+        ("projects", _) => {
+            ui.set_view(SharedString::from("projects"));
+            refresh_projects(ui, state, true);
+        }
         ("files", _) => {
             ui.set_view(SharedString::from("files"));
             // Default the first location to the home dir if none set yet.
@@ -2568,6 +2578,146 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     } else {
         ss.set_has_selection(false);
     }
+}
+
+/// Rescan (optionally) and populate the Projects view (screens 25/26).
+fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
+    let ps = ui.global::<ProjectsStore>();
+    ps.set_scanning(format!("Scanning {}", state.projects_roots.join(", ")).into());
+    if rescan {
+        let st = state.clone();
+        let w = ui.as_weak();
+        let roots = state.projects_roots.clone();
+        let ignored = state
+            .project_scan
+            .lock()
+            .map(|g| g.ignored.clone())
+            .unwrap_or_default();
+        std::thread::spawn(move || {
+            // Include repos so editor/repo-only folders land in the Found inbox.
+            let hits = magpie_app::projects::scan(&roots, 4, true, &ignored);
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    {
+                        let mut g = st.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                        g.hits = hits;
+                    }
+                    populate_projects(&ui, &st);
+                }
+            });
+        });
+    } else {
+        populate_projects(ui, state);
+    }
+}
+
+fn marker_badges(markers: &[magpie_core::projects::Marker]) -> String {
+    markers
+        .iter()
+        .map(|m| m.badge())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// Build the Projects list + selected-project detail from the cached scan.
+fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
+    use magpie_core::projects::Marker;
+    let ps = ui.global::<ProjectsStore>();
+    let hits = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        g.hits.clone()
+    };
+    let (syncable, found): (Vec<_>, Vec<_>) = hits.iter().partition(|h| h.syncable());
+
+    let list_row = |h: &magpie_app::projects::ProjectHit, is_found: bool| ProjectListRow {
+        name: h.name.clone().into(),
+        path: magpie_app::projects::display_path(&h.path).into(),
+        badges: marker_badges(&h.markers).into(),
+        open_count: format!("{} open", h.open_tasks()).into(),
+        conflict: false,
+        found: is_found,
+        extra: if is_found {
+            format!("· {}", marker_badges(&h.markers))
+        } else {
+            String::new()
+        }
+        .into(),
+    };
+    ps.set_projects(ModelRc::new(VecModel::from(
+        syncable
+            .iter()
+            .map(|h| list_row(h, false))
+            .collect::<Vec<_>>(),
+    )));
+    ps.set_found(ModelRc::new(VecModel::from(
+        found.iter().map(|h| list_row(h, true)).collect::<Vec<_>>(),
+    )));
+
+    // Detail for the selected syncable project.
+    let mut sel = ps.get_selected();
+    if sel < 0 || sel as usize >= syncable.len() {
+        sel = 0;
+        ps.set_selected(0);
+    }
+    if let Some(h) = syncable.get(sel as usize) {
+        ps.set_has_selection(true);
+        ps.set_detail_name(h.name.clone().into());
+        ps.set_detail_path(magpie_app::projects::display_path(&h.path).into());
+        ps.set_detail_branch(if h.branch.is_empty() {
+            SharedString::new()
+        } else {
+            format!("branch {}", h.branch).into()
+        });
+        ps.set_detail_tag(format!("#{}", magpie_core::projects::project_tag(&h.name)).into());
+        let open = h.open_tasks();
+        ps.set_detail_week(format!("{open} open").into());
+
+        // Tasks grouped by source file. `idx` indexes the project's flat task vec.
+        let mut rows: Vec<ProjTaskRow> = Vec::new();
+        let mut cur_file = String::new();
+        for (idx, t) in h.tasks.iter().enumerate() {
+            if t.file_rel != cur_file {
+                cur_file = t.file_rel.clone();
+                let open_in_file = h
+                    .tasks
+                    .iter()
+                    .filter(|x| x.file_rel == cur_file && !x.done)
+                    .count();
+                rows.push(ProjTaskRow {
+                    is_file_header: true,
+                    file_label: format!("{}  {} open", t.file_rel, open_in_file).into(),
+                    sync_label: "two-way".into(),
+                    title: SharedString::new(),
+                    done: false,
+                    source: SharedString::new(),
+                    idx: -1,
+                });
+            }
+            rows.push(ProjTaskRow {
+                is_file_header: false,
+                file_label: SharedString::new(),
+                sync_label: SharedString::new(),
+                title: t.title.clone().into(),
+                done: t.done,
+                source: format!("{}:{}", t.file_rel, t.line + 1).into(),
+                idx: idx as i32,
+            });
+        }
+        let _ = Marker::badge;
+        ps.set_detail_tasks(ModelRc::new(VecModel::from(rows)));
+    } else {
+        ps.set_has_selection(false);
+    }
+    ps.set_scanning(
+        format!(
+            "{} project{} · {} found · roots {}",
+            syncable.len(),
+            if syncable.len() == 1 { "" } else { "s" },
+            found.len(),
+            state.projects_roots.join(", ")
+        )
+        .into(),
+    );
 }
 
 /// Local `HH:MM` for an epoch-ms instant.
@@ -4493,6 +4643,40 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Local projects (Phase 18): seed fixture project folders, open Projects.
+                        "projects" => {
+                            let base = std::env::temp_dir().join("magpie-proj-demo");
+                            let write = |rel: &str, body: &str| {
+                                let p = base.join(rel);
+                                if let Some(parent) = p.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                let _ = std::fs::write(p, body);
+                            };
+                            write("magpie/TODO.md", "# magpie\n\n- [ ] Task card redesign !high @mon #ui\n- [ ] Link favicons + titles #clipboard\n- [x] Split launcher.slint\n");
+                            write("magpie/.magpie/tasks.md", "- [ ] Decide tz boundary data source !med\n- [ ] Wordlist license check\n");
+                            write("magpie/.git/HEAD", "ref: refs/heads/graphite/p9b\n");
+                            write(
+                                "dotfiles/TODO.md",
+                                "- [ ] tidy zshrc\n- [ ] prune brew\n- [ ] backup gpg keys\n",
+                            );
+                            write("dotfiles/.git/HEAD", "ref: refs/heads/main\n");
+                            write("blog/.magpie/tasks.md", "- [ ] draft org-mode post\n- [ ] fix RSS\n- [ ] alt text pass\n- [ ] deploy\n- [ ] newsletter\n");
+                            write("blog/.git/HEAD", "ref: refs/heads/main\n");
+                            write(
+                                "Home renovation/.magpie/tasks.md",
+                                "- [ ] call plumber\n- [ ] paint samples\n- [ ] measure kitchen\n",
+                            );
+                            write("rust-playground/TODO.md", "- [ ] try axum\n");
+                            let base_s = base.to_string_lossy().to_string();
+                            let hits = magpie_app::projects::scan(&[base_s], 4, true, &[]);
+                            if let Ok(mut g) = st.project_scan.lock() {
+                                g.hits = hits;
+                            }
+                            ui.set_section(SharedString::from("projects"));
+                            ui.set_view(SharedString::from("projects"));
+                            populate_projects(&ui, &st);
+                        }
                         // Time tracking v2 (Phase 17): seed a running timer, open Time tab.
                         "time" => {
                             if let Ok(store) = st.store.lock() {
@@ -5356,6 +5540,150 @@ pub fn start() {
                 if ui.get_tasks_view() == "time" {
                     refresh_time(&ui, &s);
                 }
+            }
+        });
+    }
+    // ---- Local projects (screens 25/26) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_select(move |i| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<ProjectsStore>().set_selected(i);
+                populate_projects(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_rescan(move || {
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_add_found(move |i| {
+            // Adding a found (repo/editor-only) folder makes it a project by creating
+            // an empty `.magpie/` dir (safe mkdir; the folder becomes syncable).
+            let path = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.hits
+                    .iter()
+                    .filter(|h| !h.syncable())
+                    .nth(i as usize)
+                    .map(|h| h.path.clone())
+            };
+            if let Some(p) = path {
+                let _ = std::fs::create_dir_all(p.join(".magpie"));
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_ignore_found(move |i| {
+            let display = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.hits
+                    .iter()
+                    .filter(|h| !h.syncable())
+                    .nth(i as usize)
+                    .map(|h| magpie_app::projects::display_path(&h.path))
+            };
+            if let Some(d) = display {
+                {
+                    let mut g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                    if !g.ignored.contains(&d) {
+                        g.ignored.push(d.clone());
+                    }
+                }
+                let cfg_path = data_dir().join("config.toml");
+                let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+                if !cfg.projects_ignored.contains(&d) {
+                    cfg.projects_ignored.push(d);
+                }
+                let _ = magpie_app::config::save(&cfg, &cfg_path);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_toggle_task(move |idx| {
+            // Line-level checkbox toggle written back to the source file.
+            let target = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                let sel = w
+                    .upgrade()
+                    .map(|ui| ui.global::<ProjectsStore>().get_selected())
+                    .unwrap_or(0);
+                let syncable: Vec<_> = g.hits.iter().filter(|h| h.syncable()).collect();
+                syncable
+                    .get(sel.max(0) as usize)
+                    .and_then(|h| h.tasks.get(idx as usize))
+                    .map(|t| (t.file_abs.clone(), t.line))
+            };
+            if let Some((file, line)) = target {
+                if let Ok(content) = std::fs::read_to_string(&file) {
+                    if let Some(new) = magpie_core::projects::toggle_task_line(&content, line) {
+                        let _ = std::fs::write(&file, new);
+                    }
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_open_task(move |idx| {
+            let file = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                let sel = w
+                    .upgrade()
+                    .map(|ui| ui.global::<ProjectsStore>().get_selected())
+                    .unwrap_or(0);
+                let syncable: Vec<_> = g.hits.iter().filter(|h| h.syncable()).collect();
+                syncable
+                    .get(sel.max(0) as usize)
+                    .and_then(|h| h.tasks.get(idx as usize))
+                    .map(|t| t.file_abs.clone())
+            };
+            if let Some(f) = file {
+                let _ = std::process::Command::new("open").arg("-t").arg(&f).spawn();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_open_folder(move || {
+            let path = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                let sel = w
+                    .upgrade()
+                    .map(|ui| ui.global::<ProjectsStore>().get_selected())
+                    .unwrap_or(0);
+                g.hits
+                    .iter()
+                    .filter(|h| h.syncable())
+                    .nth(sel.max(0) as usize)
+                    .map(|h| h.path.clone())
+            };
+            if let Some(p) = path {
+                let _ = std::process::Command::new("open").arg(&p).spawn();
             }
         });
     }

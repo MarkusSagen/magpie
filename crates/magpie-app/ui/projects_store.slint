@@ -1,0 +1,26 @@
+import { ProjectListRow, ProjTaskRow } from "types.slint";
+
+// Local-projects state (screens 25/26). A global; Rust scans + populates, the
+// ProjectsView reads it directly.
+export global ProjectsStore {
+    in-out property <[ProjectListRow]> found;     // "Found · not added yet"
+    in-out property <[ProjectListRow]> projects;
+    in-out property <int> selected;
+    in-out property <bool> has-selection;
+    // Detail.
+    in-out property <string> detail-name;
+    in-out property <string> detail-path;
+    in-out property <string> detail-branch;
+    in-out property <string> detail-tag;
+    in-out property <string> detail-week;
+    in-out property <[ProjTaskRow]> detail-tasks;
+    in-out property <string> scanning;
+
+    callback select(int);
+    callback add-found(int);
+    callback ignore-found(int);
+    callback toggle-task(int);
+    callback open-task(int);      // open the file at file:line in the editor
+    callback open-folder();
+    callback rescan();
+}

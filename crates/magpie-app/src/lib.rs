@@ -21,6 +21,7 @@ pub mod mask_view;
 pub mod merge_view;
 pub mod notes_view;
 pub mod paste_action;
+pub mod projects;
 pub mod reminders;
 pub mod retention;
 pub mod stats_view;

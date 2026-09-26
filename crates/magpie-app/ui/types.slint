@@ -357,3 +357,23 @@ export struct TimeProjectBar {
     bar: float,             // 0..1
     accent: bool,
 }
+
+// ---- Local projects (Phase 18, PNGs 25/26) ----
+export struct ProjectListRow {
+    name: string,
+    path: string,          // "~/code/hobby/magpie"
+    badges: string,        // ".magpie · TODO.md · git"
+    open-count: string,    // "7 open"
+    conflict: bool,
+    found: bool,           // true = "not added yet" inbox row
+    extra: string,         // found rows: "· TODO.md"
+}
+export struct ProjTaskRow {
+    is-file-header: bool,
+    file-label: string,    // "TODO.md  7 open"
+    sync-label: string,    // "⇄ two-way" / "read-only"
+    title: string,
+    done: bool,
+    source: string,        // "TODO.md:12"
+    idx: int,              // index into the flat task list (for toggle/editor)
+}

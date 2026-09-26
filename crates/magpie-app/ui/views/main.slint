@@ -13,6 +13,7 @@ import { DataView } from "data.slint";
 import { CalcView } from "calculator.slint";
 import { SnippetsView } from "snippets.slint";
 import { FilesView } from "files.slint";
+import { ProjectsView } from "projects.slint";
 import { CalcStore } from "../calc_store.slint";
 import { DataStore } from "../data_store.slint";
 
@@ -345,6 +346,7 @@ export component MainView inherits VerticalLayout {
                                     if event.text == "=" { root.nav-section("calculator"); return accept; }
                                     if event.text == "x" || event.text == "X" { root.nav-section("snippets"); return accept; }
                                     if event.text == "f" || event.text == "F" { root.nav-section("files"); return accept; }
+                                    if event.text == "p" || event.text == "P" { root.nav-section("projects"); return accept; }
                                     return accept;
                                 }
                                 if !event.modifiers.control && event.text == "g" && root.query == "" {
@@ -601,6 +603,9 @@ export component MainView inherits VerticalLayout {
 
             // ---- Files view (screens 19/21/22/23): reads the SearchStore global ----
             if root.view == "files": FilesView { }
+
+            // ---- Projects view (screens 25/26): reads the ProjectsStore global ----
+            if root.view == "projects": ProjectsView { }
 
             // ---- Calculator view (screens 11/12): reads the CalcStore global ----
             if root.view == "calculator": CalcView {

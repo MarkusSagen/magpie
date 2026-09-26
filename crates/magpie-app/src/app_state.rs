@@ -57,6 +57,9 @@ pub struct AppState {
     pub expand_keywords: Mutex<Vec<(String, i64)>>,
     /// Pomodoro timer (Phase 17) — a self-contained countdown, ticked 1 Hz.
     pub pomodoro: Mutex<PomodoroState>,
+    /// Local projects (Phase 18): scan roots (session-immutable) + the last scan.
+    pub projects_roots: Vec<String>,
+    pub project_scan: Mutex<ProjectScanState>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -76,6 +79,19 @@ pub struct AppState {
     /// `graph_g` empty = a single-function plot. Set when a graph is opened.
     pub calc_graph_f: Mutex<String>,
     pub calc_graph_g: Mutex<String>,
+}
+
+/// The last local-projects scan (screens 25/26).
+#[derive(Default)]
+pub struct ProjectScanState {
+    /// Detected syncable projects (already "added" — i.e. not ignored).
+    pub hits: Vec<crate::projects::ProjectHit>,
+    /// Detected-but-not-yet-added (the "Found" inbox); currently unused as a
+    /// separate list (all non-ignored hits are shown), kept for the Add/Ignore flow.
+    pub found: Vec<crate::projects::ProjectHit>,
+    pub selected: i32,
+    /// Ignored folders (display form), mirrors `Config::projects_ignored`.
+    pub ignored: Vec<String>,
 }
 
 /// Pomodoro countdown state (screen 24). Focus 25 / break 5 / long break 15 every 4.
@@ -235,6 +251,8 @@ mod tests {
             expand_buffer: std::sync::Mutex::new(String::new()),
             expand_keywords: std::sync::Mutex::new(Vec::new()),
             pomodoro: std::sync::Mutex::new(crate::app_state::PomodoroState::default()),
+            projects_roots: Vec::new(),
+            project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

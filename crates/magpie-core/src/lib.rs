@@ -34,6 +34,7 @@ pub mod metrics;
 pub mod model;
 pub mod notes;
 pub mod plot;
+pub mod projects;
 pub mod random;
 pub mod retention;
 pub mod search;

@@ -17,6 +17,7 @@ import { NoteRender } from "note_render_store.slint";
 import { SnippetsStore } from "snippets_store.slint";
 import { SearchStore } from "search_store.slint";
 import { TimeStore } from "time_store.slint";
+import { ProjectsStore } from "projects_store.slint";
 export { DataStore }
 export { CalcStore }
 export { DateStore }
@@ -25,6 +26,7 @@ export { NoteRender }
 export { SnippetsStore }
 export { SearchStore }
 export { TimeStore }
+export { ProjectsStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { BoardView } from "views/board.slint";
@@ -714,6 +716,7 @@ export component LauncherWindow inherits Window {
             show-data: true;
             show-snippets: true;
             show-files: true;
+            show-projects: true;
             theme-index: root.theme-index;
             set-section(s) => { root.set-section(s); }
             set-theme(i) => { root.set-theme(i); }

@@ -74,6 +74,12 @@ pub struct Config {
     /// needs macOS Input Monitoring + Accessibility. Experimental.
     #[serde(default)]
     pub expand_as_you_type: bool,
+    /// Roots scanned for local projects (Phase 18). Empty → `~/code` + `~/Documents`.
+    #[serde(default)]
+    pub projects_roots: Vec<String>,
+    /// Project folders the user chose to ignore (display form, e.g. `~/code/x`).
+    #[serde(default)]
+    pub projects_ignored: Vec<String>,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -109,6 +115,8 @@ impl Default for Config {
             world_clock_home: String::new(),
             world_clock_cities: Vec::new(),
             expand_as_you_type: false,
+            projects_roots: Vec::new(),
+            projects_ignored: Vec::new(),
         }
     }
 }
@@ -162,6 +170,9 @@ pub fn load_or_default(path: &Path) -> Config {
     }
     if cfg.world_clock_cities.is_empty() {
         cfg.world_clock_cities = default_world_clock_cities();
+    }
+    if cfg.projects_roots.is_empty() {
+        cfg.projects_roots = vec!["~/code".to_string(), "~/Documents".to_string()];
     }
     cfg
 }

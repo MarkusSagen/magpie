@@ -1,0 +1,140 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { ProjectListRow, ProjTaskRow } from "../types.slint";
+import { ProjectsStore } from "../projects_store.slint";
+
+// Local projects (screens 25/26): a Found-inbox + projects list (left) and the
+// selected project's tasks grouped by source file (right). State lives in the
+// ProjectsStore global (Rust scans the configured roots).
+export component ProjectsView inherits HorizontalLayout {
+    padding: 16px;
+    spacing: 16px;
+
+    // ---- list ----
+    VerticalLayout {
+        width: 320px;
+        spacing: 10px;
+        // Found · not added yet.
+        if ProjectsStore.found.length > 0: VerticalLayout {
+            spacing: 6px;
+            Text { text: "Found · not added yet"; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600; }
+            for f[i] in ProjectsStore.found: Rectangle {
+                height: 66px;
+                background: Theme.bg-panel; border-radius: Theme.r-md; border-width: 1px; border-color: Theme.line;
+                HorizontalLayout {
+                    padding: 10px; spacing: 8px;
+                    VerticalLayout {
+                        alignment: center; spacing: 2px; horizontal-stretch: 1;
+                        Text { text: f.name; color: Theme.text; font-size: Theme.fs-body; font-weight: 500; overflow: elide; }
+                        Text { text: f.path + "  " + f.extra; color: Theme.text-faint; font-size: Theme.fs-xs; overflow: elide; }
+                    }
+                    VerticalLayout { alignment: center;
+                        Rectangle { width: 56px; height: 28px; border-radius: Theme.r-sm; background: Theme.bg-elevated;
+                            addta := TouchArea { clicked => { ProjectsStore.add-found(i); } }
+                            Text { text: "Add"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } } }
+                    VerticalLayout { alignment: center;
+                        Rectangle { width: 56px; height: 28px; border-radius: Theme.r-sm; background: igta.has-hover ? Theme.bg-elevated : transparent;
+                            igta := TouchArea { clicked => { ProjectsStore.ignore-found(i); } }
+                            Text { text: "Ignore"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } } }
+                }
+            }
+        }
+        Text { text: "Projects"; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600; }
+        ListView {
+            vertical-stretch: 1;
+            for p[i] in ProjectsStore.projects: Rectangle {
+                height: 62px;
+                border-radius: Theme.r-md;
+                background: i == ProjectsStore.selected ? Theme.bg-elevated : (pta.has-hover ? Theme.bg-elevated : transparent);
+                border-width: p.conflict ? 1px : 0px;
+                border-color: Theme.accent;
+                pta := TouchArea { clicked => { ProjectsStore.select(i); } }
+                VerticalLayout {
+                    padding: 10px; spacing: 4px;
+                    HorizontalLayout {
+                        Image { source: Icons.tab-clipboard; colorize: Theme.text-faint; width: 14px; height: 14px;
+                            y: 1px; image-fit: contain; }
+                        Text { text: " " + p.name; color: Theme.text; font-size: Theme.fs-body; font-weight: 500;
+                            vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Text { text: p.conflict ? "1 conflict" : p.open-count; color: p.conflict ? Theme.accent : Theme.text-faint;
+                            font-size: Theme.fs-sm; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text { text: p.path; color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                        Text { text: p.badges; color: Theme.text-ghost; font-family: "Geist Mono"; font-size: Theme.fs-xs;
+                            vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+        Text { text: ProjectsStore.scanning; color: Theme.text-faint; font-size: Theme.fs-xs; }
+    }
+
+    // ---- detail ----
+    VerticalLayout {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        spacing: 12px;
+        if ProjectsStore.has-selection: VerticalLayout {
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: ProjectsStore.detail-name; color: Theme.text; font-size: 26px; font-weight: 700; vertical-alignment: center; }
+                Text { text: ProjectsStore.detail-path; color: Theme.text-faint; font-size: Theme.fs-body; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                Rectangle { width: 96px; height: 30px; border-radius: Theme.r-sm; background: ofta.has-hover ? Theme.bg-elevated : transparent;
+                    ofta := TouchArea { clicked => { ProjectsStore.open-folder(); } }
+                    Text { text: "Open folder"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+            }
+            // Chips.
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                for chip in [ProjectsStore.detail-branch, ProjectsStore.detail-tag, ProjectsStore.detail-week]: Rectangle {
+                    height: 28px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
+                    visible: chip != "";
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                        Text { text: chip; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            // Tasks grouped by source file.
+            ListView {
+                vertical-stretch: 1;
+                for row[i] in ProjectsStore.detail-tasks: Rectangle {
+                    height: row.is-file-header ? 34px : 32px;
+                    if row.is-file-header: HorizontalLayout {
+                        padding-top: 8px; spacing: 8px;
+                        Image { source: Icons.act-note; colorize: Theme.text-faint; width: 13px; height: 13px; y: 10px; image-fit: contain; }
+                        Text { text: row.file-label; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: row.sync-label; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                    }
+                    if !row.is-file-header: HorizontalLayout {
+                        padding-left: 10px; spacing: 10px;
+                        Rectangle {
+                            width: 18px; height: 18px; y: (parent.height - 18px) / 2; border-radius: 5px;
+                            border-width: 1.5px; border-color: row.done ? Theme.text-faint : Theme.line-strong;
+                            background: row.done ? Theme.text-faint : transparent;
+                            if row.done: Image { source: Icons.tab-tasks; colorize: Theme.bg-app; width: 12px; height: 12px; x: 3px; y: 3px; image-fit: contain; }
+                            cbta := TouchArea { clicked => { ProjectsStore.toggle-task(row.idx); } }
+                        }
+                        Text { text: row.title; color: row.done ? Theme.text-faint : Theme.text; font-size: Theme.fs-body;
+                            vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Text { text: row.source; color: Theme.text-ghost; font-family: "Geist Mono"; font-size: Theme.fs-xs;
+                            vertical-alignment: center; }
+                        Rectangle { width: 22px; height: 22px; y: (parent.height - 22px)/2; border-radius: Theme.r-xs;
+                            background: edta.has-hover ? Theme.bg-elevated : transparent;
+                            Text { text: "↗"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            edta := TouchArea { clicked => { ProjectsStore.open-task(row.idx); } } }
+                    }
+                }
+            }
+        }
+        if !ProjectsStore.has-selection: VerticalLayout {
+            alignment: center;
+            Text { text: "Scanning for projects…"; color: Theme.text-faint; font-size: Theme.fs-body; horizontal-alignment: center; }
+        }
+    }
+}
