@@ -131,6 +131,18 @@ const MIGRATIONS: &[&str] = &[
         created_at_ms INTEGER NOT NULL,
         updated_at_ms INTEGER NOT NULL
     );",
+    // v6: per-file sync baseline for local projects (Phase 18b). `baseline` is the
+    // last content both sides agreed on (the pivot for the line-level 3-way merge);
+    // `baseline_hash` lets the watcher skip unchanged files without a full compare.
+    // Keyed by (project root, path relative to that root).
+    "CREATE TABLE project_sync (
+        root TEXT NOT NULL,
+        rel_path TEXT NOT NULL,
+        baseline TEXT NOT NULL DEFAULT '',
+        baseline_hash TEXT NOT NULL DEFAULT '',
+        updated_at_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (root, rel_path)
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -599,7 +611,10 @@ mod tests {
         // and the version reaches the latest migration.
         let s = open_in_memory().unwrap();
         s.conn
-            .execute_batch("DROP TABLE favorites; DROP TABLE snippets; PRAGMA user_version = 3;")
+            .execute_batch(
+                "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
+                 PRAGMA user_version = 3;",
+            )
             .unwrap();
         run_migrations(&s.conn).unwrap();
         let version: i64 = s

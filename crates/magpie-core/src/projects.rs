@@ -3,6 +3,10 @@
 //! testable without IO is here. Files stay the source of truth — Magpie writes the
 //! smallest possible patch (one line) and preserves everything else byte-for-byte.
 
+use crate::merge3::{merge3, Conflict};
+use crate::store::{Result, Store};
+use rusqlite::OptionalExtension;
+
 /// A marker that makes a folder a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Marker {
@@ -129,6 +133,111 @@ pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
     Some(joined)
 }
 
+/// How to resolve overlapping edits when reconciling a project file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    /// Hold the file: don't write, don't advance the baseline; surface the conflicts
+    /// for Review (the file re-surfaces until resolved).
+    Ask,
+    /// The disk always wins a conflicting region; apply the merged result silently.
+    FileWins,
+}
+
+/// The outcome of reconciling one file: what (if anything) to write to disk, what to
+/// store as the new baseline, and any unresolved conflicts to surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileReconcile {
+    /// New content to write to disk. `None` = leave the file untouched (either
+    /// nothing changed, or an unresolved `Ask` conflict is being held).
+    pub write: Option<String>,
+    /// New baseline content to persist. `None` = leave the stored baseline unchanged
+    /// (an unresolved `Ask` conflict, so the divergence re-surfaces next run).
+    pub new_baseline: Option<String>,
+    /// Unresolved conflicts to surface for Review. Empty on a clean or `FileWins` run.
+    pub conflicts: Vec<Conflict>,
+}
+
+/// Reconcile one project file with the line-level 3-way merge.
+///
+/// - `baseline`: the last content both sides agreed on (the merge pivot).
+/// - `mine`: Magpie's intended content = `baseline` with its line patch applied
+///   (equal to `baseline` when Magpie has no pending edit — a pure external pull).
+/// - `disk`: the current bytes on disk.
+///
+/// A clean merge is written (only if it actually differs from `disk`, to avoid mtime
+/// churn) and becomes the new baseline. On conflict, `FileWins` applies the
+/// disk-preferring merge; `Ask` holds the file and returns the conflicts.
+pub fn reconcile_file(
+    baseline: &str,
+    mine: &str,
+    disk: &str,
+    policy: ConflictPolicy,
+) -> FileReconcile {
+    let merged = merge3(baseline, mine, disk);
+    if merged.conflicts.is_empty() || policy == ConflictPolicy::FileWins {
+        // Clean, or File-wins (where `merged` already resolved conflicts to disk).
+        let write = (merged.merged != disk).then(|| merged.merged.clone());
+        FileReconcile {
+            write,
+            new_baseline: Some(merged.merged),
+            conflicts: Vec::new(),
+        }
+    } else {
+        // Ask + unresolved conflicts: hold the file, keep the old baseline.
+        FileReconcile {
+            write: None,
+            new_baseline: None,
+            conflicts: merged.conflicts,
+        }
+    }
+}
+
+impl Store {
+    /// The stored sync baseline (last agreed content) for a project file, keyed by
+    /// its project `root` and path relative to that root. `None` if never synced.
+    pub fn project_baseline(&self, root: &str, rel_path: &str) -> Result<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT baseline FROM project_sync WHERE root = ?1 AND rel_path = ?2",
+                rusqlite::params![root, rel_path],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+    }
+
+    /// Upsert the sync baseline for a project file after a successful reconcile.
+    pub fn set_project_baseline(
+        &self,
+        root: &str,
+        rel_path: &str,
+        baseline: &str,
+        now_ms: i64,
+    ) -> Result<()> {
+        let hash = blake3::hash(baseline.as_bytes()).to_hex().to_string();
+        self.conn().execute(
+            "INSERT INTO project_sync (root, rel_path, baseline, baseline_hash, updated_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(root, rel_path) DO UPDATE SET
+                baseline = excluded.baseline,
+                baseline_hash = excluded.baseline_hash,
+                updated_at_ms = excluded.updated_at_ms",
+            rusqlite::params![root, rel_path, baseline, hash, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Forget a file's baseline (e.g. the user deleted the file and chose not to
+    /// re-link). Never called as part of a normal sync — deletions are surfaced, not
+    /// acted on automatically.
+    pub fn forget_project_baseline(&self, root: &str, rel_path: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM project_sync WHERE root = ?1 AND rel_path = ?2",
+            rusqlite::params![root, rel_path],
+        )?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +291,108 @@ mod tests {
         let out = toggle_task_line(content, 1).unwrap();
         assert_eq!(out, "- [ ] a\n- [x] b");
         assert!(!out.ends_with('\n'));
+    }
+
+    // ---- reconcile_file (pure orchestration over merge3) ----
+
+    #[test]
+    fn reconcile_clean_pull_updates_baseline_not_disk() {
+        // Magpie made no edit (mine == baseline); disk changed externally.
+        let base = "- [ ] a\n- [ ] b\n";
+        let disk = "- [x] a\n- [ ] b\n";
+        let r = reconcile_file(base, base, disk, ConflictPolicy::Ask);
+        assert_eq!(r.write, None, "disk already has the content; no write");
+        assert_eq!(r.new_baseline.as_deref(), Some(disk), "baseline advances");
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_clean_push_writes_disk() {
+        // Magpie toggled; disk unchanged from baseline.
+        let base = "- [ ] a\n- [ ] b\n";
+        let mine = "- [ ] a\n- [x] b\n";
+        let r = reconcile_file(base, mine, base, ConflictPolicy::Ask);
+        assert_eq!(r.write.as_deref(), Some(mine));
+        assert_eq!(r.new_baseline.as_deref(), Some(mine));
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_clean_merge_of_disjoint_edits() {
+        let base = "- [ ] a\n- [ ] b\n- [ ] c\n";
+        let mine = "- [x] a\n- [ ] b\n- [ ] c\n"; // Magpie toggled line 0
+        let disk = "- [ ] a\n- [ ] b\n- [ ] c edited\n"; // disk edited line 2
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::Ask);
+        assert_eq!(
+            r.write.as_deref(),
+            Some("- [x] a\n- [ ] b\n- [ ] c edited\n")
+        );
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_ask_holds_on_conflict() {
+        let base = "- [ ] task\n";
+        let mine = "- [x] task\n"; // Magpie toggled
+        let disk = "- [ ] task edited\n"; // disk edited same line
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::Ask);
+        assert_eq!(r.write, None, "Ask holds the file");
+        assert_eq!(r.new_baseline, None, "baseline is NOT advanced while held");
+        assert_eq!(r.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn reconcile_file_wins_takes_disk_and_advances() {
+        let base = "- [ ] task\n";
+        let mine = "- [x] task\n";
+        let disk = "- [ ] task edited\n";
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::FileWins);
+        assert_eq!(r.write, None, "merged == disk here, so no write needed");
+        assert_eq!(
+            r.new_baseline.as_deref(),
+            Some(disk),
+            "baseline follows disk"
+        );
+        assert!(r.conflicts.is_empty(), "File-wins resolves the conflict");
+    }
+
+    #[test]
+    fn reconcile_idempotent_when_all_agree() {
+        let s = "- [ ] a\n";
+        let r = reconcile_file(s, s, s, ConflictPolicy::Ask);
+        assert_eq!(r.write, None);
+        assert_eq!(r.new_baseline.as_deref(), Some(s));
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn project_baseline_roundtrips() {
+        let store = crate::open_in_memory().unwrap();
+        assert_eq!(store.project_baseline("/p", "TODO.md").unwrap(), None);
+        store
+            .set_project_baseline("/p", "TODO.md", "- [ ] a\n", 100)
+            .unwrap();
+        assert_eq!(
+            store.project_baseline("/p", "TODO.md").unwrap().as_deref(),
+            Some("- [ ] a\n")
+        );
+        // Upsert overwrites.
+        store
+            .set_project_baseline("/p", "TODO.md", "- [x] a\n", 200)
+            .unwrap();
+        assert_eq!(
+            store.project_baseline("/p", "TODO.md").unwrap().as_deref(),
+            Some("- [x] a\n")
+        );
+        // Forgetting clears it; other keys are unaffected.
+        store
+            .set_project_baseline("/p", "other.md", "x\n", 200)
+            .unwrap();
+        store.forget_project_baseline("/p", "TODO.md").unwrap();
+        assert_eq!(store.project_baseline("/p", "TODO.md").unwrap(), None);
+        assert_eq!(
+            store.project_baseline("/p", "other.md").unwrap().as_deref(),
+            Some("x\n")
+        );
     }
 }
