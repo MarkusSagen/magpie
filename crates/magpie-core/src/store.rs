@@ -606,7 +606,11 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, MIGRATIONS.len() as i64, "version reaches the latest");
+        assert_eq!(
+            version,
+            MIGRATIONS.len() as i64,
+            "version reaches the latest"
+        );
         let favs: i64 = s
             .conn
             .query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0))
