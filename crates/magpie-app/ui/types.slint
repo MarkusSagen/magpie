@@ -302,3 +302,11 @@ export struct MdLineVM {
     marker: string,   // "1." for numbered
     spans: [MdSpan],
 }
+
+// ---- Snippets & commands (Phase 16a, PNG 20) ----
+export struct SnippetRow {
+    id: int,
+    name: string,
+    keyword: string,     // ";meet" (snippet) or the command text chip
+    is-command: bool,
+}

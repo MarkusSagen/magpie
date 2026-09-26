@@ -37,6 +37,7 @@ pub mod random;
 pub mod retention;
 pub mod search;
 pub mod slots;
+pub mod snippets;
 pub mod stats;
 pub mod store;
 pub mod table;

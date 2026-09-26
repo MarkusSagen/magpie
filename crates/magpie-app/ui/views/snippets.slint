@@ -1,0 +1,155 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { Keycap } from "../components/keycap.slint";
+import { SnippetRow } from "../types.slint";
+import { SnippetsStore } from "../snippets_store.slint";
+
+// Snippets & commands (screen 20). Top: tabs + Expand-as-you-type toggle. Below:
+// a filterable list (left) and the selected snippet's keyword / body / placeholder
+// reference / live preview (right). State lives in the SnippetsStore global.
+export component SnippetsView inherits VerticalLayout {
+    padding: 16px;
+    spacing: 12px;
+
+    // ---- top row: tabs + expand toggle ----
+    HorizontalLayout {
+        spacing: 6px;
+        for t[i] in [
+            { label: "All", n: SnippetsStore.count-all },
+            { label: "Snippets", n: SnippetsStore.count-snippets },
+            { label: "Commands", n: SnippetsStore.count-commands },
+        ]: Rectangle {
+            height: 30px;
+            width: 116px;
+            border-radius: Theme.r-sm;
+            background: i == SnippetsStore.tab ? Theme.bg-elevated : (tta.has-hover ? Theme.bg-elevated : transparent);
+            tta := TouchArea { clicked => { SnippetsStore.set-tab(i); } }
+            HorizontalLayout {
+                alignment: center; spacing: 6px;
+                Text { text: t.label; color: i == SnippetsStore.tab ? Theme.text : Theme.text-dim;
+                    font-size: Theme.fs-body; vertical-alignment: center; }
+                Text { text: t.n; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout { alignment: center;
+                Text { text: "Expand as you type"; color: Theme.text-dim; font-size: Theme.fs-sm; } }
+            VerticalLayout { alignment: center;
+                Rectangle {
+                    width: 40px; height: 22px; border-radius: 11px;
+                    background: SnippetsStore.expand-as-you-type ? Theme.accent : Theme.bg-elevated;
+                    Rectangle {
+                        width: 18px; height: 18px; border-radius: 9px; background: Theme.text;
+                        x: SnippetsStore.expand-as-you-type ? parent.width - self.width - 2px : 2px;
+                        y: 2px;
+                    }
+                    TouchArea { clicked => { SnippetsStore.toggle-expand(); } }
+                }
+            }
+        }
+    }
+
+    // ---- body: list + detail ----
+    HorizontalLayout {
+        spacing: 16px;
+        vertical-stretch: 1;
+
+        // list
+        VerticalLayout {
+            horizontal-stretch: 40;
+            min-width: 320px;
+            spacing: 10px;
+            ListView {
+                vertical-stretch: 1;
+                for row[i] in SnippetsStore.rows: Rectangle {
+                    height: 46px;
+                    border-radius: Theme.r-sm;
+                    background: i == SnippetsStore.selected ? Theme.bg-elevated : (rta.has-hover ? Theme.bg-elevated : transparent);
+                    rta := TouchArea {
+                        clicked => { SnippetsStore.select(i); }
+                        double-clicked => { SnippetsStore.select(i); SnippetsStore.paste-selected(); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px; spacing: 10px;
+                        VerticalLayout { alignment: center;
+                            Image { source: row.is-command ? Icons.tab-clipboard : Icons.act-note;
+                                colorize: Theme.text-faint; width: 15px; height: 15px; image-fit: contain; } }
+                        Text { text: row.name; color: Theme.text; font-size: Theme.fs-body;
+                            vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        if row.keyword != "": Rectangle {
+                            background: Theme.bg-panel; border-radius: Theme.r-xs; border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                                Text { text: row.keyword; color: Theme.text-dim; font-family: "Geist Mono";
+                                    font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; } }
+                        }
+                    }
+                }
+            }
+            Text { text: "Import from espanso (YAML) or navi (.cheat)"; color: Theme.text-faint;
+                font-size: Theme.fs-xs; }
+        }
+
+        // detail
+        VerticalLayout {
+            horizontal-stretch: 60;
+            min-width: 380px;
+            spacing: 14px;
+            if SnippetsStore.has-selection: VerticalLayout {
+                spacing: 14px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: SnippetsStore.detail-name; color: Theme.text; font-size: 24px; font-weight: 700;
+                        vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                    VerticalLayout { alignment: center;
+                        Text { text: SnippetsStore.detail-is-command ? "Command" : "Keyword"; color: Theme.text-dim; font-size: Theme.fs-sm; } }
+                    Rectangle {
+                        width: 150px; height: 34px; border-radius: Theme.r-sm;
+                        background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line;
+                        HorizontalLayout { padding-left: 10px;
+                            Text { text: SnippetsStore.detail-keyword; color: Theme.text; font-family: "Geist Mono";
+                                font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; } }
+                    }
+                }
+                Rectangle {
+                    background: Theme.bg-panel; border-radius: Theme.r-lg; border-width: 1px; border-color: Theme.line;
+                    vertical-stretch: 1;
+                    Flickable {
+                        viewport-width: self.width;
+                        viewport-height: bodytext.preferred-height + 32px;
+                        bodytext := Text {
+                            x: 16px; y: 16px; width: parent.width - 32px;
+                            text: SnippetsStore.detail-body;
+                            color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-body; wrap: word-wrap;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Placeholders"; color: Theme.text-dim; font-size: Theme.fs-sm; } }
+                    for ph in ["{date}", "{time}", "{clipboard}", "{cursor}", "{input:…}"]: Rectangle {
+                        height: 26px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
+                        HorizontalLayout { padding-left: 8px; padding-right: 8px;
+                            Text { text: ph; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                vertical-alignment: center; } }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Preview"; color: Theme.text-faint; font-size: Theme.fs-xs; }
+                    Text { text: SnippetsStore.detail-preview; color: Theme.text; font-size: Theme.fs-body; wrap: word-wrap; }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+            if !SnippetsStore.has-selection: VerticalLayout {
+                alignment: center;
+                Text { text: "Select a snippet, or press ⌘N to create one."; color: Theme.text-faint;
+                    font-size: Theme.fs-body; horizontal-alignment: center; }
+            }
+        }
+    }
+}

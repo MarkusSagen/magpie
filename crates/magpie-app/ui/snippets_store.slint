@@ -1,0 +1,29 @@
+import { SnippetRow } from "types.slint";
+
+// Snippets view state (screen 20). A global so Rust builds the list + detail and
+// the view reads it directly (mirrors DataStore / DateStore).
+export global SnippetsStore {
+    in-out property <[SnippetRow]> rows;
+    in-out property <int> tab;          // 0 All, 1 Snippets, 2 Commands
+    in-out property <int> count-all;
+    in-out property <int> count-snippets;
+    in-out property <int> count-commands;
+    in-out property <int> selected;     // index into `rows`
+    // Detail of the selected snippet.
+    in-out property <string> detail-name;
+    in-out property <string> detail-keyword;
+    in-out property <string> detail-body;
+    in-out property <string> detail-preview;
+    in-out property <bool> detail-is-command;
+    in-out property <bool> has-selection;
+    // Expand-as-you-type toggle (system-wide expansion is Phase 16b, opt-in spike).
+    in-out property <bool> expand-as-you-type;
+    callback set-tab(int);
+    callback select(int);
+    callback paste-selected();
+    callback new-snippet();
+    callback edit-selected();
+    callback import-espanso();
+    callback import-navi();
+    callback toggle-expand();
+}

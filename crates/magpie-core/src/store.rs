@@ -119,6 +119,18 @@ const MIGRATIONS: &[&str] = &[
         position INTEGER NOT NULL DEFAULT 0,
         created_at_ms INTEGER NOT NULL
     );",
+    // v5: snippets & commands (Phase 16a). `kind` is snippet|command; `keyword`
+    // (e.g. `;meet`) triggers expansion; `body` holds the text with `{…}`
+    // placeholders (or a command with `{{arg}}` params, pasted never executed).
+    "CREATE TABLE snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        keyword TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'snippet',
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -581,24 +593,30 @@ mod tests {
     }
 
     #[test]
-    fn migration_v4_adds_favorites_from_v3() {
-        // Simulate a pre-v4 database (no favorites table, user_version = 3), then
-        // run the upgrade path and confirm v4 lands the table and bumps the version.
+    fn migration_v4_v5_from_v3() {
+        // Simulate a pre-v4 database (user_version = 3, none of the post-v3 tables),
+        // then run the upgrade path and confirm v4 (favorites) + v5 (snippets) land
+        // and the version reaches the latest migration.
         let s = open_in_memory().unwrap();
         s.conn
-            .execute_batch("DROP TABLE favorites; PRAGMA user_version = 3;")
+            .execute_batch("DROP TABLE favorites; DROP TABLE snippets; PRAGMA user_version = 3;")
             .unwrap();
         run_migrations(&s.conn).unwrap();
         let version: i64 = s
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 4, "favorites migration bumps user_version to 4");
-        let n: i64 = s
+        assert_eq!(version, MIGRATIONS.len() as i64, "version reaches the latest");
+        let favs: i64 = s
             .conn
             .query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(n, 0, "favorites table exists and is empty");
+        assert_eq!(favs, 0, "favorites table exists and is empty");
+        let snips: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(snips, 0, "snippets table exists and is empty");
     }
 
     #[test]

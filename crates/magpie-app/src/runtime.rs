@@ -3,7 +3,8 @@ use crate::{
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
     NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow,
-    SearchTaskRow, SlotItem, TaskRow, TimeEntryRow, WorldClockRow, WorldClockStore,
+    SearchTaskRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, WorldClockRow,
+    WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -1887,6 +1888,10 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             refresh_calc(ui, state);
             update_calc_math(ui, state);
         }
+        ("snippets", _) => {
+            ui.set_view(SharedString::from("snippets"));
+            refresh_snippets(ui, state);
+        }
         _ => {
             // clipboard: everything above is already cleared.
         }
@@ -2388,6 +2393,156 @@ fn refresh_note_render(ui: &LauncherWindow, body: &str) {
         .collect();
     ui.global::<NoteRender>()
         .set_lines(ModelRc::new(VecModel::from(lines)));
+}
+
+/// Expand a snippet body for the preview / paste, resolving `{snippet:name}` via
+/// the store and filling `{clipboard}` from the OS clipboard. `{input:…}` prompts
+/// aren't collected here — they expand to empty in the preview.
+fn expand_snippet(state: &AppState, body: &str) -> magpie_core::snippets::Expanded {
+    use magpie_core::snippets::{expand, ExpandCtx};
+    let clipboard = magpie_platform::platform_clipboard()
+        .ok()
+        .map(|mut c| c.snapshot())
+        .and_then(|s| match s.content {
+            Some(magpie_core::Content::Text(t)) => Some(t),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let inputs = std::collections::HashMap::new();
+    let ctx = ExpandCtx {
+        epoch_secs: now_ms() / 1000,
+        utc_offset_secs: local_offset_seconds() as i32,
+        clipboard: &clipboard,
+        inputs: &inputs,
+    };
+    let lookup = |name: &str| -> Option<String> {
+        let store = state.store.lock().ok()?;
+        store
+            .snippet_by_keyword(name)
+            .ok()
+            .flatten()
+            .or_else(|| {
+                store
+                    .list_snippets()
+                    .ok()?
+                    .into_iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+            })
+            .map(|s| s.body)
+    };
+    expand(body, &ctx, &lookup)
+}
+
+/// Import snippets from a conventional espanso/navi location (no file picker yet).
+/// espanso: `~/.config/espanso/match/base.yml` (or the macOS Application Support
+/// path); navi: every `*.cheat` under `~/.local/share/navi/cheats`. Imported rows
+/// are added to the store; missing files are a no-op.
+fn import_snippets(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>, espanso: bool) {
+    use magpie_core::snippets::{parse_espanso_yaml, parse_navi_cheat, Snippet};
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut found: Vec<Snippet> = Vec::new();
+    if espanso {
+        let candidates = [
+            home.join(".config/espanso/match/base.yml"),
+            home.join("Library/Application Support/espanso/match/base.yml"),
+        ];
+        for p in candidates {
+            if let Ok(text) = std::fs::read_to_string(&p) {
+                found.extend(parse_espanso_yaml(&text));
+            }
+        }
+    } else {
+        let dir = home.join(".local/share/navi/cheats");
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                if e.path().extension().and_then(|x| x.to_str()) == Some("cheat") {
+                    if let Ok(text) = std::fs::read_to_string(e.path()) {
+                        found.extend(parse_navi_cheat(&text));
+                    }
+                }
+            }
+        }
+    }
+    if found.is_empty() {
+        return;
+    }
+    {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        for s in &found {
+            let _ = store.add_snippet(&s.name, &s.keyword, &s.body, &s.kind, now_ms());
+        }
+    }
+    if let Some(ui) = w.upgrade() {
+        refresh_snippets(&ui, state);
+    }
+}
+
+/// Rebuild the Snippets view (screen 20) from the store into `SnippetsStore`,
+/// filtered by the active tab, and refresh the selected snippet's detail + preview.
+fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
+    let store_snips = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store.list_snippets().unwrap_or_default()
+    };
+    let ss = ui.global::<SnippetsStore>();
+    let count_snippets = store_snips.iter().filter(|s| !s.is_command()).count() as i32;
+    let count_commands = store_snips.iter().filter(|s| s.is_command()).count() as i32;
+    ss.set_count_all(store_snips.len() as i32);
+    ss.set_count_snippets(count_snippets);
+    ss.set_count_commands(count_commands);
+
+    let tab = ss.get_tab();
+    let filtered: Vec<&magpie_core::snippets::Snippet> = store_snips
+        .iter()
+        .filter(|s| match tab {
+            1 => !s.is_command(),
+            2 => s.is_command(),
+            _ => true,
+        })
+        .collect();
+
+    let rows: Vec<SnippetRow> = filtered
+        .iter()
+        .map(|s| SnippetRow {
+            id: s.id as i32,
+            name: s.name.clone().into(),
+            keyword: if s.is_command() {
+                s.body.chars().take(20).collect::<String>().into()
+            } else {
+                s.keyword.clone().into()
+            },
+            is_command: s.is_command(),
+        })
+        .collect();
+    let n = rows.len() as i32;
+    ss.set_rows(ModelRc::new(VecModel::from(rows)));
+
+    let mut sel = ss.get_selected();
+    if sel >= n {
+        sel = 0;
+        ss.set_selected(0);
+    }
+    if let Some(s) = filtered.get(sel.max(0) as usize) {
+        ss.set_has_selection(true);
+        ss.set_detail_name(s.name.clone().into());
+        ss.set_detail_keyword(if s.keyword.is_empty() {
+            SharedString::from("—")
+        } else {
+            s.keyword.clone().into()
+        });
+        ss.set_detail_body(s.body.clone().into());
+        ss.set_detail_is_command(s.is_command());
+        let preview = expand_snippet(state, &s.body).text;
+        ss.set_detail_preview(preview.into());
+    } else {
+        ss.set_has_selection(false);
+    }
 }
 
 fn note_provenance(n: &magpie_core::Note) -> String {
@@ -3650,6 +3805,26 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Snippets (Phase 16a): seed a starter set, open the view.
+                        "snippets" => {
+                            if let Ok(store) = st.store.lock() {
+                                if store.list_snippets().map(|s| s.is_empty()).unwrap_or(false) {
+                                    let seed: &[(&str, &str, &str, &str)] = &[
+                                        ("Meeting notes", ";meet", "## {date:%a %d %b} — {input:Meeting with}\n\n**Attendees:** {cursor}\n**Notes**\n-\n**Action items**\n- [ ]", "snippet"),
+                                        ("Today's date", ";today", "{date:%A, %d %B %Y}", "snippet"),
+                                        ("Email signature", ";sig", "Best,\nMarkus", "snippet"),
+                                        ("Shrug", ";shrug", "¯\\_(ツ)_/¯", "snippet"),
+                                        ("Wrap clipboard in code fence", ";code", "```\n{clipboard}\n```", "snippet"),
+                                        ("git: undo last commit, keep changes", "", "git reset --soft HEAD~1", "command"),
+                                        ("docker: remove stopped containers", "", "docker container prune -f", "command"),
+                                    ];
+                                    for (name, kw, body, kind) in seed {
+                                        let _ = store.add_snippet(name, kw, body, kind, now_ms());
+                                    }
+                                }
+                            }
+                            ui.invoke_set_section(SharedString::from("snippets"));
+                        }
                         // World clock (Phase 12): Calculator → World clock tab.
                         "worldclock" => {
                             let q = SharedString::from("time in tokyo");
@@ -4038,6 +4213,102 @@ pub fn start() {
                 if url.starts_with("http://") || url.starts_with("https://") {
                     open_url_and_hide(&ui, &url);
                 }
+            }
+        });
+    }
+    // ---- Snippets (screen 20) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_set_tab(move |t| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<SnippetsStore>().set_tab(t);
+                ui.global::<SnippetsStore>().set_selected(0);
+                refresh_snippets(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_select(move |i| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<SnippetsStore>().set_selected(i);
+                refresh_snippets(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_paste_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                let body = ui.global::<SnippetsStore>().get_detail_body().to_string();
+                if body.is_empty() {
+                    return;
+                }
+                let text = expand_snippet(&s, &body).text;
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&text);
+                }
+                hide_launcher(&ui);
+                let _ = slint::invoke_from_event_loop(|| {
+                    let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                });
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_new_snippet(move || {
+            if let Some(ui) = w.upgrade() {
+                let id = {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    store
+                        .add_snippet("New snippet", "", "{cursor}", "snippet", now_ms())
+                        .ok()
+                };
+                if id.is_some() {
+                    ui.global::<SnippetsStore>().set_selected(0);
+                    refresh_snippets(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        ui.global::<SnippetsStore>().on_edit_selected(move || {
+            // Inline snippet editing is out of scope for this pass; the body is
+            // shown read-only. Import or the New action create snippets.
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_import_espanso(move || {
+            import_snippets(&w, &s, true);
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_import_navi(move || {
+            import_snippets(&w, &s, false);
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SnippetsStore>().on_toggle_expand(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<SnippetsStore>();
+                ss.set_expand_as_you_type(!ss.get_expand_as_you_type());
+                // System-wide expand-as-you-type is the Phase 16b opt-in spike; the
+                // toggle only reflects intent here (no global keyboard hook yet).
+                let _ = &s;
             }
         });
     }
@@ -6319,6 +6590,21 @@ pub fn start() {
                 let _ = store.update_note_body(n.id, body, now_ms());
             }
             let _ = store.daily_note(&abs_date(now_ms()), now_ms());
+            // A few starter snippets + a command (screen 20).
+            if store.list_snippets().map(|s| s.is_empty()).unwrap_or(false) {
+                let seed: &[(&str, &str, &str, &str)] = &[
+                    ("Meeting notes", ";meet", "## {date:%a %d %b} — {input:Meeting with}\n\n**Attendees:** {cursor}\n**Notes**\n-\n**Action items**\n- [ ]", "snippet"),
+                    ("Today's date", ";today", "{date:%A, %d %B %Y}", "snippet"),
+                    ("Email signature", ";sig", "Best,\nMarkus", "snippet"),
+                    ("Shrug", ";shrug", "¯\\_(ツ)_/¯", "snippet"),
+                    ("Wrap clipboard in code fence", ";code", "```\n{clipboard}\n```", "snippet"),
+                    ("git: undo last commit, keep changes", "", "git reset --soft HEAD~1", "command"),
+                    ("docker: remove stopped containers", "", "docker container prune -f", "command"),
+                ];
+                for (name, kw, body, kind) in seed {
+                    let _ = store.add_snippet(name, kw, body, kind, now_ms());
+                }
+            }
         }
         let _ = std::fs::write(&onboarded_marker, b"1");
         // Show the launcher + the welcome overlay shortly after the loop starts.

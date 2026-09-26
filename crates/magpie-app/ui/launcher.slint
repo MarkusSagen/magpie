@@ -14,11 +14,13 @@ import { CalcStore } from "calc_store.slint";
 import { DateStore } from "date_store.slint";
 import { WorldClockStore } from "worldclock_store.slint";
 import { NoteRender } from "note_render_store.slint";
+import { SnippetsStore } from "snippets_store.slint";
 export { DataStore }
 export { CalcStore }
 export { DateStore }
 export { WorldClockStore }
 export { NoteRender }
+export { SnippetsStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { BoardView } from "views/board.slint";
@@ -706,6 +708,7 @@ export component LauncherWindow inherits Window {
             activate-favorite(a0) => { root.activate-favorite(a0); }
             show-calc-data: true;
             show-data: true;
+            show-snippets: true;
             theme-index: root.theme-index;
             set-section(s) => { root.set-section(s); }
             set-theme(i) => { root.set-theme(i); }
