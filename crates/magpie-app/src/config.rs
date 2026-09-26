@@ -80,6 +80,24 @@ pub struct Config {
     /// Project folders the user chose to ignore (display form, e.g. `~/code/x`).
     #[serde(default)]
     pub projects_ignored: Vec<String>,
+    /// One-time marker: the kubectl/gcloud/bq command packs have been seeded into
+    /// snippets. Set true after the first seed so user deletions stick.
+    #[serde(default)]
+    pub command_packs_seeded: bool,
+    /// Which tray-popover tab opens by default: `clipboard` (default) / `today` /
+    /// `tasks` / `daily`. The popover is the quick, from-anywhere clipboard menu.
+    #[serde(default = "default_popover_tab")]
+    pub popover_default_tab: String,
+    /// Per-category "open with" application map (Phase: open files in preferred
+    /// apps). Keys are categories — `text`, `code`, `image`, `pdf`, `ebook`,
+    /// `archive`, `audio`, `video`, `other` — values are macOS app names passed to
+    /// `open -a <App>` (or a bundle path). Missing category → the system default.
+    #[serde(default)]
+    pub open_with: std::collections::BTreeMap<String, String>,
+}
+
+fn default_popover_tab() -> String {
+    "clipboard".into()
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -117,6 +135,9 @@ impl Default for Config {
             expand_as_you_type: false,
             projects_roots: Vec::new(),
             projects_ignored: Vec::new(),
+            command_packs_seeded: false,
+            popover_default_tab: default_popover_tab(),
+            open_with: std::collections::BTreeMap::new(),
         }
     }
 }

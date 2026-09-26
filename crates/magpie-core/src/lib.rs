@@ -33,6 +33,7 @@ pub mod merge;
 pub mod metrics;
 pub mod model;
 pub mod notes;
+pub mod openwith;
 pub mod plot;
 pub mod projects;
 pub mod random;

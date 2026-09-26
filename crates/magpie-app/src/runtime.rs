@@ -91,6 +91,13 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
             ignored: cfg.projects_ignored.clone(),
             ..Default::default()
         }),
+        popover_default_tab: match cfg.popover_default_tab.as_str() {
+            "tasks" => 0,
+            "today" => 1,
+            "daily" => 2,
+            _ => 3, // clipboard (default)
+        },
+        open_with: cfg.open_with.clone(),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -134,6 +141,24 @@ const THUMB_MAX_EDGE: u32 = 640;
 
 /// Load an image entry's own bitmap for Slint, via the cached `.thumb.png`
 /// (see `FsImageStore::ensure_thumbnail` for why the original can't be used).
+/// If `e` is a copied *path* to an existing image file (a `File` entry or path-like
+/// text with an image extension), return the absolute path so the preview can show
+/// the image itself. `None` otherwise.
+fn image_file_of(e: &Entry) -> Option<std::path::PathBuf> {
+    let candidate = if matches!(e.kind, Kind::File) {
+        e.full_text.lines().next().unwrap_or("").trim()
+    } else if magpie_core::openwith::looks_like_path(&e.full_text) {
+        e.full_text.trim()
+    } else {
+        return None;
+    };
+    if magpie_core::openwith::category_for_path(candidate) != "image" {
+        return None;
+    }
+    let path = magpie_app::file_search::expand_tilde(candidate);
+    path.exists().then_some(path)
+}
+
 fn load_entry_image(images: &FsImageStore, e: &Entry) -> (slint::Image, bool) {
     let none = (slint::Image::default(), false);
     let Some(bin) = e.image_path.as_deref() else {
@@ -3974,6 +3999,68 @@ fn open_url_and_hide(ui: &LauncherWindow, url: &str) {
     hide_launcher(ui);
 }
 
+/// Open a file `path` in its preferred application: the one configured for the
+/// path's category (`open -a <App>`) if set, else the system default (`open`).
+fn open_path_with_app(state: &AppState, path: &str) {
+    let category = magpie_core::openwith::category_for_path(path);
+    match state.open_with.get(category) {
+        Some(app) if !app.is_empty() => {
+            let _ = std::process::Command::new("open")
+                .arg("-a")
+                .arg(app)
+                .arg(path)
+                .spawn();
+        }
+        _ => {
+            let _ = std::process::Command::new("open").arg(path).spawn();
+        }
+    }
+}
+
+/// Open the selected clip in its default / configured app: a URL in the browser, an
+/// image entry's stored bitmap in the image app, a file-path clip (or a `File`
+/// entry, each path) in the per-category app. Hides the launcher first.
+fn open_selected_default(ui: &LauncherWindow, state: &AppState) {
+    let idx = ui.get_selected();
+    let results = current_results(state, now_ms());
+    let Some(e) = (idx >= 0).then(|| results.get(idx as usize)).flatten() else {
+        return;
+    };
+    match e.kind {
+        Kind::Link => {
+            let url = e.full_text.trim().to_string();
+            if url.starts_with("http://") || url.starts_with("https://") {
+                open_url_and_hide(ui, &url);
+            }
+            return;
+        }
+        Kind::Image => {
+            // The stored bitmap (a .bin of PNG bytes) — macOS `open` detects it.
+            if let Some(bin) = e.image_path.as_deref() {
+                hide_launcher(ui);
+                open_path_with_app(state, bin);
+                return;
+            }
+        }
+        Kind::File => {
+            hide_launcher(ui);
+            for line in e.full_text.lines().filter(|l| !l.trim().is_empty()) {
+                open_path_with_app(state, line.trim());
+            }
+            return;
+        }
+        _ => {}
+    }
+    // A plain-text clip that is actually a filesystem path.
+    if magpie_core::openwith::looks_like_path(&e.full_text) {
+        let path = magpie_core::openwith::category_for_path(&e.full_text);
+        let _ = path;
+        let expanded = magpie_app::file_search::expand_tilde(e.full_text.trim());
+        hide_launcher(ui);
+        open_path_with_app(state, &expanded.to_string_lossy());
+    }
+}
+
 /// The Enter / ⌘Enter flow: copy the entry at `idx`, hide Magpie so the previous
 /// app regains focus, then paste into it. `keep_open` re-shows Magpie afterward.
 fn paste_and_close(
@@ -6148,7 +6235,20 @@ pub fn start() {
             // Image entries have no text at all, so without this the preview pane
             // was blank. A masked entry stays hidden until Reveal.
             let (preview_image, has_preview_image) = match entry {
-                Some(e) if !masked || revealed => load_entry_image(&s.images, e),
+                Some(e) if !masked || revealed => {
+                    let (img, has) = load_entry_image(&s.images, e);
+                    if has {
+                        (img, has)
+                    } else if let Some(p) = image_file_of(e) {
+                        // A copied *path* to an image file → show the image itself.
+                        match slint::Image::load_from_path(&p) {
+                            Ok(i) => (i, true),
+                            Err(_) => (img, has),
+                        }
+                    } else {
+                        (img, has)
+                    }
+                }
                 _ => (slint::Image::default(), false),
             };
             // Web-link preview extras (screen 04): the domain, plus a cached OG
@@ -7491,19 +7591,14 @@ pub fn start() {
         });
     }
     {
-        // ⌘O — open the selected web-link entry in the default browser (screen 04).
+        // ⌘O — open the selected entry in its default / configured app: a web link in
+        // the browser, an image in the image app, a file-path clip / File entry in the
+        // per-category app (config `open_with`).
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_open_selected_url(move || {
             if let Some(ui) = w.upgrade() {
-                let idx = ui.get_selected();
-                let recent = current_results(&s, now_ms());
-                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
-                    let url = e.full_text.trim().to_string();
-                    if url.starts_with("http://") || url.starts_with("https://") {
-                        open_url_and_hide(&ui, &url);
-                    }
-                }
+                open_selected_default(&ui, &s);
             }
         });
     }
@@ -7969,8 +8064,9 @@ pub fn start() {
                 let _ = store.update_note_body(n.id, body, now_ms());
             }
             let _ = store.daily_note(&abs_date(now_ms()), now_ms());
-            // A few starter snippets + a command (screen 20).
-            if store.list_snippets().map(|s| s.is_empty()).unwrap_or(false) {
+            // A few starter snippets (the command packs seed separately, so gate on
+            // our own keyword rather than an empty list).
+            if store.snippet_by_keyword(";meet").ok().flatten().is_none() {
                 let seed: &[(&str, &str, &str, &str)] = &[
                     ("Meeting notes", ";meet", "## {date:%a %d %b} — {input:Meeting with}\n\n**Attendees:** {cursor}\n**Notes**\n-\n**Action items**\n- [ ]", "snippet"),
                     ("Today's date", ";today", "{date:%A, %d %B %Y}", "snippet"),
@@ -7998,6 +8094,27 @@ pub fn start() {
                 }
             });
         });
+    }
+
+    // Seed the kubectl/gcloud/bq command packs once (idempotent by keyword), so
+    // every user — new or existing — gets them; later deletions stick.
+    if !cfg.command_packs_seeded {
+        {
+            let store = match state.store.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            for (name, keyword, body) in magpie_core::snippets::default_command_packs() {
+                if store.snippet_by_keyword(keyword).ok().flatten().is_none() {
+                    let _ = store.add_snippet(name, keyword, body, "command", now_ms());
+                }
+            }
+        }
+        refresh_expand_keywords(&state);
+        let cfg_path = data_dir().join("config.toml");
+        let mut c = magpie_app::config::load_or_default(&cfg_path);
+        c.command_packs_seeded = true;
+        let _ = magpie_app::config::save(&c, &cfg_path);
     }
 
     // Expand-as-you-type (Phase 16b): reflect the saved preference in the toggle and,
@@ -8145,6 +8262,9 @@ fn build_tray(
                                 let _ = p.hide();
                             } else {
                                 refresh_popover(&p, &s);
+                                // Open on the user's preferred tab (clipboard by default) —
+                                // this popover is the quick, from-anywhere clipboard menu.
+                                p.set_tab(s.popover_default_tab);
                                 p.window().set_position(slint::WindowPosition::Physical(
                                     slint::PhysicalPosition::new(px, py),
                                 ));

@@ -352,6 +352,90 @@ impl Store {
     }
 }
 
+/// A ready-made pack of command snippets (navi-style `{{arg}}` params, pasted never
+/// executed) for kubectl / gcloud / bq — a starter set the app can seed. Each is
+/// `(name, keyword, body)`.
+pub fn default_command_packs() -> Vec<(&'static str, &'static str, &'static str)> {
+    vec![
+        // kubectl
+        (
+            "kubectl: pods in namespace",
+            ";kpods",
+            "kubectl get pods -n {{namespace}}",
+        ),
+        (
+            "kubectl: describe pod",
+            ";kdesc",
+            "kubectl describe pod {{pod}} -n {{namespace}}",
+        ),
+        (
+            "kubectl: follow logs",
+            ";klogs",
+            "kubectl logs -f {{pod}} -n {{namespace}}",
+        ),
+        (
+            "kubectl: exec shell",
+            ";kexec",
+            "kubectl exec -it {{pod}} -n {{namespace}} -- /bin/sh",
+        ),
+        (
+            "kubectl: apply file",
+            ";kapply",
+            "kubectl apply -f {{file}}",
+        ),
+        (
+            "kubectl: switch context",
+            ";kctx",
+            "kubectl config use-context {{context}}",
+        ),
+        (
+            "kubectl: port-forward",
+            ";kpf",
+            "kubectl port-forward {{pod}} {{local}}:{{remote}} -n {{namespace}}",
+        ),
+        // gcloud
+        (
+            "gcloud: set project",
+            ";gproj",
+            "gcloud config set project {{project}}",
+        ),
+        (
+            "gcloud: list instances",
+            ";gvms",
+            "gcloud compute instances list",
+        ),
+        (
+            "gcloud: ssh instance",
+            ";gssh",
+            "gcloud compute ssh {{instance}} --zone {{zone}}",
+        ),
+        ("gcloud: auth login", ";gauth", "gcloud auth login"),
+        (
+            "gcloud: read logs",
+            ";glogs",
+            "gcloud logging read \"{{filter}}\" --limit 50 --format json",
+        ),
+        (
+            "gcloud: gke credentials",
+            ";ggke",
+            "gcloud container clusters get-credentials {{cluster}} --region {{region}}",
+        ),
+        // bq
+        (
+            "bq: run query",
+            ";bqq",
+            "bq query --use_legacy_sql=false '{{sql}}'",
+        ),
+        ("bq: list datasets", ";bqls", "bq ls {{project}}:"),
+        ("bq: show table", ";bqshow", "bq show {{dataset}}.{{table}}"),
+        (
+            "bq: load CSV",
+            ";bqload",
+            "bq load --autodetect --source_format=CSV {{dataset}}.{{table}} {{file}}",
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +517,23 @@ mod tests {
         assert_eq!(c[0].kind, "command");
         assert_eq!(c[0].name, "undo last commit, keep changes");
         assert_eq!(c[0].body, "git reset --soft HEAD~1");
+    }
+
+    #[test]
+    fn command_packs_are_pasteable_verbatim() {
+        // Every pack entry is a valid command whose {{arg}} params survive expansion
+        // (pasted, never executed) — this is what verifies the packs "work".
+        let inputs = HashMap::new();
+        let none = |_: &str| None;
+        let packs = default_command_packs();
+        assert!(packs.iter().any(|(_, kw, _)| *kw == ";kpods"));
+        assert!(packs.iter().any(|(_, kw, _)| *kw == ";gproj"));
+        assert!(packs.iter().any(|(_, kw, _)| *kw == ";bqq"));
+        for (_, kw, body) in &packs {
+            assert!(kw.starts_with(';'), "keyword {kw} should start with ;");
+            let e = expand(body, &ctx("", &inputs), &none);
+            assert_eq!(&e.text, body, "command body {body} pastes verbatim");
+        }
     }
 
     #[test]

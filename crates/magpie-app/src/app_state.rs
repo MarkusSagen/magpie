@@ -60,6 +60,10 @@ pub struct AppState {
     /// Local projects (Phase 18): scan roots (session-immutable) + the last scan.
     pub projects_roots: Vec<String>,
     pub project_scan: Mutex<ProjectScanState>,
+    /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
+    pub popover_default_tab: i32,
+    /// Per-category "open with" app map (from `Config::open_with`).
+    pub open_with: std::collections::BTreeMap<String, String>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -253,6 +257,8 @@ mod tests {
             pomodoro: std::sync::Mutex::new(crate::app_state::PomodoroState::default()),
             projects_roots: Vec::new(),
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
+            popover_default_tab: 3,
+            open_with: std::collections::BTreeMap::new(),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),
