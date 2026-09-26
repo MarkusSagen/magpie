@@ -9,6 +9,9 @@ import { HintText } from "keycap.slint";
 component GroupHeader inherits Rectangle {
     in property <string> label;
     in-out property <bool> collapsed;
+    // Fires only on user click (not when Rust sets `collapsed`), so persistence
+    // isn't churned on startup.
+    callback toggled(bool);
     height: 26px;
     HorizontalLayout {
         padding-left: 10px; padding-right: 8px;
@@ -16,7 +19,7 @@ component GroupHeader inherits Rectangle {
             vertical-alignment: center; horizontal-stretch: 1; }
         Text { text: root.collapsed ? "▸" : "▾"; color: Theme.text-faint; font-size: 9px; vertical-alignment: center; }
     }
-    TouchArea { clicked => { root.collapsed = !root.collapsed; } }
+    TouchArea { clicked => { root.collapsed = !root.collapsed; root.toggled(root.collapsed); } }
 }
 
 // One navigation row: icon + label + `G x` hint. Active = `bg-elevated` fill.
@@ -85,6 +88,8 @@ export component Sidebar inherits Rectangle {
     callback open-settings();
     callback toggle-mask();
     callback toggle-pause();
+    // A group header was collapsed/expanded by the user: (key, collapsed).
+    callback group-toggled(string, bool);
     width: 208px;
     background: Theme.bg-sidebar;
     // hairline right border
@@ -131,7 +136,8 @@ export component Sidebar inherits Rectangle {
                 spacing: 2px;
 
                 // CAPTURE
-                GroupHeader { label: "CAPTURE"; collapsed <=> root.grp-capture-collapsed; }
+                GroupHeader { label: "CAPTURE"; collapsed <=> root.grp-capture-collapsed;
+                    toggled(c) => { root.group-toggled("capture", c); } }
                 if !root.grp-capture-collapsed: VerticalLayout {
                     spacing: 2px;
                     NavItem {
@@ -146,7 +152,8 @@ export component Sidebar inherits Rectangle {
 
                 // ORGANIZE
                 Rectangle { height: 8px; }
-                GroupHeader { label: "ORGANIZE"; collapsed <=> root.grp-organize-collapsed; }
+                GroupHeader { label: "ORGANIZE"; collapsed <=> root.grp-organize-collapsed;
+                    toggled(c) => { root.group-toggled("organize", c); } }
                 if !root.grp-organize-collapsed: VerticalLayout {
                     spacing: 2px;
                     NavItem {
@@ -169,7 +176,8 @@ export component Sidebar inherits Rectangle {
 
                 // TOOLS
                 Rectangle { height: 8px; }
-                GroupHeader { label: "TOOLS"; collapsed <=> root.grp-tools-collapsed; }
+                GroupHeader { label: "TOOLS"; collapsed <=> root.grp-tools-collapsed;
+                    toggled(c) => { root.group-toggled("tools", c); } }
                 if !root.grp-tools-collapsed: VerticalLayout {
                     spacing: 2px;
                     if root.show-files: NavItem {
@@ -192,7 +200,8 @@ export component Sidebar inherits Rectangle {
 
                 // FAVORITES (Phase 10): pinned entries / quicklinks.
                 if root.favorites.length > 0: Rectangle { height: 8px; }
-                if root.favorites.length > 0: GroupHeader { label: "FAVORITES"; collapsed <=> root.grp-favorites-collapsed; }
+                if root.favorites.length > 0: GroupHeader { label: "FAVORITES"; collapsed <=> root.grp-favorites-collapsed;
+                    toggled(c) => { root.group-toggled("favorites", c); } }
                 if root.favorites.length > 0 && !root.grp-favorites-collapsed: VerticalLayout {
                     spacing: 1px;
                     for f[i] in root.favorites: Rectangle {

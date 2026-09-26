@@ -5037,6 +5037,27 @@ pub fn start() {
     let theme_idx = magpie_app::themes::index_of(&state.theme);
     ui.set_theme_index(theme_idx as i32);
 
+    // Restore the persisted sidebar group-collapse state.
+    {
+        let collapsed = |k: &str| cfg.sidebar_collapsed_groups.iter().any(|g| g == k);
+        ui.set_grp_capture_collapsed(collapsed("capture"));
+        ui.set_grp_organize_collapsed(collapsed("organize"));
+        ui.set_grp_tools_collapsed(collapsed("tools"));
+        ui.set_grp_favorites_collapsed(collapsed("favorites"));
+    }
+    {
+        ui.on_group_toggled(move |key, collapsed| {
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            let key = key.to_string();
+            cfg.sidebar_collapsed_groups.retain(|g| g != &key);
+            if collapsed {
+                cfg.sidebar_collapsed_groups.push(key);
+            }
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
+        });
+    }
+
     // The menubar popover: a second, chromeless, always-on-top window shown from
     // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
     // early would tear the window down). It's a separate top-level component with its

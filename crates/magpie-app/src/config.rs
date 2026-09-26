@@ -105,6 +105,10 @@ pub struct Config {
     pub popover_width: i64,
     #[serde(default = "default_popover_height")]
     pub popover_height: i64,
+    /// Sidebar group headers the user has collapsed (keys: `capture`, `organize`,
+    /// `tools`, `favorites`). Persisted so the sidebar reopens as left off.
+    #[serde(default)]
+    pub sidebar_collapsed_groups: Vec<String>,
 }
 
 fn default_popover_width() -> i64 {
@@ -160,6 +164,7 @@ impl Default for Config {
             popover_pinned: false,
             popover_width: default_popover_width(),
             popover_height: default_popover_height(),
+            sidebar_collapsed_groups: Vec::new(),
         }
     }
 }

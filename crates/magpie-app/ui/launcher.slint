@@ -62,6 +62,12 @@ export component LauncherWindow inherits Window {
     in-out property <string> section: "clipboard"; // clipboard|tasks|notes|bookmarks|stats
     in-out property <string> tasks-view: "today"; // today|list|board
     in-out property <string> notes-view: "notes"; // notes|journal|graph
+    // Sidebar group collapse state (persisted via config; set by Rust on startup).
+    in-out property <bool> grp-capture-collapsed;
+    in-out property <bool> grp-organize-collapsed;
+    in-out property <bool> grp-tools-collapsed;
+    in-out property <bool> grp-favorites-collapsed;
+    callback group-toggled(string, bool);
     callback set-section(string);
     callback set-task-view(string);
     callback set-note-view(string);
@@ -718,6 +724,11 @@ export component LauncherWindow inherits Window {
             show-files: true;
             show-projects: true;
             theme-index: root.theme-index;
+            grp-capture-collapsed <=> root.grp-capture-collapsed;
+            grp-organize-collapsed <=> root.grp-organize-collapsed;
+            grp-tools-collapsed <=> root.grp-tools-collapsed;
+            grp-favorites-collapsed <=> root.grp-favorites-collapsed;
+            group-toggled(k, c) => { root.group-toggled(k, c); }
             set-section(s) => { root.set-section(s); }
             set-theme(i) => { root.set-theme(i); }
             open-shortcuts => { root.mode = "help"; }
