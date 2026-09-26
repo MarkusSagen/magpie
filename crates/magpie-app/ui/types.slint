@@ -310,3 +310,31 @@ export struct SnippetRow {
     keyword: string,     // ";meet" (snippet) or the command text chip
     is-command: bool,
 }
+
+// ---- File search (Phase 15, PNGs 19/21/22/23) ----
+export struct SearchLine {
+    line-no: string,
+    // The line split around the match so the middle can be highlighted (Slint has
+    // no substring). `mid` is the matched text.
+    pre: string,
+    mid: string,
+    post: string,
+    replaced: string,   // sed replacement preview ("" when not sed)
+}
+export struct SearchFile {
+    name: string,
+    dir: string,
+    path: string,
+    match-count: string,
+    viewed: bool,
+    name-only: bool,
+    lines: [SearchLine],
+}
+export struct SearchTreeRow {
+    indent: int,        // 0 location, 1 folder, 2 file
+    label: string,
+    count: string,
+    bar: float,         // 0..1 relative match count (bar width)
+    is-file: bool,
+    viewed: bool,
+}

@@ -67,6 +67,8 @@ fn state() -> AppState {
         world_clock_cities: std::sync::Mutex::new(Vec::new()),
         wc_session_targets: std::sync::Mutex::new(Vec::new()),
         wc_chosen_hour: std::sync::Mutex::new(-1),
+        search: std::sync::Mutex::new(magpie_app::app_state::SearchState::default()),
+        search_gen: std::sync::atomic::AtomicU64::new(0),
         nav_back: Mutex::new(Vec::new()),
         nav_fwd: Mutex::new(Vec::new()),
         data_input: Mutex::new(String::new()),

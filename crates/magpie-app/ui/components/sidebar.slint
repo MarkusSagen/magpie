@@ -55,6 +55,7 @@ export component Sidebar inherits Rectangle {
     in property <bool> show-calc-data;      // reveal Calculator (feature flag)
     in property <bool> show-data;           // reveal Data (screens 13/14)
     in property <bool> show-snippets;       // reveal Snippets (screen 20)
+    in property <bool> show-files;          // reveal Files (screens 19/21/22/23)
     in property <int> theme-index;
     callback set-section(string);
     callback set-theme(int);
@@ -119,6 +120,10 @@ export component Sidebar inherits Rectangle {
         NavItem {
             label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
             active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
+        }
+        if root.show-files: NavItem {
+            label: "Files"; icon: Icons.search; hint: "G F"; cmd-held: root.cmd-held;
+            active: root.section == "files"; clicked => { root.set-section("files"); }
         }
         if root.show-calc-data: NavItem {
             label: "Calculator"; icon: Icons.tab-stats; hint: "G ="; cmd-held: root.cmd-held;

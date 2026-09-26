@@ -1,0 +1,36 @@
+import { SearchFile, SearchTreeRow } from "types.slint";
+
+// File-search state (screens 19/21/22/23). A global so Rust runs the search and
+// the Files view reads it directly (mirrors DataStore / DateStore).
+export global SearchStore {
+    in-out property <[string]> locations;   // active location chips (display form)
+    in-out property <int> mode;             // 0 Text, 1 Regex, 2 Sed
+    in-out property <int> case-mode;        // 0 Smart, 1 Sensitive, 2 Insensitive
+    in-out property <int> tab;              // 0 All, 1 Names, 2 Contents, 3 Documents
+    in-out property <int> count-all;
+    in-out property <int> count-names;
+    in-out property <int> count-contents;
+    in-out property <int> count-documents;
+    in-out property <[SearchFile]> files;
+    in-out property <[SearchTreeRow]> tree;
+    in-out property <string> summary;       // "10 matches · 3 files · 2 locations"
+    in-out property <string> ignore-summary;
+    in-out property <bool> hide-viewed;
+    in-out property <bool> is-sed;          // query parsed as a sed command
+    in-out property <int> selected;         // selected file index
+
+    callback set-tab(int);
+    callback set-mode(int);
+    callback cycle-case();
+    callback add-location();
+    callback remove-location(int);
+    callback open-file(int);
+    callback reveal-file(int);
+    callback edit-file(int);
+    callback copy-name(int);
+    callback copy-path(int);
+    callback toggle-viewed(int);
+    callback toggle-hide-viewed();
+    callback collapse-all();
+    callback apply-replace();               // sed: apply the replacement (⌘↵)
+}

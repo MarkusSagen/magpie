@@ -2,9 +2,9 @@ use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
-    NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchNoteRow,
-    SearchTaskRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, WorldClockRow,
-    WorldClockStore,
+    NoteRender, NoteRow, Popover, RecentData, RefRow, SearchBookmarkRow, SearchFile, SearchLine,
+    SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem, SnippetRow, SnippetsStore,
+    TaskRow, TimeEntryRow, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -79,6 +79,8 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         world_clock_cities: std::sync::Mutex::new(cfg.world_clock_cities.clone()),
         wc_session_targets: std::sync::Mutex::new(Vec::new()),
         wc_chosen_hour: std::sync::Mutex::new(-1),
+        search: std::sync::Mutex::new(magpie_app::app_state::SearchState::default()),
+        search_gen: std::sync::atomic::AtomicU64::new(0),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -1892,6 +1894,17 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             ui.set_view(SharedString::from("snippets"));
             refresh_snippets(ui, state);
         }
+        ("files", _) => {
+            ui.set_view(SharedString::from("files"));
+            // Default the first location to the home dir if none set yet.
+            {
+                let mut s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+                if s.locations.is_empty() {
+                    s.locations.push("~".to_string());
+                }
+            }
+            refresh_files(ui, state);
+        }
         _ => {
             // clipboard: everything above is already cleared.
         }
@@ -2543,6 +2556,335 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     } else {
         ss.set_has_selection(false);
     }
+}
+
+/// Map the SearchState mode/case ints to the core enums.
+fn search_mode_from(i: i32) -> magpie_core::filesearch::MatchMode {
+    use magpie_core::filesearch::MatchMode::*;
+    match i {
+        1 => Regex,
+        2 => Sed,
+        _ => Text,
+    }
+}
+fn search_case_from(i: i32) -> magpie_core::filesearch::CaseMode {
+    use magpie_core::filesearch::CaseMode::*;
+    match i {
+        1 => Sensitive,
+        2 => Insensitive,
+        _ => Smart,
+    }
+}
+fn search_tab_from(i: i32) -> magpie_app::file_search::Tab {
+    use magpie_app::file_search::Tab::*;
+    match i {
+        1 => Names,
+        2 => Contents,
+        3 => Documents,
+        _ => All,
+    }
+}
+
+/// Run the file search for the current query on a background thread and push the
+/// results (files + hierarchy tree + counts) into `SearchStore`. Stale runs are
+/// cancelled via `search_gen`. The shared search box supplies the query.
+fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
+    use magpie_app::file_search::{self, Limits};
+    use std::sync::atomic::Ordering;
+
+    let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
+    let (locations, mode_i, case_i, tab_i, hide_viewed) = {
+        let s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+        (s.locations.clone(), s.mode, s.case, s.tab, s.hide_viewed)
+    };
+    let ss = ui.global::<SearchStore>();
+    ss.set_locations(ModelRc::new(VecModel::from(
+        locations
+            .iter()
+            .cloned()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    ss.set_mode(mode_i);
+    ss.set_case_mode(case_i);
+    ss.set_tab(tab_i);
+    ss.set_hide_viewed(hide_viewed);
+    let mode = search_mode_from(mode_i);
+    ss.set_is_sed(matches!(mode, magpie_core::filesearch::MatchMode::Sed));
+    let sed_cmd = magpie_core::filesearch::parse_sed(&query);
+    ss.set_ignore_summary(SharedString::from(format!(
+        "Ignoring .gitignore, global excludes and {} · 3 rules",
+        file_search::magpie_ignore_path().display()
+    )));
+
+    // Nothing to search yet.
+    let effective_query = query.trim().to_string();
+    if locations.is_empty() || (effective_query.is_empty() && mode_i != 2) {
+        ss.set_files(ModelRc::new(VecModel::from(Vec::<SearchFile>::new())));
+        ss.set_tree(ModelRc::new(VecModel::from(Vec::<SearchTreeRow>::new())));
+        ss.set_summary(SharedString::from("Type to search these locations"));
+        ss.set_count_all(0);
+        ss.set_count_names(0);
+        ss.set_count_contents(0);
+        ss.set_count_documents(0);
+        return;
+    }
+
+    let gen = state.search_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let st = state.clone();
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let case = search_case_from(case_i);
+        let tab = search_tab_from(tab_i);
+        let cancelled = {
+            let st = st.clone();
+            move || st.search_gen.load(Ordering::SeqCst) != gen
+        };
+        let results = file_search::run_search(
+            &locations,
+            &effective_query,
+            mode,
+            case,
+            tab,
+            false,
+            false,
+            &Limits::default(),
+            &cancelled,
+        );
+        if st.search_gen.load(Ordering::SeqCst) != gen {
+            return;
+        }
+        let sed = sed_cmd.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = w.upgrade() {
+                populate_search_results(&ui, &st, results, sed);
+            }
+        });
+    });
+}
+
+/// Apply the current `s/pat/rep/flags` substitution to every matched file, writing
+/// a `<path>.magpie-bak` backup first (undo). Only runs when the query parses as a
+/// sed command. Reachable via the `apply-replace` callback (⌘↵).
+fn apply_sed_replace(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>) {
+    let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
+    let Some(cmd) = magpie_core::filesearch::parse_sed(&query) else {
+        return;
+    };
+    let Ok(re) = regex::RegexBuilder::new(&cmd.pattern)
+        .case_insensitive(cmd.case_insensitive)
+        .build()
+    else {
+        return;
+    };
+    let paths = state
+        .search
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .result_paths
+        .clone();
+    for p in paths {
+        let Ok(content) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        let replaced = if cmd.global {
+            re.replace_all(&content, cmd.replacement.as_str())
+                .to_string()
+        } else {
+            re.replace(&content, cmd.replacement.as_str()).to_string()
+        };
+        if replaced != content {
+            let _ = std::fs::write(format!("{p}.magpie-bak"), &content);
+            let _ = std::fs::write(&p, replaced);
+        }
+    }
+    if let Some(ui) = w.upgrade() {
+        refresh_files(&ui, state);
+    }
+}
+
+/// Byte-safe split of `text` around `[start,end)` into (pre, mid, post), with pre
+/// trimmed to a tail window and post to a head window so the match stays visible
+/// near the left of the row (a leading/trailing `…` marks truncation).
+fn split3(text: &str, start: usize, end: usize) -> (String, String, String) {
+    const PRE: usize = 40;
+    const POST: usize = 120;
+    if start >= end
+        || end > text.len()
+        || !text.is_char_boundary(start)
+        || !text.is_char_boundary(end)
+    {
+        let head: String = text.chars().take(160).collect();
+        return (head, String::new(), String::new());
+    }
+    // Trim pre to the last PRE chars.
+    let pre_full = &text[..start];
+    let pre_chars: Vec<char> = pre_full.chars().collect();
+    let pre = if pre_chars.len() > PRE {
+        let tail: String = pre_chars[pre_chars.len() - PRE..].iter().collect();
+        format!("…{}", tail.trim_start())
+    } else {
+        pre_full.to_string()
+    };
+    let mid = text[start..end].to_string();
+    let post_full = &text[end..];
+    let post_chars: Vec<char> = post_full.chars().collect();
+    let post = if post_chars.len() > POST {
+        let head: String = post_chars[..POST].iter().collect();
+        format!("{head}…")
+    } else {
+        post_full.to_string()
+    };
+    (pre, mid, post)
+}
+
+/// Convert engine results into the Slint models (files + tree + counts + summary),
+/// mark viewed, apply hide-viewed, and compute the sed replacement preview.
+fn populate_search_results(
+    ui: &LauncherWindow,
+    state: &Arc<AppState>,
+    results: magpie_app::file_search::SearchResults,
+    sed: Option<magpie_core::filesearch::SedCommand>,
+) {
+    let (viewed, hide_viewed) = {
+        let s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+        (s.viewed.clone(), s.hide_viewed)
+    };
+    // A regex to build the sed replacement preview.
+    let sed_re = sed.as_ref().and_then(|c| {
+        regex::RegexBuilder::new(&c.pattern)
+            .case_insensitive(c.case_insensitive)
+            .build()
+            .ok()
+            .map(|re| (re, c.replacement.clone(), c.global))
+    });
+
+    let ss = ui.global::<SearchStore>();
+    let shown: Vec<&magpie_app::file_search::FileHit> = results
+        .files
+        .iter()
+        .filter(|f| !(hide_viewed && viewed.contains(&f.path.to_string_lossy().to_string())))
+        .collect();
+
+    let max_matches = shown
+        .iter()
+        .map(|f| f.matches.len().max(1))
+        .max()
+        .unwrap_or(1) as f32;
+
+    let files: Vec<SearchFile> = shown
+        .iter()
+        .map(|f| {
+            let path_s = f.path.to_string_lossy().to_string();
+            let is_viewed = viewed.contains(&path_s);
+            let lines: Vec<SearchLine> = f
+                .matches
+                .iter()
+                .map(|m| {
+                    let (pre, mid, post) = split3(&m.text, m.match_start, m.match_end);
+                    let replaced = sed_re
+                        .as_ref()
+                        .map(|(re, rep, global)| {
+                            if *global {
+                                re.replace_all(&m.text, rep.as_str()).to_string()
+                            } else {
+                                re.replace(&m.text, rep.as_str()).to_string()
+                            }
+                        })
+                        .filter(|r| *r != m.text)
+                        .unwrap_or_default();
+                    SearchLine {
+                        line_no: m.line_no.to_string().into(),
+                        pre: pre.into(),
+                        mid: mid.into(),
+                        post: post.into(),
+                        replaced: replaced.into(),
+                    }
+                })
+                .collect();
+            SearchFile {
+                name: f.name.clone().into(),
+                dir: f.dir_rel.clone().into(),
+                path: path_s.into(),
+                match_count: format!(
+                    "{} match{}",
+                    f.matches.len().max(1),
+                    if f.matches.len() == 1 { "" } else { "es" }
+                )
+                .into(),
+                viewed: is_viewed,
+                name_only: f.name_only,
+                lines: ModelRc::new(VecModel::from(lines)),
+            }
+        })
+        .collect();
+
+    // Hierarchy tree: one row per location, then its files (indent 1).
+    use magpie_app::file_search;
+    let mut tree: Vec<SearchTreeRow> = Vec::new();
+    let locations = {
+        let s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+        s.locations.clone()
+    };
+    for loc in &locations {
+        let root = file_search::expand_tilde(loc);
+        let loc_files: Vec<&&magpie_app::file_search::FileHit> =
+            shown.iter().filter(|f| f.path.starts_with(&root)).collect();
+        let loc_matches: usize = loc_files.iter().map(|f| f.matches.len().max(1)).sum();
+        tree.push(SearchTreeRow {
+            indent: 0,
+            label: loc.clone().into(),
+            count: loc_matches.to_string().into(),
+            bar: (loc_matches as f32 / (max_matches * 3.0)).min(1.0),
+            is_file: false,
+            viewed: false,
+        });
+        for f in loc_files {
+            let path_s = f.path.to_string_lossy().to_string();
+            tree.push(SearchTreeRow {
+                indent: 1,
+                label: f.name.clone().into(),
+                count: f.matches.len().max(1).to_string().into(),
+                bar: (f.matches.len().max(1) as f32 / max_matches).min(1.0),
+                is_file: true,
+                viewed: viewed.contains(&path_s),
+            });
+        }
+    }
+
+    // Store the shown paths for index → action.
+    {
+        let mut s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+        s.result_paths = shown
+            .iter()
+            .map(|f| f.path.to_string_lossy().to_string())
+            .collect();
+    }
+
+    let n_files = shown.len();
+    let n_matches: usize = shown.iter().map(|f| f.matches.len()).sum();
+    ss.set_summary(
+        format!(
+            "{} match{} · {} file{} · {} location{}",
+            n_matches,
+            if n_matches == 1 { "" } else { "es" },
+            n_files,
+            if n_files == 1 { "" } else { "s" },
+            locations.len(),
+            if locations.len() == 1 { "" } else { "s" },
+        )
+        .into(),
+    );
+    ss.set_count_all(n_matches as i32);
+    ss.set_count_contents(shown.iter().map(|f| f.matches.len()).sum::<usize>() as i32);
+    ss.set_count_names(shown.iter().filter(|f| f.name_only).count() as i32);
+    ss.set_count_documents(0);
+    ss.set_files(ModelRc::new(VecModel::from(files)));
+    ss.set_tree(ModelRc::new(VecModel::from(tree)));
+    if ss.get_selected() >= n_files as i32 {
+        ss.set_selected(0);
+    }
+    let _ = results.truncated;
 }
 
 fn note_provenance(n: &magpie_core::Note) -> String {
@@ -3805,6 +4147,19 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // File search (Phase 15): search the repo for a term.
+                        "files" => {
+                            {
+                                let mut g = st.search.lock().unwrap_or_else(|e| e.into_inner());
+                                g.locations = vec!["~/code/hobby/magpie/crates".to_string()];
+                            }
+                            let q = SharedString::from("user_version");
+                            ui.set_query(q.clone());
+                            if let Ok(mut u) = st.ui.lock() {
+                                u.text = "user_version".to_string();
+                            }
+                            ui.invoke_set_section(SharedString::from("files"));
+                        }
                         // Snippets (Phase 16a): seed a starter set, open the view.
                         "snippets" => {
                             if let Ok(store) = st.store.lock() {
@@ -4312,6 +4667,210 @@ pub fn start() {
             }
         });
     }
+    // ---- File search (screens 19/21/22/23) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_set_tab(move |t| {
+            s.search.lock().unwrap_or_else(|e| e.into_inner()).tab = t;
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_set_mode(move |m| {
+            s.search.lock().unwrap_or_else(|e| e.into_inner()).mode = m;
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_cycle_case(move || {
+            {
+                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                g.case = (g.case + 1) % 3;
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_add_location(move || {
+            // Add the typed query as a path if it looks like one; else the home dir.
+            let typed = w
+                .upgrade()
+                .map(|ui| ui.get_query().to_string())
+                .unwrap_or_default();
+            let path = typed.trim().to_string();
+            let candidate = if path.starts_with('~') || path.starts_with('/') {
+                path
+            } else {
+                "~/Documents".to_string()
+            };
+            {
+                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                if !g.locations.contains(&candidate) {
+                    g.locations.push(candidate);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_remove_location(move |i| {
+            {
+                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                let idx = i as usize;
+                if idx < g.locations.len() {
+                    g.locations.remove(idx);
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_toggle_hide_viewed(move || {
+            {
+                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                g.hide_viewed = !g.hide_viewed;
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_toggle_viewed(move |i| {
+            {
+                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(p) = g.result_paths.get(i as usize).cloned() {
+                    if g.viewed.contains(&p) {
+                        g.viewed.remove(&p);
+                    } else {
+                        g.viewed.insert(p);
+                    }
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_files(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_open_file(move |i| {
+            let path = s
+                .search
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result_paths
+                .get(i as usize)
+                .cloned();
+            if let (Some(p), Some(ui)) = (path, w.upgrade()) {
+                hide_launcher(&ui);
+                let _ = std::process::Command::new("open").arg(&p).spawn();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.global::<SearchStore>().on_reveal_file(move |i| {
+            let path = s
+                .search
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result_paths
+                .get(i as usize)
+                .cloned();
+            if let Some(p) = path {
+                let _ = std::process::Command::new("open").arg("-R").arg(&p).spawn();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.global::<SearchStore>().on_edit_file(move |i| {
+            let path = s
+                .search
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result_paths
+                .get(i as usize)
+                .cloned();
+            if let Some(p) = path {
+                // Open in the default text editor.
+                let _ = std::process::Command::new("open").arg("-t").arg(&p).spawn();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.global::<SearchStore>().on_copy_name(move |i| {
+            if let Some(p) = s
+                .search
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result_paths
+                .get(i as usize)
+                .cloned()
+            {
+                let name = std::path::Path::new(&p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or(p);
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&name);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        ui.global::<SearchStore>().on_copy_path(move |i| {
+            if let Some(p) = s
+                .search
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result_paths
+                .get(i as usize)
+                .cloned()
+            {
+                if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                    let _ = clip.set_text(&p);
+                }
+            }
+        });
+    }
+    {
+        ui.global::<SearchStore>().on_collapse_all(move || {});
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SearchStore>().on_apply_replace(move || {
+            apply_sed_replace(&w, &s);
+        });
+    }
     // ---- Data view (screens 13/14) ----
     {
         let s = state.clone();
@@ -4702,6 +5261,10 @@ pub fn start() {
                 // New query text → start the answer card at its first format.
                 ui.set_answer_format_index(0);
                 refresh(&ui, &s);
+                // In the Files view, the query drives the file search.
+                if ui.get_view() == "files" {
+                    refresh_files(&ui, &s);
+                }
                 // In the calculator, auto-detect the input syntax and re-typeset.
                 if ui.get_view() == "calculator" {
                     let mode = match magpie_core::mathsvg::detect_syntax(text.as_str()) {

@@ -24,6 +24,7 @@ pub mod edit;
 pub mod eval;
 pub mod export;
 pub mod favorites;
+pub mod filesearch;
 pub mod holidays;
 pub mod mask_support;
 pub mod mathsvg;

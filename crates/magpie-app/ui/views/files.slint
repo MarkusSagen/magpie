@@ -1,0 +1,208 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { SearchFile, SearchLine, SearchTreeRow } from "../types.slint";
+import { SearchStore } from "../search_store.slint";
+
+// File search (screens 19/21/22/23). Own top row (location chips + match-mode
+// toggles), tabs, then a hierarchy tree (left) + per-file results (right). The
+// shared search box supplies the query; SearchStore holds everything else.
+export component FilesView inherits VerticalLayout {
+    padding: 16px;
+    spacing: 10px;
+
+    // ---- location chips + match-mode toggles ----
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout { alignment: center;
+            Text { text: "in"; color: Theme.text-faint; font-size: Theme.fs-sm; } }
+        for loc[i] in SearchStore.locations: Rectangle {
+            height: 30px;
+            background: Theme.bg-elevated;
+            border-radius: Theme.r-sm;
+            HorizontalLayout {
+                padding-left: 10px; padding-right: 8px; spacing: 6px;
+                Image { source: Icons.tab-clipboard; colorize: Theme.text-faint; width: 12px; height: 12px;
+                    y: (parent.height - 12px) / 2; image-fit: contain; }
+                Text { text: loc; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                Rectangle { width: 16px;
+                    Text { text: "×"; color: Theme.text-faint; font-size: 14px;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { SearchStore.remove-location(i); } }
+                }
+            }
+        }
+        Rectangle {
+            width: 34px; height: 30px; border-radius: Theme.r-sm;
+            background: addta.has-hover ? Theme.bg-elevated : transparent; border-width: 1px; border-color: Theme.line;
+            addta := TouchArea { clicked => { SearchStore.add-location(); } }
+            Text { text: "+"; color: Theme.text-dim; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        // Match-mode toggle group: Aa (text) · .* (regex) · s// (sed).
+        Rectangle {
+            background: Theme.bg-sidebar; border-radius: Theme.r-sm; height: 30px; width: 150px;
+            HorizontalLayout {
+                padding: 3px; spacing: 2px;
+                for m[i] in ["Aa", ".*", "s//"]: Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: Theme.r-xs;
+                    background: i == SearchStore.mode ? Theme.bg-elevated : (mta.has-hover ? Theme.bg-elevated : transparent);
+                    mta := TouchArea { clicked => { SearchStore.set-mode(i); } }
+                    Text { text: m; color: i == SearchStore.mode ? Theme.text : Theme.text-dim;
+                        font-family: "Geist Mono"; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+        // Case-mode cycle (Smart / Match / Ignore).
+        Rectangle {
+            width: 92px; height: 30px; border-radius: Theme.r-sm;
+            background: cta.has-hover ? Theme.bg-elevated : transparent; border-width: 1px; border-color: Theme.line;
+            cta := TouchArea { clicked => { SearchStore.cycle-case(); } }
+            Text { text: SearchStore.case-mode == 0 ? "Smart case" : (SearchStore.case-mode == 1 ? "Match case" : "Ignore case");
+                color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+
+    // ---- tabs + view controls ----
+    HorizontalLayout {
+        spacing: 6px;
+        for t[i] in [
+            { label: "All", n: SearchStore.count-all },
+            { label: "Names", n: SearchStore.count-names },
+            { label: "Contents", n: SearchStore.count-contents },
+            { label: "Documents", n: SearchStore.count-documents },
+        ]: Rectangle {
+            height: 30px; width: 116px; border-radius: Theme.r-sm;
+            background: i == SearchStore.tab ? Theme.bg-elevated : (tta.has-hover ? Theme.bg-elevated : transparent);
+            tta := TouchArea { clicked => { SearchStore.set-tab(i); } }
+            HorizontalLayout { alignment: center; spacing: 6px;
+                Text { text: t.label; color: i == SearchStore.tab ? Theme.text : Theme.text-dim;
+                    font-size: Theme.fs-body; vertical-alignment: center; }
+                Text { text: t.n; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; } }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Rectangle {
+            width: 110px; height: 30px; border-radius: Theme.r-sm;
+            background: hvta.has-hover ? Theme.bg-elevated : transparent;
+            hvta := TouchArea { clicked => { SearchStore.toggle-hide-viewed(); } }
+            Text { text: SearchStore.hide-viewed ? "Show viewed" : "Hide viewed"; color: Theme.text-dim;
+                font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Rectangle {
+            width: 96px; height: 30px; border-radius: Theme.r-sm;
+            background: cata.has-hover ? Theme.bg-elevated : transparent;
+            cata := TouchArea { clicked => { SearchStore.collapse-all(); } }
+            Text { text: "Collapse all"; color: Theme.text-dim; font-size: Theme.fs-sm;
+                horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+
+    // ---- body: tree | results ----
+    HorizontalLayout {
+        spacing: 16px;
+        vertical-stretch: 1;
+
+        // hierarchy tree
+        VerticalLayout {
+            horizontal-stretch: 30;
+            min-width: 240px;
+            max-width: 300px;
+            spacing: 6px;
+            Text { text: "Where matches are"; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600; }
+            Text { text: SearchStore.summary; color: Theme.text-faint; font-size: Theme.fs-sm; }
+            ListView {
+                vertical-stretch: 1;
+                for row[i] in SearchStore.tree: Rectangle {
+                    height: 30px;
+                    border-radius: Theme.r-sm;
+                    background: rowta.has-hover ? Theme.bg-elevated : transparent;
+                    rowta := TouchArea { }
+                    HorizontalLayout {
+                        padding-left: 6px + row.indent * 18px; padding-right: 6px; spacing: 6px;
+                        Image { source: row.is-file ? Icons.act-note : Icons.tab-clipboard;
+                            colorize: Theme.text-faint; width: 13px; height: 13px; y: (parent.height - 13px) / 2; image-fit: contain; }
+                        Text { text: row.label; color: row.viewed ? Theme.text-faint : Theme.text-dim; font-size: Theme.fs-sm;
+                            vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        if row.viewed: Text { text: "✓"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
+                        Text { text: row.count; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Rectangle {
+                            width: 40px; height: 4px; y: (parent.height - 4px) / 2;
+                            background: Theme.bg-elevated; border-radius: 2px;
+                            Rectangle { x: 0; width: parent.width * row.bar; height: parent.height; border-radius: 2px;
+                                background: Theme.line-strong; }
+                        }
+                    }
+                }
+            }
+            Text { text: SearchStore.ignore-summary; color: Theme.text-faint; font-size: Theme.fs-xs; wrap: word-wrap; }
+        }
+
+        // results
+        ListView {
+            horizontal-stretch: 66;
+            for file[fi] in SearchStore.files: VerticalLayout {
+                spacing: 0px;
+                // file header
+                Rectangle {
+                    height: 44px;
+                    background: fi == SearchStore.selected ? Theme.bg-elevated : transparent;
+                    border-radius: Theme.r-sm;
+                    fhta := TouchArea { clicked => { SearchStore.selected = fi; } }
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; spacing: 8px;
+                        Image { source: Icons.act-note; colorize: Theme.text-dim; width: 15px; height: 15px;
+                            y: (parent.height - 15px) / 2; image-fit: contain; }
+                        Text { text: file.name; color: Theme.text; font-size: Theme.fs-body; font-weight: 500; vertical-alignment: center; }
+                        Text { text: file.dir; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Text { text: file.match-count; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        // action icons
+                        img-btn := Rectangle { width: 26px; height: 26px; y: (parent.height - 26px)/2; border-radius: Theme.r-xs;
+                            background: rvta.has-hover ? Theme.bg-panel : transparent;
+                            Image { source: Icons.tab-clipboard; colorize: Theme.text-faint; width: 13px; height: 13px; x: 6px; y: 6px; image-fit: contain; }
+                            rvta := TouchArea { clicked => { SearchStore.reveal-file(fi); } } }
+                        Rectangle { width: 26px; height: 26px; y: (parent.height - 26px)/2; border-radius: Theme.r-xs;
+                            background: opta.has-hover ? Theme.bg-panel : transparent;
+                            Text { text: "↗"; color: Theme.text-faint; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                            opta := TouchArea { clicked => { SearchStore.open-file(fi); } } }
+                        // Viewed checkbox
+                        Rectangle { width: 92px; height: 28px; y: (parent.height - 28px)/2; border-radius: Theme.r-sm;
+                            border-width: 1px; border-color: Theme.line;
+                            background: vwta.has-hover ? Theme.bg-panel : transparent;
+                            HorizontalLayout { alignment: center; spacing: 5px;
+                                Rectangle { width: 14px; height: 14px; y: (parent.height - 14px) / 2; border-radius: 4px;
+                                    border-width: 1.5px; border-color: file.viewed ? Theme.accent : Theme.line-strong;
+                                    background: file.viewed ? Theme.accent : transparent; }
+                                Text { text: "Viewed"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+                            vwta := TouchArea { clicked => { SearchStore.toggle-viewed(fi); } } }
+                    }
+                }
+                // matching lines
+                for line[li] in file.lines: Rectangle {
+                    height: 26px;
+                    HorizontalLayout {
+                        padding-left: 12px; spacing: 12px;
+                        Text { text: line.line-no; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            vertical-alignment: center; width: 48px; horizontal-alignment: right; }
+                        HorizontalLayout {
+                            spacing: 0px; horizontal-stretch: 1;
+                            Text { text: line.pre; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                vertical-alignment: center; overflow: elide; }
+                            Rectangle {
+                                background: Theme.accent.with-alpha(0.22); border-radius: 3px;
+                                Text { text: line.mid; color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                    vertical-alignment: center; } }
+                            Text { text: line.post; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                vertical-alignment: center; overflow: elide; }
+                            // sed replacement preview
+                            if line.replaced != "": Text { text: "  →  " + line.replaced; color: Theme.accent;
+                                font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+                Rectangle { height: 8px; }
+            }
+        }
+    }
+}

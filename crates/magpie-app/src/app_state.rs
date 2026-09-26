@@ -44,6 +44,11 @@ pub struct AppState {
     pub world_clock_cities: Mutex<Vec<String>>,
     pub wc_session_targets: Mutex<Vec<String>>,
     pub wc_chosen_hour: Mutex<i32>,
+    /// File search (screens 19/21/22/23): active locations, match/case mode, tab,
+    /// which files are marked "viewed", and the last result's file paths (in shown
+    /// order, for index→action). `search_gen` cancels a stale background run.
+    pub search: Mutex<SearchState>,
+    pub search_gen: std::sync::atomic::AtomicU64,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -63,6 +68,24 @@ pub struct AppState {
     /// `graph_g` empty = a single-function plot. Set when a graph is opened.
     pub calc_graph_f: Mutex<String>,
     pub calc_graph_g: Mutex<String>,
+}
+
+/// File-search session state (screens 19/21/22/23).
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    /// Active location chips (display form, e.g. `~/code/hobby/magpie`).
+    pub locations: Vec<String>,
+    /// 0 Text, 1 Regex, 2 Sed.
+    pub mode: i32,
+    /// 0 Smart, 1 Sensitive, 2 Insensitive.
+    pub case: i32,
+    /// 0 All, 1 Names, 2 Contents, 3 Documents.
+    pub tab: i32,
+    pub hide_viewed: bool,
+    /// Absolute paths marked "viewed".
+    pub viewed: std::collections::HashSet<String>,
+    /// The last result's file paths, in shown order (for index → action).
+    pub result_paths: Vec<String>,
 }
 
 /// One entry in the Data view's session recent-data rail.
@@ -145,6 +168,8 @@ mod tests {
             world_clock_cities: std::sync::Mutex::new(Vec::new()),
             wc_session_targets: std::sync::Mutex::new(Vec::new()),
             wc_chosen_hour: std::sync::Mutex::new(-1),
+            search: std::sync::Mutex::new(crate::app_state::SearchState::default()),
+            search_gen: std::sync::atomic::AtomicU64::new(0),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),
