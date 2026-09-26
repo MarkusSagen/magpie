@@ -96,6 +96,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         } else {
             magpie_core::projects::ConflictPolicy::Ask
         },
+        project_conflicts: std::sync::Mutex::new(Vec::new()),
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
             "today" => 1,
@@ -2619,12 +2620,26 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     }
 }
 
-/// Rescan (optionally) and populate the Projects view (screens 25/26).
+/// The task title on the first line of a conflict slice, for the banner summary:
+/// trims and strips a leading checkbox marker. Empty slice → "(removed)".
+fn conflict_line_label(slice: &str) -> String {
+    let first = slice.lines().next().unwrap_or("").trim();
+    if first.is_empty() {
+        return "(removed)".to_string();
+    }
+    for m in ["- [ ] ", "- [x] ", "- [X] ", "- [/] "] {
+        if let Some(rest) = first.strip_prefix(m) {
+            return rest.to_string();
+        }
+    }
+    first.to_string()
+}
+
 /// Toggle a project task line through the 3-way merge (Phase 18b). The merge pivot is
 /// the scan snapshot (the exact bytes the UI showed, so its line index aligns), and it
 /// reconciles against the current disk bytes so a concurrent external edit isn't
-/// clobbered. Writes the merged result, advances the stored baseline, and returns true
-/// if an unresolved conflict was held (Ask policy) so the caller can notify.
+/// clobbered. Writes the merged result, advances the stored baseline, and — under Ask
+/// — records an unresolved conflict for Review. Returns true if a conflict was held.
 fn toggle_project_task(
     state: &AppState,
     root: &std::path::Path,
@@ -2661,9 +2676,74 @@ fn toggle_project_task(
         let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
         let _ = store.set_project_baseline(&root_s, rel, nb, now_ms());
     }
-    !r.conflicts.is_empty()
+    // Update the Review queue for this file: clear any prior conflict, then record the
+    // new one (Ask only — FileWins/clean return no conflicts).
+    let mut cs = state
+        .project_conflicts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    cs.retain(|c| c.file_abs != file_abs);
+    if let Some(c0) = r.conflicts.first() {
+        cs.push(magpie_app::app_state::ProjConflict {
+            root: root.to_path_buf(),
+            rel: rel.to_string(),
+            file_abs: file_abs.to_path_buf(),
+            line: c0.line,
+            base: baseline,
+            mine,
+            disk,
+            summary: format!(
+                "Line {} changed in Magpie and on disk — “{}” vs “{}”",
+                c0.line,
+                conflict_line_label(&c0.mine),
+                conflict_line_label(&c0.theirs),
+            ),
+        });
+        return true;
+    }
+    false
 }
 
+/// Resolve the selected project's first pending conflict by writing the chosen side
+/// ("keep mine" or "keep disk"), advancing the baseline, and clearing it from the
+/// Review queue. Returns true if a conflict was resolved.
+fn resolve_project_conflict(state: &AppState, prefer_mine: bool) -> bool {
+    let root_path = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        let syncable: Vec<_> = g.hits.iter().filter(|h| h.syncable()).collect();
+        syncable
+            .get(g.selected.max(0) as usize)
+            .map(|h| h.path.clone())
+    };
+    let Some(root_path) = root_path else {
+        return false;
+    };
+    let conflict = {
+        let cs = state
+            .project_conflicts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cs.iter().find(|c| c.root == root_path).cloned()
+    };
+    let Some(c) = conflict else { return false };
+    let resolved = magpie_core::merge3::resolve(&c.base, &c.mine, &c.disk, prefer_mine);
+    if std::fs::write(&c.file_abs, &resolved).is_err() {
+        return false;
+    }
+    {
+        let root_s = c.root.to_string_lossy().to_string();
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = store.set_project_baseline(&root_s, &c.rel, &resolved, now_ms());
+    }
+    let mut cs = state
+        .project_conflicts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    cs.retain(|x| x.file_abs != c.file_abs);
+    true
+}
+
+/// Rescan (optionally) and populate the Projects view (screens 25/26).
 fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
     let ps = ui.global::<ProjectsStore>();
     ps.set_scanning(format!("Scanning {}", state.projects_roots.join(", ")).into());
@@ -2713,12 +2793,21 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
     };
     let (syncable, found): (Vec<_>, Vec<_>) = hits.iter().partition(|h| h.syncable());
 
+    // Pending conflicts (Phase 18b): mark their projects in the list + show the banner.
+    let conflicts = state
+        .project_conflicts
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default();
+    let conflict_roots: std::collections::HashSet<std::path::PathBuf> =
+        conflicts.iter().map(|c| c.root.clone()).collect();
+
     let list_row = |h: &magpie_app::projects::ProjectHit, is_found: bool| ProjectListRow {
         name: h.name.clone().into(),
         path: magpie_app::projects::display_path(&h.path).into(),
         badges: marker_badges(&h.markers).into(),
         open_count: format!("{} open", h.open_tasks()).into(),
-        conflict: false,
+        conflict: conflict_roots.contains(&h.path),
         found: is_found,
         extra: if is_found {
             format!("· {}", marker_badges(&h.markers))
@@ -2745,6 +2834,18 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
     }
     if let Some(h) = syncable.get(sel as usize) {
         ps.set_has_selection(true);
+        // Conflict banner for the selected project.
+        let sel_conflict = conflicts.iter().find(|c| c.root == h.path);
+        ps.set_detail_has_conflict(sel_conflict.is_some());
+        ps.set_conflict_summary(
+            sel_conflict
+                .map(|c| c.summary.clone())
+                .unwrap_or_default()
+                .into(),
+        );
+        if sel_conflict.is_none() {
+            ps.set_reviewing(false);
+        }
         ps.set_detail_name(h.name.clone().into());
         ps.set_detail_path(magpie_app::projects::display_path(&h.path).into());
         ps.set_detail_branch(if h.branch.is_empty() {
@@ -4933,8 +5034,25 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                                 g.hits = hits;
                                 g.file_snapshots = snapshots;
                             }
+                            // Demo conflict so the Review banner renders (PNG 25).
+                            if let Ok(mut cs) = st.project_conflicts.lock() {
+                                let root = base.join("magpie");
+                                cs.clear();
+                                cs.push(magpie_app::app_state::ProjConflict {
+                                    root: root.clone(),
+                                    rel: "TODO.md".into(),
+                                    file_abs: root.join("TODO.md"),
+                                    line: 14,
+                                    base: String::new(),
+                                    mine: String::new(),
+                                    disk: String::new(),
+                                    summary: "Line 14 changed in Magpie and on disk — \u{201c}Link favicons\u{201d} vs \u{201c}Link favicons + titles\u{201d}".into(),
+                                });
+                            }
                             ui.set_section(SharedString::from("projects"));
                             ui.set_view(SharedString::from("projects"));
+                            // Select the conflicted "magpie" project so its banner shows.
+                            ui.global::<ProjectsStore>().set_selected(3);
                             populate_projects(&ui, &st);
                         }
                         // Time tracking v2 (Phase 17): seed a running timer, open Time tab.
@@ -6041,6 +6159,70 @@ pub fn start() {
             };
             if let Some(p) = path {
                 let _ = std::process::Command::new("open").arg(&p).spawn();
+            }
+        });
+    }
+    // ---- Project sync conflict Review (Phase 18b, PNG 25) ----
+    {
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_review(move || {
+            if let Some(ui) = w.upgrade() {
+                let ps = ui.global::<ProjectsStore>();
+                ps.set_reviewing(!ps.get_reviewing());
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_resolve_mine(move || {
+            resolve_project_conflict(&s, true);
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_resolve_theirs(move || {
+            resolve_project_conflict(&s, false);
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<ProjectsStore>().on_resolve_edit(move || {
+            // Open the conflicted file in the editor for a manual merge, then drop it
+            // from the Review queue (the watcher picks up the hand-edited result).
+            let root = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.hits
+                    .iter()
+                    .filter(|h| h.syncable())
+                    .nth(g.selected.max(0) as usize)
+                    .map(|h| h.path.clone())
+            };
+            let file = root.and_then(|rp| {
+                let cs = s
+                    .project_conflicts
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                cs.iter().find(|c| c.root == rp).map(|c| c.file_abs.clone())
+            });
+            if let Some(f) = &file {
+                let _ = std::process::Command::new("open").arg("-t").arg(f).spawn();
+                let mut cs = s
+                    .project_conflicts
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                cs.retain(|c| Some(&c.file_abs) != file.as_ref());
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_projects(&ui, &s, true);
             }
         });
     }

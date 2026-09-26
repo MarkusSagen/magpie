@@ -76,6 +76,7 @@ fn state() -> AppState {
         projects_roots: Vec::new(),
         project_scan: std::sync::Mutex::new(magpie_app::app_state::ProjectScanState::default()),
         project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
+        project_conflicts: Mutex::new(Vec::new()),
         popover_default_tab: 3,
         open_with: std::collections::BTreeMap::new(),
         popover_pinned: std::sync::atomic::AtomicBool::new(false),

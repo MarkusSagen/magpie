@@ -164,8 +164,20 @@ fn build_region(base: &[&str], lo: usize, hi: usize, hunks: &[&Hunk]) -> String 
 /// Works from the two per-side hunk lists (`base→mine`, `base→theirs`). Insertions are
 /// attributed to gaps, so a disk insertion adjacent to a Magpie edit merges silently;
 /// a conflict is raised only when the two sides' changed base ranges actually overlap
-/// (or both insert different content at the same gap).
+/// (or both insert different content at the same gap). Conflict regions in `merged`
+/// take `theirs` (the File-wins / "keep disk" resolution).
 pub fn merge3(base: &str, mine: &str, theirs: &str) -> Merge3 {
+    merge3_with(base, mine, theirs, false)
+}
+
+/// The merged content with every conflict region resolved to one side: `prefer_mine`
+/// picks Magpie's version ("Keep mine" in Review), otherwise disk's ("Keep disk").
+/// Non-conflicting regions merge as usual.
+pub fn resolve(base: &str, mine: &str, theirs: &str, prefer_mine: bool) -> String {
+    merge3_with(base, mine, theirs, prefer_mine).merged
+}
+
+fn merge3_with(base: &str, mine: &str, theirs: &str, prefer_mine: bool) -> Merge3 {
     let b = split_keep_eol(base);
     let m = split_keep_eol(mine);
     let t = split_keep_eol(theirs);
@@ -285,11 +297,15 @@ pub fn merge3(base: &str, mine: &str, theirs: &str) -> Merge3 {
             } else {
                 conflicts.push(Conflict {
                     base: base_r,
-                    mine: mine_r,
+                    mine: mine_r.clone(),
                     theirs: theirs_r.clone(),
                     line: out_lines + 1,
                 });
-                emit_str!(&theirs_r);
+                if prefer_mine {
+                    emit_str!(&mine_r);
+                } else {
+                    emit_str!(&theirs_r);
+                }
             }
             p = hi;
             continue;
@@ -320,7 +336,11 @@ pub fn merge3(base: &str, mine: &str, theirs: &str) -> Merge3 {
                             theirs: ht.repl.concat(),
                             line: out_lines + 1,
                         });
-                        emit!(&ht.repl);
+                        if prefer_mine {
+                            emit!(&hm.repl);
+                        } else {
+                            emit!(&ht.repl);
+                        }
                     }
                     mi += 1;
                     ti += 1;
@@ -564,5 +584,45 @@ mod tests {
     fn empty_base_both_add_different_conflicts() {
         let r = merge3("", "- [ ] mine\n", "- [ ] theirs\n");
         assert_eq!(r.conflicts.len(), 1);
+    }
+
+    // ---- resolve (Review: keep mine / keep disk) ----
+
+    #[test]
+    fn resolve_picks_the_chosen_side_for_conflicts() {
+        let base = "- [ ] a\n- [ ] task\n- [ ] c\n";
+        let mine = "- [ ] a\n- [x] task\n- [ ] c\n";
+        let disk = "- [ ] a\n- [ ] task edited\n- [ ] c\n";
+        // Keep disk == the default merged.
+        assert_eq!(resolve(base, mine, disk, false), disk);
+        assert_eq!(
+            resolve(base, mine, disk, false),
+            merge3(base, mine, disk).merged
+        );
+        // Keep mine substitutes Magpie's line, preserving the rest.
+        assert_eq!(
+            resolve(base, mine, disk, true),
+            "- [ ] a\n- [x] task\n- [ ] c\n"
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_disjoint_edits_but_takes_whole_conflict_region() {
+        // Magpie toggled line 0 (disjoint) and line 1; disk edited lines 1 and 2, so
+        // the b/c edits chain with mine's b edit into one conflict region.
+        let base = "- [ ] a\n- [ ] b\n- [ ] c\n";
+        let mine = "- [x] a\n- [x] b\n- [ ] c\n";
+        let disk = "- [ ] a\n- [ ] b renamed\n- [ ] c done?\n";
+        // mine's contiguous a+b edit is one hunk that overlaps disk's b+c edit, so the
+        // whole [0..3) is one conflict region taken wholesale from the chosen side —
+        // you can't cherry-pick within a hunk.
+        assert_eq!(
+            resolve(base, mine, disk, true),
+            "- [x] a\n- [x] b\n- [ ] c\n"
+        );
+        assert_eq!(
+            resolve(base, mine, disk, false),
+            "- [ ] a\n- [ ] b renamed\n- [ ] c done?\n"
+        );
     }
 }

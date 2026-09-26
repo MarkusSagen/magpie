@@ -99,6 +99,66 @@ export component ProjectsView inherits HorizontalLayout {
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
+            // Sync conflict banner + Review (PNG 25). Accent outline; "Review" reveals
+            // the keep-mine / keep-disk / edit choices.
+            if ProjectsStore.detail-has-conflict: Rectangle {
+                background: Theme.bg-panel;
+                border-radius: Theme.r-md;
+                border-width: 1px;
+                border-color: Theme.accent;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: ProjectsStore.conflict-summary;
+                            color: Theme.text;
+                            font-size: Theme.fs-body;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 84px;
+                            height: 30px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: Theme.r-sm;
+                            background: revta.has-hover ? Theme.bg-elevated : Theme.bg-app;
+                            border-width: 1px;
+                            border-color: Theme.line-strong;
+                            revta := TouchArea { clicked => { ProjectsStore.review(); } }
+                            Text { text: "Review"; color: Theme.text; font-size: Theme.fs-sm;
+                                horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    if ProjectsStore.reviewing: HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        for choice in [
+                            { label: "Keep mine", act: "mine" },
+                            { label: "Keep disk", act: "theirs" },
+                            { label: "Edit merged", act: "edit" },
+                        ]: Rectangle {
+                            width: 108px;
+                            height: 28px;
+                            border-radius: Theme.r-sm;
+                            background: chta.has-hover ? Theme.bg-elevated : transparent;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            chta := TouchArea {
+                                clicked => {
+                                    if (choice.act == "mine") { ProjectsStore.resolve-mine(); }
+                                    if (choice.act == "theirs") { ProjectsStore.resolve-theirs(); }
+                                    if (choice.act == "edit") { ProjectsStore.resolve-edit(); }
+                                }
+                            }
+                            Text { text: choice.label; color: Theme.text-dim; font-size: Theme.fs-sm;
+                                horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
             // Tasks grouped by source file.
             ListView {
                 vertical-stretch: 1;

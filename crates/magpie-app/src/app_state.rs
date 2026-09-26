@@ -62,6 +62,8 @@ pub struct AppState {
     pub project_scan: Mutex<ProjectScanState>,
     /// How overlapping project-file edits resolve (Phase 18b): Ask or FileWins.
     pub project_conflict_policy: magpie_core::projects::ConflictPolicy,
+    /// Unresolved project-file conflicts awaiting Review (Phase 18b).
+    pub project_conflicts: Mutex<Vec<ProjConflict>>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
@@ -107,6 +109,22 @@ pub struct ProjectScanState {
     /// Sync snapshot per task file (`file_abs` → exact bytes read at scan): the merge
     /// pivot whose line indices match the displayed tasks (Phase 18b).
     pub file_snapshots: std::collections::HashMap<std::path::PathBuf, String>,
+}
+
+/// An unresolved project-file sync conflict awaiting Review (Phase 18b, PNG 25).
+#[derive(Debug, Clone)]
+pub struct ProjConflict {
+    pub root: std::path::PathBuf,
+    pub rel: String,
+    pub file_abs: std::path::PathBuf,
+    /// 1-based line where the conflict begins (for the banner).
+    pub line: usize,
+    /// Full-file versions, so Review can write a "keep mine" / "keep disk" resolution.
+    pub base: String,
+    pub mine: String,
+    pub disk: String,
+    /// One-line banner summary: `Line N changed in Magpie and on disk — "x" vs "y"`.
+    pub summary: String,
 }
 
 /// Pomodoro countdown state (screen 24). Focus 25 / break 5 / long break 15 every 4.
@@ -269,6 +287,7 @@ mod tests {
             projects_roots: Vec::new(),
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
             project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
+            project_conflicts: std::sync::Mutex::new(Vec::new()),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),

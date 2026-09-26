@@ -15,6 +15,10 @@ export global ProjectsStore {
     in-out property <string> detail-week;
     in-out property <[ProjTaskRow]> detail-tasks;
     in-out property <string> scanning;
+    // Sync conflict banner + Review (Phase 18b, PNG 25).
+    in-out property <bool> detail-has-conflict;
+    in-out property <string> conflict-summary;
+    in-out property <bool> reviewing;   // Review expanded to show resolution choices
 
     callback select(int);
     callback add-found(int);
@@ -23,4 +27,8 @@ export global ProjectsStore {
     callback open-task(int);      // open the file at file:line in the editor
     callback open-folder();
     callback rescan();
+    callback review();            // toggle the Review choices open/closed
+    callback resolve-mine();      // keep Magpie's version
+    callback resolve-theirs();    // keep the disk version
+    callback resolve-edit();      // open the file in the editor to merge by hand
 }
