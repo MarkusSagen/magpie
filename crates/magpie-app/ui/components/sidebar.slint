@@ -1,7 +1,23 @@
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Icons } from "../icons.slint";
 import { Palette, FavoriteRow } from "../types.slint";
 import { HintText } from "keycap.slint";
+
+// A collapsible group header (Phase 19, screen 27): uppercase label + a chevron
+// that rotates when collapsed. Click toggles `collapsed`.
+component GroupHeader inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> collapsed;
+    height: 26px;
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 8px;
+        Text { text: root.label; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600;
+            vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.collapsed ? "▸" : "▾"; color: Theme.text-faint; font-size: 9px; vertical-alignment: center; }
+    }
+    TouchArea { clicked => { root.collapsed = !root.collapsed; } }
+}
 
 // One navigation row: icon + label + `G x` hint. Active = `bg-elevated` fill.
 component NavItem inherits Rectangle {
@@ -57,6 +73,11 @@ export component Sidebar inherits Rectangle {
     in property <bool> show-snippets;       // reveal Snippets (screen 20)
     in property <bool> show-files;          // reveal Files (screens 19/21/22/23)
     in property <bool> show-projects;       // reveal Projects (screens 25/26)
+    // Collapsible group state (Phase 19, screen 27) — session-scoped.
+    in-out property <bool> grp-capture-collapsed;
+    in-out property <bool> grp-organize-collapsed;
+    in-out property <bool> grp-tools-collapsed;
+    in-out property <bool> grp-favorites-collapsed;
     in property <int> theme-index;
     callback set-section(string);
     callback set-theme(int);
@@ -102,72 +123,98 @@ export component Sidebar inherits Rectangle {
         }
         Rectangle { height: 8px; }
 
-        NavItem {
-            label: "Clipboard"; icon: Icons.tab-clipboard; hint: "G C"; cmd-held: root.cmd-held;
-            active: root.section == "clipboard"; clicked => { root.set-section("clipboard"); }
-        }
-        NavItem {
-            label: "Tasks"; icon: Icons.tab-tasks; hint: "G T"; cmd-held: root.cmd-held;
-            active: root.section == "tasks"; clicked => { root.set-section("tasks"); }
-        }
-        NavItem {
-            label: "Notes"; icon: Icons.tab-notes; hint: "G N"; cmd-held: root.cmd-held;
-            active: root.section == "notes"; clicked => { root.set-section("notes"); }
-        }
-        if root.show-snippets: NavItem {
-            label: "Snippets"; icon: Icons.act-note; hint: "G X"; cmd-held: root.cmd-held;
-            active: root.section == "snippets"; clicked => { root.set-section("snippets"); }
-        }
-        NavItem {
-            label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
-            active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
-        }
-        if root.show-files: NavItem {
-            label: "Files"; icon: Icons.search; hint: "G F"; cmd-held: root.cmd-held;
-            active: root.section == "files"; clicked => { root.set-section("files"); }
-        }
-        if root.show-projects: NavItem {
-            label: "Projects"; icon: Icons.tab-clipboard; hint: "G P"; cmd-held: root.cmd-held;
-            active: root.section == "projects"; clicked => { root.set-section("projects"); }
-        }
-        if root.show-calc-data: NavItem {
-            label: "Calculator"; icon: Icons.tab-stats; hint: "G ="; cmd-held: root.cmd-held;
-            active: root.section == "calculator"; clicked => { root.set-section("calculator"); }
-        }
-        if root.show-data: NavItem {
-            label: "Data"; icon: Icons.tab-stats; hint: "G D"; cmd-held: root.cmd-held;
-            active: root.section == "data"; clicked => { root.set-section("data"); }
-        }
-        NavItem {
-            label: "Stats"; icon: Icons.tab-stats; hint: "G S"; cmd-held: root.cmd-held;
-            active: root.section == "stats"; clicked => { root.set-section("stats"); }
-        }
+        // Grouped, collapsible nav (Phase 19). The list scrolls; the wordmark above
+        // and the timer/Settings/status below stay pinned.
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 2px;
 
-        // Favorites group (Phase 10): pinned entries / quicklinks.
-        if root.favorites.length > 0: VerticalLayout {
-            padding-top: 12px;
-            spacing: 1px;
-            Text { text: "Favorites"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600;
-                x: 10px; }
-            for f[i] in root.favorites: Rectangle {
-                height: 30px;
-                border-radius: Theme.r-sm;
-                background: favta.has-hover ? Theme.bg-elevated : transparent;
-                favta := TouchArea { clicked => { root.activate-favorite(f.id); } }
-                HorizontalLayout {
-                    padding-left: 10px; padding-right: 10px; spacing: 8px;
-                    VerticalLayout { alignment: center;
-                        Text { text: f.kind == "quicklink" || f.kind == "bookmark" ? "↗" : (f.kind == "note" ? "◇" : (f.kind == "search" ? "⌕" : "★"));
-                            color: Theme.text-faint; font-size: 12px; } }
-                    Text { text: f.label; color: Theme.text-dim; font-size: Theme.fs-body;
-                        vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
-                    if f.keyword != "": Text { text: f.keyword; color: Theme.text-ghost;
-                        font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+                // CAPTURE
+                GroupHeader { label: "CAPTURE"; collapsed <=> root.grp-capture-collapsed; }
+                if !root.grp-capture-collapsed: VerticalLayout {
+                    spacing: 2px;
+                    NavItem {
+                        label: "Clipboard"; icon: Icons.tab-clipboard; hint: "G C"; cmd-held: root.cmd-held;
+                        active: root.section == "clipboard"; clicked => { root.set-section("clipboard"); }
+                    }
+                    if root.show-snippets: NavItem {
+                        label: "Snippets"; icon: Icons.act-note; hint: "G X"; cmd-held: root.cmd-held;
+                        active: root.section == "snippets"; clicked => { root.set-section("snippets"); }
+                    }
                 }
+
+                // ORGANIZE
+                Rectangle { height: 8px; }
+                GroupHeader { label: "ORGANIZE"; collapsed <=> root.grp-organize-collapsed; }
+                if !root.grp-organize-collapsed: VerticalLayout {
+                    spacing: 2px;
+                    NavItem {
+                        label: "Notes"; icon: Icons.tab-notes; hint: "G N"; cmd-held: root.cmd-held;
+                        active: root.section == "notes"; clicked => { root.set-section("notes"); }
+                    }
+                    NavItem {
+                        label: "Tasks"; icon: Icons.tab-tasks; hint: "G T"; cmd-held: root.cmd-held;
+                        active: root.section == "tasks"; clicked => { root.set-section("tasks"); }
+                    }
+                    if root.show-projects: NavItem {
+                        label: "Projects"; icon: Icons.tab-clipboard; hint: "G P"; cmd-held: root.cmd-held;
+                        active: root.section == "projects"; clicked => { root.set-section("projects"); }
+                    }
+                    NavItem {
+                        label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
+                        active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
+                    }
+                }
+
+                // TOOLS
+                Rectangle { height: 8px; }
+                GroupHeader { label: "TOOLS"; collapsed <=> root.grp-tools-collapsed; }
+                if !root.grp-tools-collapsed: VerticalLayout {
+                    spacing: 2px;
+                    if root.show-files: NavItem {
+                        label: "Files"; icon: Icons.search; hint: "G F"; cmd-held: root.cmd-held;
+                        active: root.section == "files"; clicked => { root.set-section("files"); }
+                    }
+                    if root.show-calc-data: NavItem {
+                        label: "Calculator"; icon: Icons.tab-stats; hint: "G ="; cmd-held: root.cmd-held;
+                        active: root.section == "calculator"; clicked => { root.set-section("calculator"); }
+                    }
+                    if root.show-data: NavItem {
+                        label: "Data"; icon: Icons.tab-stats; hint: "G D"; cmd-held: root.cmd-held;
+                        active: root.section == "data"; clicked => { root.set-section("data"); }
+                    }
+                    NavItem {
+                        label: "Stats"; icon: Icons.tab-stats; hint: "G S"; cmd-held: root.cmd-held;
+                        active: root.section == "stats"; clicked => { root.set-section("stats"); }
+                    }
+                }
+
+                // FAVORITES (Phase 10): pinned entries / quicklinks.
+                if root.favorites.length > 0: Rectangle { height: 8px; }
+                if root.favorites.length > 0: GroupHeader { label: "FAVORITES"; collapsed <=> root.grp-favorites-collapsed; }
+                if root.favorites.length > 0 && !root.grp-favorites-collapsed: VerticalLayout {
+                    spacing: 1px;
+                    for f[i] in root.favorites: Rectangle {
+                        height: 30px;
+                        border-radius: Theme.r-sm;
+                        background: favta.has-hover ? Theme.bg-elevated : transparent;
+                        favta := TouchArea { clicked => { root.activate-favorite(f.id); } }
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px; spacing: 8px;
+                            VerticalLayout { alignment: center;
+                                Text { text: f.kind == "quicklink" || f.kind == "bookmark" ? "↗" : (f.kind == "note" ? "◇" : (f.kind == "search" ? "⌕" : "★"));
+                                    color: Theme.text-faint; font-size: 12px; } }
+                            Text { text: f.label; color: Theme.text-dim; font-size: Theme.fs-body;
+                                vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                            if f.keyword != "": Text { text: f.keyword; color: Theme.text-ghost;
+                                font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
             }
         }
-
-        Rectangle { vertical-stretch: 1; }
 
         // Bottom: Shortcuts / Settings + status row.
         NavItem {
