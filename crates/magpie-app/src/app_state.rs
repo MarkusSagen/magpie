@@ -37,6 +37,13 @@ pub struct AppState {
     /// Region for locale-dependent holiday answers (from `Config::holiday_region`);
     /// parsed to `magpie_core::holidays::Region` when building the date card.
     pub holiday_region: String,
+    /// World clock (screen 16): home zone (session-immutable), the persisted city
+    /// list, the current query's target zones (shown on top of the list), and the
+    /// chosen 24-hour-strip hour (`-1` = follow the current home hour).
+    pub world_clock_home: String,
+    pub world_clock_cities: Mutex<Vec<String>>,
+    pub wc_session_targets: Mutex<Vec<String>>,
+    pub wc_chosen_hour: Mutex<i32>,
     /// Keyboard-nav history: screens (`(section, view)`) visited before the
     /// current one (`⌘[` pops here), most-recent last.
     pub nav_back: Mutex<Vec<(String, String)>>,
@@ -134,6 +141,10 @@ mod tests {
             log_clock_entries: true,
             theme: "dark".into(),
             holiday_region: "SE".into(),
+            world_clock_home: "Europe/Stockholm".into(),
+            world_clock_cities: std::sync::Mutex::new(Vec::new()),
+            wc_session_targets: std::sync::Mutex::new(Vec::new()),
+            wc_chosen_hour: std::sync::Mutex::new(-1),
             nav_back: std::sync::Mutex::new(Vec::new()),
             nav_fwd: std::sync::Mutex::new(Vec::new()),
             data_input: std::sync::Mutex::new(String::new()),

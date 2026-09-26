@@ -1,0 +1,14 @@
+import { WorldClockRow } from "types.slint";
+
+// World clock state (screen 16). A global so Rust populates it and the World clock
+// tab reads it directly (mirrors DataStore / DateStore). Map is deferred; this is
+// the city list + home-aligned 24-hour strip.
+export global WorldClockStore {
+    in-out property <[WorldClockRow]> rows;
+    in-out property <int> chosen-hour;   // 0–23, the accent column across all rows
+    in-out property <string> summary;    // one-line paste summary
+    callback shift-hour(int);            // -1 / +1
+    callback set-hour(int);              // click a column to pick that hour
+    callback add-city();
+    callback copy-summary();
+}

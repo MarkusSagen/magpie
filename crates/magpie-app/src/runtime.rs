@@ -3,7 +3,7 @@ use crate::{
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, NoteRow, Popover,
     RecentData, RefRow, SearchBookmarkRow, SearchNoteRow, SearchTaskRow, SlotItem, TaskRow,
-    TimeEntryRow,
+    TimeEntryRow, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -74,6 +74,10 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         log_clock_entries: cfg.log_clock_entries,
         theme: cfg.theme.clone(),
         holiday_region: cfg.holiday_region.clone(),
+        world_clock_home: cfg.world_clock_home.clone(),
+        world_clock_cities: std::sync::Mutex::new(cfg.world_clock_cities.clone()),
+        wc_session_targets: std::sync::Mutex::new(Vec::new()),
+        wc_chosen_hour: std::sync::Mutex::new(-1),
         nav_back: std::sync::Mutex::new(Vec::new()),
         nav_fwd: std::sync::Mutex::new(Vec::new()),
         data_input: std::sync::Mutex::new(String::new()),
@@ -464,7 +468,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
 
     // Inline answer card (dates / math / units) for the current query.
     let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
-    set_answer_card(ui, &query);
+    set_answer_card(ui, state, &query);
     // Full date answer + calendar (screen 15) when the query resolves to a date.
     populate_date_card(ui, state, 0);
     set_quicklink_hint(ui, state, &query);
@@ -533,7 +537,7 @@ fn answer_kind_label(kind: &magpie_core::eval::AnswerKind) -> &'static str {
 /// card when the query is not answer-like (or evaluates to an error). The selected
 /// format index is only clamped here — it is reset to 0 by `on_search_changed` when
 /// the query text actually changes, so Tab cycling survives background refreshes.
-fn set_answer_card(ui: &LauncherWindow, query: &str) {
+fn set_answer_card(ui: &LauncherWindow, state: &AppState, query: &str) {
     use magpie_core::eval;
     let answer = if eval::is_answer_like(query) {
         eval::evaluate(
@@ -566,8 +570,84 @@ fn set_answer_card(ui: &LauncherWindow, query: &str) {
         }
         // Not a date/math answer — is it a random-generation request?
         _ if set_random_answer(ui, query) => {}
+        // …or a world-clock query (time in X)?
+        _ if set_worldclock_answer(ui, state, query) => {}
         _ => ui.set_has_answer(false),
     }
+}
+
+/// If `query` is a world-clock query (`time in tokyo`, `3pm pst to cet`), show the
+/// summary line in the inline answer card (↵ pastes it) and feed the query's
+/// target cities into the World clock tab. Returns `true` on a match.
+fn set_worldclock_answer(ui: &LauncherWindow, state: &AppState, query: &str) -> bool {
+    use magpie_core::worldclock;
+    let Some(req) = worldclock::parse_worldclock(query) else {
+        // Leaving a world-clock query clears its session targets (drop the lock
+        // before refreshing — `refresh_worldclock` re-locks the same mutex).
+        let had = {
+            let mut t = match state.wc_session_targets.lock() {
+                Ok(t) => t,
+                Err(_) => return false,
+            };
+            let had = !t.is_empty();
+            t.clear();
+            had
+        };
+        if had {
+            refresh_worldclock(ui, state);
+        }
+        return false;
+    };
+    // Record the query's targets so the World clock tab includes them, and set the
+    // strip hour from an explicit base time if given.
+    if let Ok(mut t) = state.wc_session_targets.lock() {
+        *t = req.targets.clone();
+    }
+    if let Some((h, _)) = req.base_hm {
+        if let Ok(mut c) = state.wc_chosen_hour.lock() {
+            *c = h as i32;
+        }
+    }
+    refresh_worldclock(ui, state);
+
+    // Inline answer: the summary line for the queried cities.
+    let epoch = now_ms() / 1000;
+    let home = req
+        .base_zone
+        .clone()
+        .unwrap_or_else(|| state.world_clock_home.clone());
+    let chosen = state
+        .wc_chosen_hour
+        .lock()
+        .map(|h| *h)
+        .ok()
+        .filter(|h| *h >= 0)
+        .map(|h| h as u32)
+        .unwrap_or_else(|| worldclock::home_current_hour(&home, epoch));
+    let wc = worldclock::compute(&home, &req.targets, epoch, chosen);
+    let summary = worldclock::summary_line(&wc);
+    // Headline = the first target's time.
+    let display = wc
+        .rows
+        .iter()
+        .find(|r| !r.is_home)
+        .or_else(|| wc.rows.first())
+        .map(|r| format!("{} {}", r.name, r.big_time))
+        .unwrap_or_default();
+    ui.set_answer_kind(SharedString::from("World clock"));
+    ui.set_answer_display(SharedString::from(display));
+    ui.set_answer_explanation(SharedString::from(
+        "Open Calculator → World clock for the full grid",
+    ));
+    ui.set_answer_formats(ModelRc::new(VecModel::from(vec![SharedString::from(
+        summary,
+    )])));
+    if ui.get_answer_format_index() >= 1 {
+        ui.set_answer_format_index(0);
+    }
+    ui.set_answer_random(false);
+    ui.set_has_answer(true);
+    true
 }
 
 /// If `query` is a random-generation command (`password 24`, `uuid`, `2d6`,
@@ -924,6 +1004,75 @@ fn month_name_short(m: u32) -> &'static str {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     N[(m.clamp(1, 12) - 1) as usize]
+}
+
+/// Recompute the World clock (screen 16) from config cities + the current query's
+/// session targets, at the chosen strip hour, and push it into `WorldClockStore`.
+fn refresh_worldclock(ui: &LauncherWindow, state: &AppState) {
+    use magpie_core::worldclock;
+    let epoch = now_ms() / 1000;
+    let home = state.world_clock_home.clone();
+    // Config cities + this query's session targets (deduped by compute()).
+    let mut cities: Vec<String> = state
+        .world_clock_cities
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default();
+    if let Ok(t) = state.wc_session_targets.lock() {
+        for id in t.iter() {
+            if !cities.contains(id) {
+                cities.push(id.clone());
+            }
+        }
+    }
+    let chosen = state.wc_chosen_hour.lock().map(|h| *h).unwrap_or(-1);
+    let chosen = if chosen < 0 {
+        worldclock::home_current_hour(&home, epoch)
+    } else {
+        chosen as u32
+    };
+    let wc = worldclock::compute(&home, &cities, epoch, chosen);
+
+    let rows: Vec<WorldClockRow> = wc
+        .rows
+        .iter()
+        .map(|r| {
+            let hh = r.rel_minutes / 60;
+            let mm = (r.rel_minutes % 60).abs();
+            let rel_label = if r.is_home {
+                "you".to_string()
+            } else if mm == 0 {
+                format!("{hh:+}h")
+            } else {
+                format!("{hh:+}h{mm:02}")
+            };
+            let off_h = r.offset_minutes / 60;
+            let off_m = (r.offset_minutes % 60).abs();
+            let offset_label = if off_m == 0 {
+                format!("{off_h:+}")
+            } else {
+                format!("{off_h:+}:{off_m:02}")
+            };
+            let hours: Vec<i32> = r.hours.iter().map(|h| *h as i32).collect();
+            let shades: Vec<i32> = r.shades.iter().map(|s| *s as i32).collect();
+            WorldClockRow {
+                name: r.name.clone().into(),
+                abbrev: r.abbrev.clone().into(),
+                offset_label: offset_label.into(),
+                rel_label: rel_label.into(),
+                big_time: r.big_time.clone().into(),
+                date_label: r.date_label.clone().into(),
+                is_home: r.is_home,
+                hours: ModelRc::new(VecModel::from(hours)),
+                shades: ModelRc::new(VecModel::from(shades)),
+            }
+        })
+        .collect();
+
+    let store = ui.global::<WorldClockStore>();
+    store.set_chosen_hour(wc.chosen_hour as i32);
+    store.set_summary(worldclock::summary_line(&wc).into());
+    store.set_rows(ModelRc::new(VecModel::from(rows)));
 }
 
 /// A built-in sample dataset (NASA planetary fact sheet) shown the first time the
@@ -3390,6 +3539,14 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // World clock (Phase 12): Calculator → World clock tab.
+                        "worldclock" => {
+                            let q = SharedString::from("time in tokyo");
+                            ui.set_query(q.clone());
+                            ui.invoke_search_changed(q);
+                            ui.invoke_set_section(SharedString::from("calculator"));
+                            ui.global::<CalcStore>().invoke_open_worldclock();
+                        }
                         // Data view: the typed grid (13), optionally with the chart (14).
                         "data" => {
                             ui.invoke_set_section(SharedString::from("data"));
@@ -3633,6 +3790,94 @@ pub fn start() {
         ui.global::<DateStore>().on_set_eve(move |i| {
             if let Some(ui) = w.upgrade() {
                 populate_date_card(&ui, &s, i);
+            }
+        });
+    }
+    // ---- World clock (screen 16) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<CalcStore>().on_open_worldclock(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<CalcStore>().set_worldclock_open(true);
+                refresh_worldclock(&ui, &s);
+            }
+        });
+    }
+    {
+        ui.global::<CalcStore>().on_close_worldclock(move || {});
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<WorldClockStore>().on_shift_hour(move |d| {
+            let cur = {
+                let epoch = now_ms() / 1000;
+                let stored = s.wc_chosen_hour.lock().map(|h| *h).unwrap_or(-1);
+                if stored < 0 {
+                    magpie_core::worldclock::home_current_hour(&s.world_clock_home, epoch) as i32
+                } else {
+                    stored
+                }
+            };
+            let next = (cur + d).rem_euclid(24);
+            if let Ok(mut h) = s.wc_chosen_hour.lock() {
+                *h = next;
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_worldclock(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<WorldClockStore>().on_set_hour(move |h| {
+            if let Ok(mut c) = s.wc_chosen_hour.lock() {
+                *c = h.clamp(0, 23);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_worldclock(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<WorldClockStore>().on_add_city(move || {
+            // Add the currently-typed city (if it resolves) to the persisted list.
+            let query = w
+                .upgrade()
+                .map(|ui| ui.get_query().to_string())
+                .unwrap_or_default();
+            let name = query.trim();
+            if let Some(tz) = magpie_core::worldclock::resolve_zone(name) {
+                let id = tz.name().to_string();
+                if let Ok(mut c) = s.world_clock_cities.lock() {
+                    if !c.contains(&id) {
+                        c.push(id);
+                        let cfg_path = data_dir().join("config.toml");
+                        let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+                        cfg.world_clock_cities = c.clone();
+                        let _ = magpie_app::config::save(&cfg, &cfg_path);
+                    }
+                }
+                if let Some(ui) = w.upgrade() {
+                    refresh_worldclock(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<WorldClockStore>().on_copy_summary(move || {
+            if let Some(ui) = w.upgrade() {
+                let summary = ui.global::<WorldClockStore>().get_summary().to_string();
+                if !summary.is_empty() {
+                    if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                        let _ = clip.set_text(&summary);
+                    }
+                }
             }
         });
     }

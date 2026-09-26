@@ -268,3 +268,16 @@ export struct CalMonthLabel {
     label: string,      // "Jan"
     col: int,           // heatmap column the month starts in
 }
+
+// ---- World clock (Phase 12, PNG 16) ----
+export struct WorldClockRow {
+    name: string,
+    abbrev: string,        // "CEST"
+    offset-label: string,  // "+2"
+    rel-label: string,     // "you" / "-1h" / "+7h"
+    big-time: string,      // "15:00"
+    date-label: string,    // "Fri 25 Sep"
+    is-home: bool,
+    hours: [int],          // 24 local-hour labels, aligned to the home day
+    shades: [int],         // 24 shade bands: 0 night, 1 awake, 2 work
+}

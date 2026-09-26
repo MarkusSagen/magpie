@@ -42,6 +42,7 @@ pub mod table;
 pub mod tags;
 pub mod transforms;
 pub mod vault;
+pub mod worldclock;
 
 pub use bookmarks::{read_firefox_bookmarks, Bookmark};
 pub use detect::Kind;

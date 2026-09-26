@@ -3,7 +3,8 @@ import { Theme } from "../theme.slint";
 import { Keycap } from "../components/keycap.slint";
 import { AnswerCard } from "../components/answer_card.slint";
 import { CalcStore } from "../calc_store.slint";
-import { CalcRow, ChartPoint } from "../types.slint";
+import { WorldClockStore } from "../worldclock_store.slint";
+import { CalcRow, ChartPoint, WorldClockRow } from "../types.slint";
 
 // Calculator view (screens 11 + 12). History mode shows the answer card + a
 // day-grouped history list; Graphs mode plots saved functions. All state is in
@@ -20,8 +21,109 @@ export component CalcView inherits VerticalLayout {
     padding: 16px;
     spacing: 12px;
 
+    // Mode tabs: History · Graphs · World clock (screen 16).
+    HorizontalLayout {
+        spacing: 6px;
+        for t[i] in ["History", "Graphs", "World clock"]: Rectangle {
+            property <bool> active: (i == 0 && !CalcStore.graphs-open && !CalcStore.worldclock-open)
+                || (i == 1 && CalcStore.graphs-open)
+                || (i == 2 && CalcStore.worldclock-open);
+            height: 34px;
+            width: 116px;
+            border-radius: Theme.r-sm;
+            background: active ? Theme.bg-elevated : (mta.has-hover ? Theme.bg-elevated : transparent);
+            mta := TouchArea {
+                clicked => {
+                    if i == 0 {
+                        CalcStore.close-graphs();
+                        CalcStore.close-worldclock();
+                    } else if i == 1 {
+                        CalcStore.close-worldclock();
+                        CalcStore.graphs-open = true;
+                    } else {
+                        CalcStore.close-graphs();
+                        CalcStore.open-worldclock();
+                    }
+                }
+            }
+            Text {
+                text: t;
+                color: active ? Theme.text : Theme.text-dim;
+                font-size: Theme.fs-body;
+                font-weight: active ? 600 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        // Add city (world-clock mode only).
+        if CalcStore.worldclock-open: Rectangle {
+            height: 34px;
+            width: 120px;
+            border-radius: Theme.r-sm;
+            background: aca.has-hover ? Theme.bg-elevated : transparent;
+            border-width: 1px;
+            border-color: Theme.line;
+            aca := TouchArea { clicked => { WorldClockStore.add-city(); } }
+            HorizontalLayout {
+                alignment: center; spacing: 6px;
+                Text { text: "+ Add city"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+        }
+    }
+
+    // ======================== WORLD CLOCK (16) =========================
+    if CalcStore.worldclock-open: VerticalLayout {
+        spacing: 2px;
+        for row[ri] in WorldClockStore.rows: Rectangle {
+            height: 54px;
+            border-radius: Theme.r-sm;
+            background: row.is-home ? Theme.bg-elevated : transparent;
+            border-width: row.is-home ? 1px : 0px;
+            border-color: Theme.accent;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 12px; spacing: 10px;
+                // City name.
+                Text { text: row.name; color: Theme.text; font-size: Theme.fs-body; font-weight: 500;
+                    vertical-alignment: center; width: 116px; overflow: elide; }
+                // Abbrev · offset.
+                Text { text: row.abbrev + " · " + row.offset-label; color: Theme.text-dim;
+                    font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; width: 92px; }
+                // Relative to home.
+                Text { text: row.rel-label; color: Theme.text-faint; font-family: "Geist Mono";
+                    font-size: Theme.fs-sm; vertical-alignment: center; width: 44px; }
+                // Big local time.
+                Text { text: row.big-time; color: Theme.text; font-size: 20px; font-weight: 700;
+                    vertical-alignment: center; width: 72px; }
+                // 24-hour strip aligned to the home day.
+                HorizontalLayout {
+                    spacing: 1px;
+                    for h[c] in row.hours: Rectangle {
+                        horizontal-stretch: 1;
+                        height: 30px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: Theme.r-xs;
+                        background: row.shades[c] == 2 ? Theme.bg-elevated
+                            : (row.shades[c] == 1 ? Theme.bg-panel : Theme.bg-sidebar);
+                        border-width: c == WorldClockStore.chosen-hour ? 1px : 0px;
+                        border-color: Theme.accent;
+                        Text {
+                            text: h;
+                            color: c == WorldClockStore.chosen-hour ? Theme.text : Theme.text-faint;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { WorldClockStore.set-hour(c); } }
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+
     // ============================ HISTORY (11) ============================
-    if !CalcStore.graphs-open: VerticalLayout {
+    if !CalcStore.graphs-open && !CalcStore.worldclock-open: VerticalLayout {
         spacing: 12px;
         // Filter tabs + Clear.
         HorizontalLayout {

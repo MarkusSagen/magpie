@@ -62,6 +62,14 @@ pub struct Config {
     /// Christmas eve switch and holiday labels in the date answer card.
     #[serde(default)]
     pub holiday_region: String,
+    /// Home zone for the world clock (an IANA id or a city name). Empty → the
+    /// starter default. Marked "you" and used as the 24-hour strip's day anchor.
+    #[serde(default)]
+    pub world_clock_home: String,
+    /// Cities shown in the world clock (IANA ids or city names), persisted as you
+    /// Add/remove them. Empty → a starter set on first load.
+    #[serde(default)]
+    pub world_clock_cities: Vec<String>,
 }
 
 fn default_mask_visible_chars() -> i64 {
@@ -94,8 +102,25 @@ impl Default for Config {
             theme_dark: true,
             theme: "dark".into(),
             holiday_region: String::new(),
+            world_clock_home: String::new(),
+            world_clock_cities: Vec::new(),
         }
     }
+}
+
+/// The world-clock starter set used when the config has none yet (matches the
+/// reference screen). IANA ids so they're unambiguous across locales.
+pub fn default_world_clock_cities() -> Vec<String> {
+    [
+        "Europe/London",
+        "America/New_York",
+        "America/Los_Angeles",
+        "Asia/Tokyo",
+        "Australia/Sydney",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 /// Detect the OS locale for a first-run `holiday_region` default. Reads the usual
@@ -125,6 +150,13 @@ pub fn load_or_default(path: &Path) -> Config {
         cfg.holiday_region = magpie_core::holidays::Region::from_locale(&detect_locale())
             .id()
             .to_string();
+    }
+    // First run: seed a world-clock home + starter cities.
+    if cfg.world_clock_home.is_empty() {
+        cfg.world_clock_home = "Europe/Stockholm".to_string();
+    }
+    if cfg.world_clock_cities.is_empty() {
+        cfg.world_clock_cities = default_world_clock_cities();
     }
     cfg
 }

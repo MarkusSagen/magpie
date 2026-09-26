@@ -42,4 +42,9 @@ export global CalcStore {
     in-out property <[ChartPoint]> graph-intersections;
     callback open-graphs(int);          // open a saved graph by index
     callback close-graphs();
+
+    // World clock (screen 16) — a third calculator mode alongside History/Graphs.
+    in-out property <bool> worldclock-open;
+    callback open-worldclock();
+    callback close-worldclock();
 }

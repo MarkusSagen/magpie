@@ -9,6 +9,12 @@ rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"]
 blake3 = "1"
 regex = "1"
 fuzzy-matcher = "0.3"
+# World clock (Phase 12): IANA tz database embedded in the binary for correct,
+# cross-platform DST handling. `chrono` is used only as the datetime carrier for
+# `chrono-tz`'s offset lookups (not for the date-answer evaluator, which stays
+# hand-rolled and clock-injected).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.9"
 
 [dev-dependencies]
 proptest = "1"
