@@ -99,6 +99,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         projects_keep_magpie_out_of_git: cfg.projects_keep_magpie_out_of_git,
         project_conflicts: std::sync::Mutex::new(Vec::new()),
         project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
+        project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
             "today" => 1,
@@ -2026,7 +2027,36 @@ fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
 fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
     let day = abs_date(now); // "YYYY-MM-DD"
-    let (rows, all_tags, open_id, body, prov, links, refs) = {
+                             // "From projects": read-only rows for each syncable project's .magpie/notes/*.md,
+                             // with negative ids that open the file (Phase 18b cross-view). Computed before the
+                             // store lock (locks project_scan).
+    let (proj_note_rows, proj_note_refs): (
+        Vec<NoteRow>,
+        std::collections::HashMap<i32, std::path::PathBuf>,
+    ) = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        let mut rows = Vec::new();
+        let mut refs = std::collections::HashMap::new();
+        let mut nid: i32 = -2_000_000;
+        for h in g.hits.iter().filter(|h| h.syncable()) {
+            for (rel, title) in magpie_app::projects::project_note_files(&h.path) {
+                rows.push(NoteRow {
+                    id: nid,
+                    title: format!("⇄ {}/{}", h.name, title).into(),
+                    when: SharedString::from("project"),
+                    is_daily: false,
+                    tags: SharedString::new(),
+                });
+                refs.insert(nid, h.path.join(&rel));
+                nid -= 1;
+            }
+        }
+        (rows, refs)
+    };
+    if let Ok(mut m) = state.project_note_refs.lock() {
+        *m = proj_note_refs;
+    }
+    let (mut rows, all_tags, open_id, body, prov, links, refs) = {
         let store = match state.store.lock() {
             Ok(s) => s,
             Err(e) => e.into_inner(),
@@ -2091,6 +2121,11 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         let refs = magpie_app::backlinks::find_references(&open_name, &all);
         (rows, all_tags, open, body, prov, links, refs)
     };
+    // Append the read-only "From projects" rows (only when no tag filter is active, so
+    // they don't masquerade as tagged notes).
+    if ui.get_note_tag_filter().is_empty() {
+        rows.extend(proj_note_rows);
+    }
     ui.set_notes(ModelRc::new(VecModel::from(rows)));
     ui.set_note_all_tags(ModelRc::new(VecModel::from(
         all_tags
@@ -7760,6 +7795,18 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_open_note(move |id| {
+            // A "From projects" row (negative id) opens its file, not a DB note.
+            if id < 0 {
+                let path = s
+                    .project_note_refs
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&id).cloned());
+                if let Some(p) = path {
+                    let _ = std::process::Command::new("open").arg("-t").arg(&p).spawn();
+                }
+                return;
+            }
             if let Some(ui) = w.upgrade() {
                 ui.set_note_id(id);
                 refresh_notes(&ui, &s);

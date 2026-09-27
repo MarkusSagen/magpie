@@ -79,6 +79,7 @@ fn state() -> AppState {
         projects_keep_magpie_out_of_git: false,
         project_conflicts: Mutex::new(Vec::new()),
         project_task_refs: Mutex::new(std::collections::HashMap::new()),
+        project_note_refs: Mutex::new(std::collections::HashMap::new()),
         popover_default_tab: 3,
         open_with: std::collections::BTreeMap::new(),
         popover_pinned: std::sync::atomic::AtomicBool::new(false),

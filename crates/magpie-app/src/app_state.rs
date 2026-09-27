@@ -69,6 +69,9 @@ pub struct AppState {
     /// Negative synthetic `note_id` → the project file its task came from, so a toggle
     /// in the global Tasks view / board routes to the file (Phase 18b cross-view).
     pub project_task_refs: Mutex<std::collections::HashMap<i32, ProjTaskRef>>,
+    /// Negative synthetic note id → a project's `.magpie/notes/*.md` file, so opening a
+    /// "From projects" row in the Notes view opens the file (Phase 18b cross-view).
+    pub project_note_refs: Mutex<std::collections::HashMap<i32, std::path::PathBuf>>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
@@ -308,6 +311,7 @@ mod tests {
             projects_keep_magpie_out_of_git: false,
             project_conflicts: std::sync::Mutex::new(Vec::new()),
             project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
+            project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),
