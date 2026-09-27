@@ -275,6 +275,35 @@ pub fn scan_code_comments(project_dir: &Path, cap: usize) -> Vec<CodeTodo> {
     out
 }
 
+/// List a project's `.magpie/notes/*.md` files (Phase 18b), as `(rel_path, title)`
+/// sorted by name. Read-only in the detail for now; the full Notes-view "From
+/// projects" integration is a follow-up. `title` is the file stem.
+pub fn project_note_files(project_dir: &Path) -> Vec<(String, String)> {
+    let dir = project_dir.join(".magpie/notes");
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let path = e.path();
+            let is_md = path
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| x.eq_ignore_ascii_case("md"))
+                .unwrap_or(false);
+            if !is_md {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("note")
+                .to_string();
+            out.push((format!(".magpie/notes/{stem}.md"), stem));
+        }
+    }
+    out.sort_by_key(|(_, title)| title.to_lowercase());
+    out
+}
+
 /// Keep `.magpie/` out of git for a project by appending it to `.git/info/exclude`
 /// (a private, per-clone ignore — never touches a tracked `.gitignore`). No-op unless
 /// the folder has both a `.git` dir and a `.magpie/` dir and doesn't already exclude

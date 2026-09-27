@@ -2909,6 +2909,34 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
         }
         let _ = Marker::badge;
 
+        // Project notes (.magpie/notes/*.md) — read-only listing for now; the full
+        // Notes-view "From projects" integration is a follow-up (Phase 18b).
+        let note_files = magpie_app::projects::project_note_files(&h.path);
+        if !note_files.is_empty() {
+            rows.push(ProjTaskRow {
+                is_file_header: true,
+                file_label: format!("Notes  {}", note_files.len()).into(),
+                sync_label: "read-only".into(),
+                title: SharedString::new(),
+                done: false,
+                source: SharedString::new(),
+                idx: -1,
+                read_only: true,
+            });
+            for (rel, title) in &note_files {
+                rows.push(ProjTaskRow {
+                    is_file_header: false,
+                    file_label: SharedString::new(),
+                    sync_label: SharedString::new(),
+                    title: title.clone().into(),
+                    done: false,
+                    source: format!("{rel}:1").into(),
+                    idx: -1,
+                    read_only: true,
+                });
+            }
+        }
+
         // Read-only code-comment lens (Phase 18b, PNG 25): TODO/FIXME/HACK/XXX found in
         // source, cached per selected project so re-populates don't re-walk.
         let code_todos = {
