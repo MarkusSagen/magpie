@@ -123,6 +123,76 @@ impl Store {
         )
     }
 
+    // ---- Note version history (backlog #4). ----
+
+    /// Snapshot a note's body as a restore point. Coalesces rapid saves: if the newest
+    /// version for this note is younger than `coalesce_ms`, it's updated in place rather
+    /// than adding a row; a snapshot identical to the newest is skipped. Keeps the
+    /// newest `keep` versions per note.
+    pub fn snapshot_note_version(
+        &self,
+        note_id: i64,
+        body: &str,
+        now_ms: i64,
+        coalesce_ms: i64,
+        keep: i64,
+    ) -> Result<()> {
+        let latest: Option<(i64, String, i64)> = self
+            .conn()
+            .query_row(
+                "SELECT id, body, created_at_ms FROM note_versions
+                 WHERE note_id = ?1 ORDER BY created_at_ms DESC, id DESC LIMIT 1",
+                [note_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        if let Some((id, last_body, last_ms)) = latest {
+            if last_body == body {
+                return Ok(()); // no change → no new restore point
+            }
+            if now_ms - last_ms < coalesce_ms {
+                self.conn().execute(
+                    "UPDATE note_versions SET body = ?2, created_at_ms = ?3 WHERE id = ?1",
+                    rusqlite::params![id, body, now_ms],
+                )?;
+                return Ok(());
+            }
+        }
+        self.conn().execute(
+            "INSERT INTO note_versions (note_id, body, created_at_ms) VALUES (?1, ?2, ?3)",
+            rusqlite::params![note_id, body, now_ms],
+        )?;
+        self.conn().execute(
+            "DELETE FROM note_versions WHERE note_id = ?1 AND id NOT IN
+             (SELECT id FROM note_versions WHERE note_id = ?1 ORDER BY created_at_ms DESC LIMIT ?2)",
+            rusqlite::params![note_id, keep],
+        )?;
+        Ok(())
+    }
+
+    /// A note's version history, newest first: `(version_id, created_at_ms, body)`.
+    pub fn note_versions(&self, note_id: i64, limit: i64) -> Result<Vec<(i64, i64, String)>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT id, created_at_ms, body FROM note_versions
+             WHERE note_id = ?1 ORDER BY created_at_ms DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![note_id, limit], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+        rows.collect()
+    }
+
+    /// The body of a specific version (for restore/preview).
+    pub fn note_version_body(&self, version_id: i64) -> Result<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT body FROM note_versions WHERE id = ?1",
+                [version_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+    }
+
     pub fn upsert_note_by_name(&self, name: &str, now_ms: i64) -> Result<Note> {
         let n = name.trim();
         if n.is_empty() {
@@ -447,6 +517,38 @@ mod scratch_tests {
         let earlier = s.scratch_earlier(50).unwrap();
         assert_eq!(earlier.len(), 1);
         assert_eq!(earlier[0].id, first.id);
+    }
+
+    #[test]
+    fn note_versions_coalesce_dedupe_and_cap() {
+        let s = open_in_memory().unwrap();
+        let n = s.upsert_note_by_name("N", 0).unwrap();
+        // First snapshot.
+        s.snapshot_note_version(n.id, "v1", 1_000, 60_000, 3)
+            .unwrap();
+        // Within the coalesce window + changed → updates in place (still 1 version).
+        s.snapshot_note_version(n.id, "v1b", 5_000, 60_000, 3)
+            .unwrap();
+        assert_eq!(s.note_versions(n.id, 10).unwrap().len(), 1);
+        assert_eq!(s.note_versions(n.id, 1).unwrap()[0].2, "v1b");
+        // Identical body → skipped.
+        s.snapshot_note_version(n.id, "v1b", 200_000, 60_000, 3)
+            .unwrap();
+        assert_eq!(s.note_versions(n.id, 10).unwrap().len(), 1);
+        // Past the window + changed → new version.
+        s.snapshot_note_version(n.id, "v2", 200_000, 60_000, 3)
+            .unwrap();
+        s.snapshot_note_version(n.id, "v3", 400_000, 60_000, 3)
+            .unwrap();
+        s.snapshot_note_version(n.id, "v4", 600_000, 60_000, 3)
+            .unwrap();
+        // Cap keeps the newest 3.
+        let vers = s.note_versions(n.id, 10).unwrap();
+        assert_eq!(vers.len(), 3);
+        assert_eq!(vers[0].2, "v4");
+        // Restore body lookup.
+        let vid = vers[1].0;
+        assert_eq!(s.note_version_body(vid).unwrap().as_deref(), Some("v3"));
     }
 
     #[test]

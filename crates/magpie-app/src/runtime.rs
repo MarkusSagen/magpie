@@ -2,10 +2,11 @@ use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, FileTarget, GraphEdge, GraphNode, JobRow, JournalRow, LauncherWindow,
-    MdLineVM, MdSpan, NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore,
-    RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow, SearchBookmarkRow,
-    SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem,
-    SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
+    MdLineVM, MdSpan, NoteRender, NoteRow, NoteVersionRow, Popover, ProjTaskRow, ProjectListRow,
+    ProjectsStore, RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow,
+    SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
+    SearchTreeRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore,
+    WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -6917,6 +6918,74 @@ pub fn start() {
             }
         });
     }
+    // ---- Note version history (backlog #4) ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<NoteRender>().on_toggle_history(move || {
+            if let Some(ui) = w.upgrade() {
+                let nr = ui.global::<NoteRender>();
+                let open = !nr.get_history();
+                nr.set_history(open);
+                if open {
+                    let id = ui.get_note_id();
+                    let rows: Vec<NoteVersionRow> = if id >= 0 {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        store
+                            .note_versions(id as i64, 50)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|(vid, ms, body)| NoteVersionRow {
+                                id: vid as i32,
+                                when: relative_time(ms, now_ms()).into(),
+                                preview: body
+                                    .lines()
+                                    .find(|l| !l.trim().is_empty())
+                                    .unwrap_or("(empty)")
+                                    .chars()
+                                    .take(80)
+                                    .collect::<String>()
+                                    .into(),
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    nr.set_versions(ModelRc::new(VecModel::from(rows)));
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<NoteRender>().on_restore_version(move |row| {
+            if let Some(ui) = w.upgrade() {
+                let id = ui.get_note_id();
+                if id < 0 {
+                    return;
+                }
+                let body = {
+                    let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    store
+                        .note_versions(id as i64, 50)
+                        .ok()
+                        .and_then(|v| v.get(row as usize).map(|(_, _, b)| b.clone()))
+                };
+                if let Some(body) = body {
+                    {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = store.update_note_body(id as i64, &body, now_ms());
+                        // Record the restore itself as a new restore point (force a new row).
+                        let _ = store.snapshot_note_version(id as i64, &body, now_ms(), 0, 50);
+                    }
+                    ui.set_note_body(body.clone().into());
+                    ui.global::<NoteRender>().set_history(false);
+                    refresh_notes(&ui, &s);
+                }
+            }
+        });
+    }
     // ---- Notes v2 rich preview (screen 18) ----
     {
         let w = ui.as_weak();
@@ -8949,6 +9018,15 @@ pub fn start() {
                     };
                     if id >= 0 {
                         let _ = store.update_note_body(id as i64, body.as_str(), now_ms());
+                        // Version history (backlog #4): a coalesced restore point per
+                        // ~2 min of edits, last 50 kept.
+                        let _ = store.snapshot_note_version(
+                            id as i64,
+                            body.as_str(),
+                            now_ms(),
+                            120_000,
+                            50,
+                        );
                     }
                     let own_name = if id >= 0 {
                         store.get_note(id as i64).ok().flatten().map(|n| n.name)

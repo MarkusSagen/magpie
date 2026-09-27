@@ -76,6 +76,13 @@ export struct FileTarget {
     key: string,      // digit shown on the right
 }
 
+// One note version-history entry (backlog #4).
+export struct NoteVersionRow {
+    id: int,
+    when: string,     // relative time, e.g. "2h ago"
+    preview: string,  // first line of that version
+}
+
 // One scheduled job row (Phase 21, PNG 29).
 export struct JobRow {
     id: int,

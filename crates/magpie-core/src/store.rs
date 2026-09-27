@@ -177,6 +177,14 @@ const MIGRATIONS: &[&str] = &[
         stdout TEXT NOT NULL DEFAULT '',
         stderr TEXT NOT NULL DEFAULT ''
     );",
+    // v9: per-note version history (backlog #4). A snapshot of the body on save,
+    // coalesced within a short window and capped per note — cheap restore points.
+    "CREATE TABLE note_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -647,7 +655,7 @@ mod tests {
         s.conn
             .execute_batch(
                 "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
-                 DROP TABLE jobs; DROP TABLE job_runs; \
+                 DROP TABLE jobs; DROP TABLE job_runs; DROP TABLE note_versions; \
                  ALTER TABLE notes DROP COLUMN scratch; \
                  ALTER TABLE notes DROP COLUMN scratch_pinned; \
                  PRAGMA user_version = 3;",
