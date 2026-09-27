@@ -117,10 +117,10 @@ impl Store {
     /// Delete unpinned scratch notes not updated since `older_than_ms` (30-day sweep).
     /// Returns how many were removed.
     pub fn prune_scratches(&self, older_than_ms: i64) -> Result<usize> {
-        Ok(self.conn().execute(
+        self.conn().execute(
             "DELETE FROM notes WHERE scratch = 1 AND scratch_pinned = 0 AND updated_at_ms < ?1",
             [older_than_ms],
-        )?)
+        )
     }
 
     pub fn upsert_note_by_name(&self, name: &str, now_ms: i64) -> Result<Note> {
