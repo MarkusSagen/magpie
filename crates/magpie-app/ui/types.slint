@@ -76,6 +76,19 @@ export struct FileTarget {
     key: string,      // digit shown on the right
 }
 
+// One scheduled job row (Phase 21, PNG 29).
+export struct JobRow {
+    id: int,
+    name: string,
+    kind: string,          // notification|shell|open|url
+    cron: string,
+    enabled: bool,
+    os-managed: bool,
+    last-run: string,      // "Fri 09:00 · exit 0 · 1.2s" / "failed · exit 1" / "never"
+    failed: bool,
+    next-run: string,      // "next: tomorrow 09:00"
+}
+
 export struct BookmarkRow {
     id: int,
     title: string,

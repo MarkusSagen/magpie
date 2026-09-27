@@ -1,11 +1,11 @@
 use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
-    EntryRow, FavoriteRow, FileTarget, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM,
-    MdSpan, NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore, RecentData,
-    RefRow, ScratchRow, ScratchStore, ScratchWindow, SearchBookmarkRow, SearchFile, SearchLine,
-    SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem, SnippetRow, SnippetsStore,
-    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
+    EntryRow, FavoriteRow, FileTarget, GraphEdge, GraphNode, JobRow, JournalRow, LauncherWindow,
+    MdLineVM, MdSpan, NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore,
+    RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow, SearchBookmarkRow,
+    SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem,
+    SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -1910,6 +1910,13 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             refresh_tasks(ui, state);
             refresh_time(ui, state);
         }
+        ("tasks", "schedule") => {
+            // The Schedule tab (cron jobs) lives inside the Tasks overlay.
+            ui.set_tasks_view(SharedString::from("schedule"));
+            ui.set_tasks_mode(true);
+            refresh_tasks(ui, state);
+            refresh_schedule(ui, state);
+        }
         ("tasks", _) => {
             // "list", or any unrecognized view — the flat Tasks list.
             ui.set_tasks_view(SharedString::from("list"));
@@ -3807,6 +3814,407 @@ fn task_row_with_tracking(
     }
 }
 
+/// Rebuild the Schedule tab's job list (Phase 21) from the job store.
+fn refresh_schedule(ui: &LauncherWindow, state: &AppState) {
+    let ss = ui.global::<ScheduleStore>();
+    let tz = state.world_clock_home.clone();
+    let now = now_ms();
+    let rows: Vec<JobRow> = {
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .list_jobs()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|j| {
+                let last = store
+                    .recent_job_runs(j.id, 1)
+                    .ok()
+                    .and_then(|v| v.into_iter().next());
+                let (last_run, failed) = match last {
+                    Some(r) => {
+                        let when = magpie_core::cron::fmt_local(r.start_ms / 1000, &tz);
+                        match r.exit_code {
+                            Some(0) => (format!("last: {when} · ok"), false),
+                            Some(c) => (format!("last: {when} · failed · exit {c}"), true),
+                            None => (format!("last: {when} · did not finish"), true),
+                        }
+                    }
+                    None => ("never run".to_string(), false),
+                };
+                let next_run = magpie_core::cron::parse_cron(&j.cron)
+                    .ok()
+                    .and_then(|c| {
+                        magpie_core::cron::next_runs_in_tz(&c, now / 1000, &tz, 1)
+                            .first()
+                            .copied()
+                    })
+                    .map(|ts| format!("· next {}", magpie_core::cron::fmt_local(ts, &tz)))
+                    .unwrap_or_default();
+                JobRow {
+                    id: j.id as i32,
+                    name: j.name.into(),
+                    kind: j.kind.as_str().into(),
+                    cron: j.cron.into(),
+                    enabled: j.enabled,
+                    os_managed: j.os_managed,
+                    last_run: last_run.into(),
+                    failed,
+                    next_run: next_run.into(),
+                }
+            })
+            .collect()
+    };
+    ss.set_jobs(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Map the Schedule form's kind index to a `JobKind`.
+fn job_kind_of(i: i32) -> magpie_core::jobs::JobKind {
+    use magpie_core::jobs::JobKind;
+    match i {
+        1 => JobKind::Shell,
+        2 => JobKind::Open,
+        3 => JobKind::Url,
+        _ => JobKind::Notification,
+    }
+}
+
+/// The job id for a Schedule-list row index (list order matches `refresh_schedule`).
+fn job_id_at(state: &AppState, row: i32) -> Option<i64> {
+    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+    store
+        .list_jobs()
+        .ok()
+        .and_then(|v| v.get(row.max(0) as usize).map(|j| j.id))
+}
+
+/// Install or remove the OS scheduler entry for a job per its `os_managed`/`enabled`.
+/// Returns Err (with a message) if an OS install was requested but failed.
+fn apply_os_schedule(job: &magpie_core::jobs::Job) -> Result<(), String> {
+    if job.os_managed && job.enabled {
+        let cron = magpie_core::cron::parse_cron(&job.cron)?;
+        let intervals = cron.launchd_intervals();
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        magpie_platform::install_os_job(job.id, &intervals, &exe)
+    } else {
+        let _ = magpie_platform::remove_os_job(job.id);
+        Ok(())
+    }
+}
+
+/// Wire the Schedule tab's callbacks (Phase 21).
+fn wire_schedule(ui: &LauncherWindow, state: &Arc<AppState>) {
+    let ss = ui.global::<ScheduleStore>();
+    // New job → reset the form.
+    {
+        let w = ui.as_weak();
+        ss.on_new_job(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<ScheduleStore>();
+                ss.set_edit_id(-1);
+                ss.set_form_name(SharedString::new());
+                ss.set_form_kind(0);
+                ss.set_form_command(SharedString::new());
+                ss.set_form_when(SharedString::new());
+                ss.set_form_cron(SharedString::new());
+                ss.set_form_dir(SharedString::new());
+                ss.set_form_timeout(300);
+                ss.set_form_notify(true);
+                ss.set_form_os(false);
+                ss.set_next_runs(SharedString::new());
+                ss.set_form_error(SharedString::new());
+                ss.set_editing(true);
+            }
+        });
+    }
+    // Edit an existing job → load it into the form.
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_edit_job(move |row| {
+            let job = job_id_at(&s, row).and_then(|id| {
+                s.store
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_job(id)
+                    .ok()
+                    .flatten()
+            });
+            if let (Some(ui), Some(j)) = (w.upgrade(), job) {
+                let ss = ui.global::<ScheduleStore>();
+                ss.set_edit_id(j.id as i32);
+                ss.set_form_name(j.name.into());
+                ss.set_form_kind(match j.kind {
+                    magpie_core::jobs::JobKind::Shell => 1,
+                    magpie_core::jobs::JobKind::Open => 2,
+                    magpie_core::jobs::JobKind::Url => 3,
+                    _ => 0,
+                });
+                ss.set_form_command(j.command.into());
+                ss.set_form_when(j.cron.clone().into());
+                ss.set_form_cron(j.cron.into());
+                ss.set_form_dir(j.working_dir.into());
+                ss.set_form_timeout(j.timeout_secs as i32);
+                ss.set_form_notify(j.notify_on_failure);
+                ss.set_form_os(j.os_managed);
+                ss.set_form_error(SharedString::new());
+                ss.set_editing(true);
+                schedule_preview(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_delete_job(move |row| {
+            if let Some(id) = job_id_at(&s, row) {
+                let _ = magpie_platform::remove_os_job(id);
+                let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = store.delete_job(id);
+                drop(store);
+                if let Some(ui) = w.upgrade() {
+                    refresh_schedule(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_run_now(move |row| {
+            if let Some(id) = job_id_at(&s, row) {
+                // Verify + start under the lock, execute without it, finish under it.
+                let vjob = {
+                    let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    st.job_for_run(id).ok().flatten()
+                };
+                if let Some(vjob) = vjob {
+                    let run = {
+                        let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        st.start_job_run(id, now_ms()).ok()
+                    };
+                    let res = magpie_app::job_runner::execute_job(&vjob);
+                    if let Some(run) = run {
+                        let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = st.finish_job_run(
+                            run,
+                            id,
+                            now_ms(),
+                            res.exit_code,
+                            &res.stdout,
+                            &res.stderr,
+                            20,
+                        );
+                    }
+                }
+                if let Some(ui) = w.upgrade() {
+                    refresh_schedule(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_toggle_pause(move |row| {
+            if let Some(id) = job_id_at(&s, row) {
+                let job = {
+                    let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    let cur = st.get_job(id).ok().flatten();
+                    if let Some(j) = &cur {
+                        let _ = st.set_job_enabled(id, !j.enabled, now_ms());
+                    }
+                    st.get_job(id).ok().flatten()
+                };
+                if let Some(j) = job {
+                    let _ = apply_os_schedule(&j);
+                }
+                if let Some(ui) = w.upgrade() {
+                    refresh_schedule(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_view_logs(move |row| {
+            if let (Some(ui), Some(id)) = (w.upgrade(), job_id_at(&s, row)) {
+                let tz = s.world_clock_home.clone();
+                let logs = {
+                    let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    st.recent_job_runs(id, 20)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|r| {
+                            let when = magpie_core::cron::fmt_local(r.start_ms / 1000, &tz);
+                            let code = r
+                                .exit_code
+                                .map(|c| format!("exit {c}"))
+                                .unwrap_or_else(|| "—".into());
+                            let mut s = format!("{when} · {code}");
+                            if !r.stdout.trim().is_empty() {
+                                s.push_str(&format!("\n{}", r.stdout.trim()));
+                            }
+                            if !r.stderr.trim().is_empty() {
+                                s.push_str(&format!("\n[err] {}", r.stderr.trim()));
+                            }
+                            s
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                };
+                let ss = ui.global::<ScheduleStore>();
+                ss.set_logs(logs.into());
+                ss.set_showing_logs(true);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ss.on_close_logs(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<ScheduleStore>().set_showing_logs(false);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_when_changed(move |_txt| {
+            if let Some(ui) = w.upgrade() {
+                schedule_preview(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ss.on_save(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<ScheduleStore>();
+                let name = ss.get_form_name().to_string();
+                let command = ss.get_form_command().to_string();
+                let cron = resolve_form_cron(&ss);
+                if name.trim().is_empty() || command.trim().is_empty() {
+                    ss.set_form_error("Name and command are required.".into());
+                    return;
+                }
+                if magpie_core::cron::parse_cron(&cron).is_err() {
+                    ss.set_form_error(
+                        "Couldn't understand the schedule — try a cron like `0 9 * * *`.".into(),
+                    );
+                    return;
+                }
+                ss.set_form_cron(cron.clone().into());
+                let kind = ["Notification", "Shell", "Open", "URL"]
+                    [ss.get_form_kind().clamp(0, 3) as usize];
+                let mode = if ss.get_form_os() {
+                    "Always (OS scheduler)"
+                } else {
+                    "While Magpie is open"
+                };
+                ss.set_confirm_text(
+                    format!("{kind}: {command}\nWhen: {cron}\nRuns: {mode}").into(),
+                );
+                ss.set_form_error(SharedString::new());
+                ss.set_confirming(true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ss.on_confirm_save(move || {
+            if let Some(ui) = w.upgrade() {
+                let ssg = ui.global::<ScheduleStore>();
+                let id = ssg.get_edit_id();
+                let name = ssg.get_form_name().to_string();
+                let kind = job_kind_of(ssg.get_form_kind());
+                let command = ssg.get_form_command().to_string();
+                let cron = resolve_form_cron(&ssg);
+                let dir = ssg.get_form_dir().to_string();
+                let timeout = ssg.get_form_timeout().max(1) as i64;
+                let notify = ssg.get_form_notify();
+                let os = ssg.get_form_os();
+                let now = now_ms();
+                let job_id = {
+                    let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    if id < 0 {
+                        st.add_job(&name, kind, &command, &cron, &dir, timeout, notify, os, now)
+                            .ok()
+                    } else {
+                        let _ = st.update_job(
+                            id as i64, &name, kind, &command, &cron, &dir, timeout, notify, os, now,
+                        );
+                        Some(id as i64)
+                    }
+                };
+                // Apply the OS schedule (or remove it). On failure, fall back to While-open.
+                if let Some(jid) = job_id {
+                    let job = s
+                        .store
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get_job(jid)
+                        .ok()
+                        .flatten();
+                    if let Some(job) = job {
+                        if let Err(e) = apply_os_schedule(&job) {
+                            magpie_platform::notify("Magpie — OS scheduling failed", &e);
+                            let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                            let _ = st.update_job(
+                                jid, &name, kind, &command, &cron, &dir, timeout, notify, false,
+                                now,
+                            );
+                        }
+                    }
+                }
+                ssg.set_confirming(false);
+                ssg.set_editing(false);
+                refresh_schedule(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ss.on_cancel_edit(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<ScheduleStore>();
+                ss.set_confirming(false);
+                ss.set_editing(false);
+            }
+        });
+    }
+}
+
+/// The cron the form resolves to: a valid cron typed directly, else natural language.
+fn resolve_form_cron(ss: &ScheduleStore) -> String {
+    let when = ss.get_form_when().to_string();
+    if magpie_core::cron::parse_cron(&when).is_ok() {
+        when
+    } else {
+        magpie_core::cron::natural_to_cron(&when).unwrap_or_default()
+    }
+}
+
+/// Recompute the form's resolved cron + next-5-runs preview from the "when" field.
+fn schedule_preview(ui: &LauncherWindow, state: &AppState) {
+    let ss = ui.global::<ScheduleStore>();
+    let cron = resolve_form_cron(&ss);
+    ss.set_form_cron(cron.clone().into());
+    let tz = state.world_clock_home.clone();
+    let preview = magpie_core::cron::parse_cron(&cron)
+        .ok()
+        .map(|c| {
+            magpie_core::cron::next_runs_in_tz(&c, now_ms() / 1000, &tz, 5)
+                .into_iter()
+                .map(|ts| magpie_core::cron::fmt_local(ts, &tz))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    ss.set_next_runs(preview.into());
+}
+
 /// Build synthetic `Task`s for every syncable project's file tasks so they appear in
 /// the global Tasks view and board alongside note tasks (Phase 18b cross-view). Each
 /// file gets a unique negative `note_id`; markdown files reuse the note parser (full
@@ -5444,6 +5852,74 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.invoke_set_section(SharedString::from("tasks"));
                             ui.invoke_set_task_view(SharedString::from("time"));
                         }
+                        // Schedule (Phase 21): seed a few demo jobs, open the Schedule tab.
+                        "schedule" => {
+                            use magpie_core::jobs::JobKind;
+                            if let Ok(store) = st.store.lock() {
+                                if store.list_jobs().map(|v| v.is_empty()).unwrap_or(false) {
+                                    let now = now_ms();
+                                    let a = store
+                                        .add_job(
+                                            "Morning standup ping",
+                                            JobKind::Notification,
+                                            "Time for standup",
+                                            "40 8 * * 1-5",
+                                            "",
+                                            300,
+                                            true,
+                                            false,
+                                            now,
+                                        )
+                                        .unwrap_or(0);
+                                    let r = store.start_job_run(a, now - 3_600_000).unwrap_or(0);
+                                    let _ = store.finish_job_run(
+                                        r,
+                                        a,
+                                        now - 3_600_000,
+                                        Some(0),
+                                        "",
+                                        "",
+                                        20,
+                                    );
+                                    let b = store
+                                        .add_job(
+                                            "Nightly backup",
+                                            JobKind::Shell,
+                                            "rsync -a ~/code ~/backup",
+                                            "0 2 * * *",
+                                            "",
+                                            600,
+                                            true,
+                                            true,
+                                            now,
+                                        )
+                                        .unwrap_or(0);
+                                    let r = store.start_job_run(b, now - 80_000_000).unwrap_or(0);
+                                    let _ = store.finish_job_run(
+                                        r,
+                                        b,
+                                        now - 80_000_000,
+                                        Some(1),
+                                        "",
+                                        "rsync: connection refused",
+                                        20,
+                                    );
+                                    let _ = store.add_job(
+                                        "Open dashboard",
+                                        JobKind::Url,
+                                        "https://grafana.local",
+                                        "0 9 * * 1",
+                                        "",
+                                        60,
+                                        false,
+                                        false,
+                                        now,
+                                    );
+                                }
+                            }
+                            ui.invoke_set_section(SharedString::from("tasks"));
+                            ui.invoke_set_task_view(SharedString::from("schedule"));
+                        }
                         // File search (Phase 15): search the repo for a term.
                         "files" => {
                             {
@@ -6078,6 +6554,7 @@ pub fn start() {
     let scratch = ScratchWindow::new().expect("create scratch window");
     scratch.set_theme_index(theme_idx as i32);
     wire_scratch(&scratch, &state);
+    wire_schedule(&ui, &state);
     popover.set_pinned(cfg.popover_pinned);
 
     // Match the native window chrome (titlebar / traffic-light strip) to the

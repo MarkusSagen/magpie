@@ -271,6 +271,16 @@ pub fn next_runs_in_tz(cron: &Cron, from_epoch: i64, tz_name: &str, n: usize) ->
     next_runs(cron, from_epoch, tz, n)
 }
 
+/// Format an epoch-seconds instant as local `Www DD Mon HH:MM` in `tz_name` (e.g.
+/// "Mon 28 Sep 09:00"), for run previews / last-run labels.
+pub fn fmt_local(epoch: i64, tz_name: &str) -> String {
+    let tz: Tz = tz_name.parse().unwrap_or(chrono_tz::UTC);
+    match tz.timestamp_opt(epoch, 0).single() {
+        Some(dt) => dt.format("%a %d %b %H:%M").to_string(),
+        None => String::new(),
+    }
+}
+
 /// Best-effort natural-language → cron. Returns `None` if it can't confidently parse
 /// (the UI then lets the user type/edit the cron directly — never a wrong guess).
 pub fn natural_to_cron(text: &str) -> Option<String> {

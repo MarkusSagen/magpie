@@ -1,0 +1,234 @@
+import { ListView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { JobRow } from "../types.slint";
+import { ScheduleStore } from "../schedule_store.slint";
+import { Keycap } from "../components/keycap.slint";
+
+// Schedule — cron jobs (Phase 21, PNG 29). Lives inside the Tasks view's Schedule tab.
+export component ScheduleView inherits VerticalLayout {
+    spacing: 12px;
+
+    // ---- Editor form ----
+    if ScheduleStore.editing: Rectangle {
+        vertical-stretch: 1;
+        background: Theme.bg-panel;
+        border-radius: Theme.r-md;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+            Text { text: ScheduleStore.edit-id < 0 ? "New job" : "Edit job"; color: Theme.text;
+                font-size: 18px; font-weight: 700; }
+
+            // Name.
+            field := Rectangle {
+                height: 34px; background: Theme.bg-app; border-radius: Theme.r-sm;
+                HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                    if ScheduleStore.form-name == "": Text { text: "Name"; color: Theme.text-faint;
+                        font-size: 13px; vertical-alignment: center; }
+                    TextInput { text <=> ScheduleStore.form-name; color: Theme.text; font-size: 13px;
+                        vertical-alignment: center; single-line: true; } }
+            }
+
+            // Type selector.
+            HorizontalLayout {
+                spacing: 6px;
+                for k[i] in ["Notification", "Shell", "Open", "URL"]: Rectangle {
+                    height: 28px; width: 104px; border-radius: Theme.r-sm;
+                    background: ScheduleStore.form-kind == i ? Pal.accent : Theme.bg-app;
+                    TouchArea { clicked => { ScheduleStore.form-kind = i; } }
+                    Text { text: k; color: ScheduleStore.form-kind == i ? Pal.on-accent : Theme.text;
+                        font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+
+            // Command / message / URL / path.
+            Rectangle {
+                height: 34px; background: Theme.bg-app; border-radius: Theme.r-sm;
+                HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                    if ScheduleStore.form-command == "": Text {
+                        text: ScheduleStore.form-kind == 0 ? "Message" : (ScheduleStore.form-kind == 3 ? "URL" : (ScheduleStore.form-kind == 2 ? "Path / app / note" : "Shell command"));
+                        color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                    TextInput { text <=> ScheduleStore.form-command; color: Theme.text; font-family: "Geist Mono";
+                        font-size: 13px; vertical-alignment: center; single-line: true; } }
+            }
+
+            // When (natural language) → cron + next runs.
+            Rectangle {
+                height: 34px; background: Theme.bg-app; border-radius: Theme.r-sm;
+                HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                    if ScheduleStore.form-when == "": Text { text: "When — e.g. \"every weekday at 8:40\" or a cron";
+                        color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
+                    TextInput { text <=> ScheduleStore.form-when; color: Theme.text; font-size: 13px;
+                        vertical-alignment: center; single-line: true;
+                        edited => { ScheduleStore.when-changed(self.text); } } }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: ScheduleStore.form-cron == "" ? "" : "cron: " + ScheduleStore.form-cron;
+                    color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Text { text: ScheduleStore.next-runs == "" ? "" : "next: " + ScheduleStore.next-runs;
+                color: Theme.text-faint; font-size: Theme.fs-sm; wrap: word-wrap; }
+
+            // Shell-only: working dir + timeout.
+            if ScheduleStore.form-kind == 1: HorizontalLayout {
+                spacing: 8px;
+                Rectangle { height: 34px; horizontal-stretch: 1; background: Theme.bg-app; border-radius: Theme.r-sm;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                        if ScheduleStore.form-dir == "": Text { text: "Working directory (optional)"; color: Theme.text-faint;
+                            font-size: 13px; vertical-alignment: center; }
+                        TextInput { text <=> ScheduleStore.form-dir; color: Theme.text; font-size: 13px;
+                            vertical-alignment: center; single-line: true; } } }
+            }
+
+            // Toggles: notify on failure · run mode.
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { width: 150px; height: 28px; border-radius: Theme.r-sm;
+                    background: ScheduleStore.form-notify ? Pal.accent : Theme.bg-app;
+                    TouchArea { clicked => { ScheduleStore.form-notify = !ScheduleStore.form-notify; } }
+                    Text { text: "Notify on failure"; color: ScheduleStore.form-notify ? Pal.on-accent : Theme.text;
+                        font-size: 12px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 130px; height: 28px; border-radius: Theme.r-sm;
+                    background: !ScheduleStore.form-os ? Pal.accent : Theme.bg-app;
+                    TouchArea { clicked => { ScheduleStore.form-os = false; } }
+                    Text { text: "While open"; color: !ScheduleStore.form-os ? Pal.on-accent : Theme.text;
+                        font-size: 12px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 130px; height: 28px; border-radius: Theme.r-sm;
+                    background: ScheduleStore.form-os ? Pal.accent : Theme.bg-app;
+                    TouchArea { clicked => { ScheduleStore.form-os = true; } }
+                    Text { text: "Always (OS)"; color: ScheduleStore.form-os ? Pal.on-accent : Theme.text;
+                        font-size: 12px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            if ScheduleStore.form-error != "": Text { text: ScheduleStore.form-error; color: Theme.danger;
+                font-size: Theme.fs-sm; }
+            Rectangle { vertical-stretch: 1; }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle { width: 90px; height: 32px; border-radius: Theme.r-sm; background: cta.has-hover ? Theme.bg-elevated : transparent;
+                    border-width: 1px; border-color: Theme.line;
+                    cta := TouchArea { clicked => { ScheduleStore.cancel-edit(); } }
+                    Text { text: "Cancel"; color: Theme.text-dim; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 90px; height: 32px; border-radius: Theme.r-sm; background: Pal.accent;
+                    sta := TouchArea { clicked => { ScheduleStore.save(); } }
+                    Text { text: "Save"; color: Pal.on-accent; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; } }
+            }
+        }
+    }
+
+    // ---- Logs pane ----
+    if ScheduleStore.showing-logs && !ScheduleStore.editing: Rectangle {
+        vertical-stretch: 1;
+        background: Theme.bg-panel;
+        border-radius: Theme.r-md;
+        VerticalLayout {
+            padding: 16px; spacing: 10px;
+            HorizontalLayout {
+                Text { text: "Logs"; color: Theme.text; font-size: 18px; font-weight: 700; horizontal-stretch: 1; }
+                Rectangle { width: 72px; height: 28px; border-radius: Theme.r-sm; background: lclose.has-hover ? Theme.bg-elevated : transparent;
+                    border-width: 1px; border-color: Theme.line;
+                    lclose := TouchArea { clicked => { ScheduleStore.close-logs(); } }
+                    Text { text: "Close"; color: Theme.text-dim; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; } }
+            }
+            Flickable {
+                vertical-stretch: 1;
+                viewport-width: self.width;
+                Text { text: ScheduleStore.logs == "" ? "No runs yet." : ScheduleStore.logs; color: Theme.text-dim;
+                    font-family: "Geist Mono"; font-size: Theme.fs-sm; wrap: word-wrap; width: parent.width; }
+            }
+        }
+    }
+
+    // ---- Job list ----
+    if !ScheduleStore.editing && !ScheduleStore.showing-logs: HorizontalLayout {
+        Text { text: "Scheduled jobs"; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600;
+            vertical-alignment: center; horizontal-stretch: 1; }
+        Rectangle { width: 84px; height: 30px; border-radius: Theme.r-sm; background: Pal.accent;
+            newta := TouchArea { clicked => { ScheduleStore.new-job(); } }
+            HorizontalLayout { alignment: center; spacing: 4px;
+                Text { text: "New"; color: Pal.on-accent; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+                Keycap { text: "⌘N"; } }
+        }
+    }
+    if !ScheduleStore.editing && !ScheduleStore.showing-logs: ListView {
+        vertical-stretch: 1;
+        for j[i] in ScheduleStore.jobs: Rectangle {
+            height: 58px;
+            border-radius: Theme.r-md;
+            background: i == ScheduleStore.selected ? Theme.bg-elevated : (jrow.has-hover ? Theme.bg-elevated : transparent);
+            border-width: j.failed ? 1px : 0px;
+            border-color: Theme.danger;
+            jrow := TouchArea { clicked => { ScheduleStore.selected = i; } }
+            HorizontalLayout {
+                padding: 10px; spacing: 10px;
+                VerticalLayout {
+                    alignment: center; spacing: 3px; horizontal-stretch: 1;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: j.name; color: j.enabled ? Theme.text : Theme.text-faint; font-size: Theme.fs-body;
+                            font-weight: 500; vertical-alignment: center; }
+                        Text { text: j.kind; color: Theme.text-ghost; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        if j.os-managed: Text { text: "OS"; color: Pal.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        if !j.enabled: Text { text: "paused"; color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    }
+                    Text { text: j.cron + "   " + j.next-run; color: Theme.text-faint; font-family: "Geist Mono";
+                        font-size: Theme.fs-xs; overflow: elide; }
+                    Text { text: j.last-run; color: j.failed ? Theme.danger : Theme.text-ghost; font-size: Theme.fs-xs; }
+                }
+                // Row actions.
+                for a[ai] in [
+                    { label: "Run", act: 0 },
+                    { label: j.enabled ? "Pause" : "Resume", act: 1 },
+                    { label: "Logs", act: 2 },
+                    { label: "Edit", act: 3 },
+                    { label: "Delete", act: 4 },
+                ]: Rectangle {
+                    width: 52px; height: 26px; y: (parent.height - 26px)/2; border-radius: Theme.r-xs;
+                    background: ata.has-hover ? Theme.bg-app : transparent;
+                    ata := TouchArea { clicked => {
+                        if (a.act == 0) { ScheduleStore.run-now(i); }
+                        if (a.act == 1) { ScheduleStore.toggle-pause(i); }
+                        if (a.act == 2) { ScheduleStore.view-logs(i); }
+                        if (a.act == 3) { ScheduleStore.edit-job(i); }
+                        if (a.act == 4) { ScheduleStore.delete-job(i); }
+                    } }
+                    Text { text: a.label; color: a.act == 4 ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ---- Confirm overlay (shown before save/first run) ----
+    if ScheduleStore.confirming: Rectangle {
+        background: Theme.bg-app.with-alpha(0.7);
+        TouchArea {}
+        Rectangle {
+            width: 460px; height: cbox.preferred-height; y: 60px;
+            x: (parent.width - self.width) / 2;
+            background: Theme.bg-elevated; border-radius: Theme.r-md; border-width: 1px; border-color: Theme.accent;
+            cbox := VerticalLayout {
+                padding: 16px; spacing: 12px;
+                Text { text: "Confirm this job"; color: Theme.text; font-size: 16px; font-weight: 700; }
+                Text { text: ScheduleStore.confirm-text; color: Theme.text-dim; font-family: "Geist Mono";
+                    font-size: Theme.fs-sm; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle { width: 90px; height: 32px; border-radius: Theme.r-sm; background: ccx.has-hover ? Theme.bg-panel : transparent;
+                        border-width: 1px; border-color: Theme.line;
+                        ccx := TouchArea { clicked => { ScheduleStore.cancel-edit(); } }
+                        Text { text: "Cancel"; color: Theme.text-dim; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; } }
+                    Rectangle { width: 130px; height: 32px; border-radius: Theme.r-sm; background: Pal.accent;
+                        cok := TouchArea { clicked => { ScheduleStore.confirm-save(); } }
+                        Text { text: "Save & schedule"; color: Pal.on-accent; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; } }
+                }
+            }
+        }
+    }
+}

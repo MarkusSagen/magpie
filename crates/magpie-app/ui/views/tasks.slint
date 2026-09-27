@@ -7,6 +7,7 @@ import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { TimeView } from "time.slint";
+import { ScheduleView } from "schedule.slint";
 
 export component TasksView inherits Rectangle {
     callback focus-search();
@@ -123,14 +124,14 @@ export component TasksView inherits Rectangle {
                     // button; the sidebar's Clipboard icon is the back button now.
                     HorizontalLayout {
                         spacing: 4px;
-                        for tv in ["today", "list", "board", "time"]: Rectangle {
+                        for tv in ["today", "list", "board", "time", "schedule"]: Rectangle {
                             height: 30px;
-                            width: 56px;
+                            width: tv == "schedule" ? 72px : 56px;
                             border-radius: 6px;
                             background: root.tasks-view == tv ? Pal.accent : (tvsw2.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             tvsw2 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
-                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : (tv == "board" ? "Board" : "Time"));
+                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : (tv == "board" ? "Board" : (tv == "time" ? "Time" : "Schedule")));
                                 color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
@@ -183,8 +184,10 @@ export component TasksView inherits Rectangle {
                 }
                 // Time tab (screen 24): entries + Pomodoro + this-week, from TimeStore.
                 if root.tasks-view == "time": TimeView { }
+                // Schedule tab (screen 29, Phase 21): cron jobs.
+                if root.tasks-view == "schedule": ScheduleView { }
 
-                if root.tasks-view != "time": HorizontalLayout {
+                if root.tasks-view != "time" && root.tasks-view != "schedule": HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
                     for f in [
@@ -203,7 +206,7 @@ export component TasksView inherits Rectangle {
                 }
                 // The list. `group_sort` already clusters by project + orders within,
                 // so a flat list reads correctly top-to-bottom.
-                if root.tasks-view != "time": ListView {
+                if root.tasks-view != "time" && root.tasks-view != "schedule": ListView {
                     for t[i] in root.tasks: VerticalLayout {
                         spacing: 0px;
                         // Project group header — shown once per project cluster so the

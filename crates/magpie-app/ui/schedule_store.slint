@@ -1,0 +1,43 @@
+import { JobRow } from "types.slint";
+
+// Schedule (cron jobs) state (Phase 21, PNG 29). Rust owns the job list; the editor
+// form is edited here and saved via `save` (which re-shows the command for confirm).
+export global ScheduleStore {
+    in property <[JobRow]> jobs;
+    in-out property <int> selected;
+
+    // Editor form (shown when `editing`).
+    in-out property <bool> editing;
+    in-out property <int> edit-id;        // -1 = new
+    in-out property <string> form-name;
+    in-out property <int> form-kind;      // 0 notification, 1 shell, 2 open, 3 url
+    in-out property <string> form-command;
+    in-out property <string> form-when;   // natural language OR cron
+    in-out property <string> form-cron;   // resolved cron (from `when`)
+    in-out property <string> form-dir;
+    in-out property <int> form-timeout;
+    in-out property <bool> form-notify;
+    in-out property <bool> form-os;       // Always (OS) vs While open
+    in-out property <string> next-runs;   // "tomorrow 09:00, Wed 09:00, …" preview
+    in-out property <string> form-error;
+
+    // Confirm gate (save + first run show the command).
+    in-out property <bool> confirming;
+    in-out property <string> confirm-text;
+
+    // Logs pane.
+    in-out property <bool> showing-logs;
+    in-out property <string> logs;
+
+    callback new-job();
+    callback edit-job(int);       // row index
+    callback delete-job(int);
+    callback run-now(int);
+    callback toggle-pause(int);
+    callback view-logs(int);
+    callback close-logs();
+    callback when-changed(string);  // recompute cron + next-runs preview
+    callback save();                // validate → open confirm
+    callback confirm-save();        // actually persist (+ install OS job) after confirm
+    callback cancel-edit();
+}
