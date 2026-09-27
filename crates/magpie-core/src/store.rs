@@ -148,6 +148,35 @@ const MIGRATIONS: &[&str] = &[
     // exempts it from the 30-day scratch retention sweep.
     "ALTER TABLE notes ADD COLUMN scratch INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE notes ADD COLUMN scratch_pinned INTEGER NOT NULL DEFAULT 0;",
+    // v8: scheduled jobs (Phase 21). Jobs are created ONLY via the UI and live in this
+    // encrypted DB — never a plaintext file, never from project files. `command_hash`
+    // is verified before every run so an OS scheduler entry (which only ever calls
+    // `magpie --run-job <id>`) can't be made to run something else. `os_managed` = 0 is
+    // Magpie's own while-open scheduler; 1 is exported to the OS scheduler.
+    "CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        command TEXT NOT NULL,
+        cron TEXT NOT NULL,
+        working_dir TEXT NOT NULL DEFAULT '',
+        timeout_secs INTEGER NOT NULL DEFAULT 300,
+        notify_on_failure INTEGER NOT NULL DEFAULT 1,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        os_managed INTEGER NOT NULL DEFAULT 0,
+        command_hash TEXT NOT NULL DEFAULT '',
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );
+    CREATE TABLE job_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER,
+        exit_code INTEGER,
+        stdout TEXT NOT NULL DEFAULT '',
+        stderr TEXT NOT NULL DEFAULT ''
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -618,6 +647,7 @@ mod tests {
         s.conn
             .execute_batch(
                 "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
+                 DROP TABLE jobs; DROP TABLE job_runs; \
                  ALTER TABLE notes DROP COLUMN scratch; \
                  ALTER TABLE notes DROP COLUMN scratch_pinned; \
                  PRAGMA user_version = 3;",
