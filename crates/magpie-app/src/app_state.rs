@@ -61,9 +61,10 @@ pub struct AppState {
     pub projects_roots: Vec<String>,
     pub project_scan: Mutex<ProjectScanState>,
     /// How overlapping project-file edits resolve (Phase 18b): Ask or FileWins.
-    pub project_conflict_policy: magpie_core::projects::ConflictPolicy,
+    /// Interior-mutable so Settings can change it live.
+    pub project_conflict_policy: Mutex<magpie_core::projects::ConflictPolicy>,
     /// Append `.magpie/` to each git project's `.git/info/exclude` on scan (Phase 18b).
-    pub projects_keep_magpie_out_of_git: bool,
+    pub projects_keep_magpie_out_of_git: std::sync::atomic::AtomicBool,
     /// Unresolved project-file conflicts awaiting Review (Phase 18b).
     pub project_conflicts: Mutex<Vec<ProjConflict>>,
     /// Negative synthetic `note_id` → the project file its task came from, so a toggle
@@ -76,7 +77,8 @@ pub struct AppState {
     /// autosave, pin and "file" target this id. -1 = none loaded yet.
     pub scratch_shown_id: Mutex<i64>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
-    pub popover_default_tab: i32,
+    /// Interior-mutable so Settings can change it live.
+    pub popover_default_tab: std::sync::atomic::AtomicI32,
     /// Per-category "open with" app map (from `Config::open_with`).
     pub open_with: std::collections::BTreeMap<String, String>,
     /// Quick-clipboard popover pinned as a persistent, docked side panel.
@@ -310,13 +312,15 @@ mod tests {
             pomodoro: std::sync::Mutex::new(crate::app_state::PomodoroState::default()),
             projects_roots: Vec::new(),
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
-            project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
-            projects_keep_magpie_out_of_git: false,
+            project_conflict_policy: std::sync::Mutex::new(
+                magpie_core::projects::ConflictPolicy::Ask,
+            ),
+            projects_keep_magpie_out_of_git: std::sync::atomic::AtomicBool::new(false),
             project_conflicts: std::sync::Mutex::new(Vec::new()),
             project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
             project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
             scratch_shown_id: std::sync::Mutex::new(-1),
-            popover_default_tab: 3,
+            popover_default_tab: std::sync::atomic::AtomicI32::new(3),
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),
             popover_size: std::sync::Mutex::new((360, 440)),

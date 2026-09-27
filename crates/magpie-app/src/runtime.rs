@@ -91,22 +91,26 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
             ignored: cfg.projects_ignored.clone(),
             ..Default::default()
         }),
-        project_conflict_policy: if cfg.project_sync_conflict == "file" {
+        project_conflict_policy: std::sync::Mutex::new(if cfg.project_sync_conflict == "file" {
             magpie_core::projects::ConflictPolicy::FileWins
         } else {
             magpie_core::projects::ConflictPolicy::Ask
-        },
-        projects_keep_magpie_out_of_git: cfg.projects_keep_magpie_out_of_git,
+        }),
+        projects_keep_magpie_out_of_git: std::sync::atomic::AtomicBool::new(
+            cfg.projects_keep_magpie_out_of_git,
+        ),
         project_conflicts: std::sync::Mutex::new(Vec::new()),
         project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
         project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
         scratch_shown_id: std::sync::Mutex::new(-1),
-        popover_default_tab: match cfg.popover_default_tab.as_str() {
-            "tasks" => 0,
-            "today" => 1,
-            "daily" => 2,
-            _ => 3, // clipboard (default)
-        },
+        popover_default_tab: std::sync::atomic::AtomicI32::new(
+            match cfg.popover_default_tab.as_str() {
+                "tasks" => 0,
+                "today" => 1,
+                "daily" => 2,
+                _ => 3, // clipboard (default)
+            },
+        ),
         open_with: cfg.open_with.clone(),
         popover_pinned: std::sync::atomic::AtomicBool::new(cfg.popover_pinned),
         popover_size: std::sync::Mutex::new(magpie_app::panel::clamp_size(
@@ -2706,12 +2710,11 @@ fn toggle_project_task(
         Some(m) => m,
         None => return false, // not a task line in this format
     };
-    let r = magpie_core::projects::reconcile_file(
-        &baseline,
-        &mine,
-        &disk,
-        state.project_conflict_policy,
-    );
+    let policy = *state
+        .project_conflict_policy
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let r = magpie_core::projects::reconcile_file(&baseline, &mine, &disk, policy);
     if let Some(w) = &r.write {
         if std::fs::write(file_abs, w).is_err() {
             return false;
@@ -2851,7 +2854,9 @@ fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
             .lock()
             .map(|g| g.ignored.clone())
             .unwrap_or_default();
-        let keep_out = state.projects_keep_magpie_out_of_git;
+        let keep_out = state
+            .projects_keep_magpie_out_of_git
+            .load(std::sync::atomic::Ordering::Relaxed);
         std::thread::spawn(move || {
             // Include repos so editor/repo-only folders land in the Found inbox.
             let (hits, snapshots) = magpie_app::projects::scan(&roots, 4, true, &ignored);
@@ -3811,6 +3816,131 @@ fn task_row_with_tracking(
         bookmarked: t.bookmarked,
         tracking,
         time_total: SharedString::from(magpie_app::format_time::fmt_duration(total_ms)),
+    }
+}
+
+/// The config token for a popover-tab index.
+fn popover_tab_token(i: i32) -> &'static str {
+    match i {
+        0 => "tasks",
+        1 => "today",
+        2 => "daily",
+        _ => "clipboard",
+    }
+}
+
+/// Pretty-print a hotkey spec (`super+alt+space`) with mac glyphs (`⌘⌥Space`).
+fn pretty_hotkey(spec: &str) -> String {
+    let mut out = String::new();
+    for part in spec.split('+') {
+        let p = part.trim().to_ascii_lowercase();
+        let glyph = match p.as_str() {
+            "super" | "cmd" | "command" => "⌘",
+            "alt" | "option" | "opt" => "⌥",
+            "shift" => "⇧",
+            "ctrl" | "control" => "⌃",
+            "space" => "Space",
+            _ => "",
+        };
+        if glyph.is_empty() {
+            out.push_str(&p.to_uppercase());
+        } else {
+            out.push_str(glyph);
+        }
+    }
+    out
+}
+
+/// The scratch-hotkey presets the Settings row cycles through.
+const SCRATCH_HOTKEY_PRESETS: &[&str] = &[
+    "super+alt+space",
+    "alt+shift+space",
+    "super+shift+space",
+    "super+alt+s",
+];
+
+/// Populate the Settings → Features controls from the current state/config.
+fn init_settings_props(ui: &LauncherWindow, state: &AppState, cfg: &Config) {
+    use std::sync::atomic::Ordering::Relaxed;
+    ui.set_settings_popover_tab(state.popover_default_tab.load(Relaxed));
+    ui.set_settings_sync_file_wins(matches!(
+        *state
+            .project_conflict_policy
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()),
+        magpie_core::projects::ConflictPolicy::FileWins
+    ));
+    ui.set_settings_keep_git(state.projects_keep_magpie_out_of_git.load(Relaxed));
+    ui.set_settings_scratch_hotkey(pretty_hotkey(&cfg.scratch_hotkey).into());
+}
+
+/// Wire the Settings → Features callbacks: apply live + persist to config.
+fn wire_settings(ui: &LauncherWindow, state: &Arc<AppState>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_popover_tab(move |i| {
+            s.popover_default_tab.store(i, Relaxed);
+            let path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&path);
+            cfg.popover_default_tab = popover_tab_token(i).to_string();
+            let _ = magpie_app::config::save(&cfg, &path);
+            if let Some(ui) = w.upgrade() {
+                ui.set_settings_popover_tab(i);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_sync_policy(move |file_wins| {
+            *s.project_conflict_policy
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = if file_wins {
+                magpie_core::projects::ConflictPolicy::FileWins
+            } else {
+                magpie_core::projects::ConflictPolicy::Ask
+            };
+            let path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&path);
+            cfg.project_sync_conflict = if file_wins { "file" } else { "ask" }.into();
+            let _ = magpie_app::config::save(&cfg, &path);
+            if let Some(ui) = w.upgrade() {
+                ui.set_settings_sync_file_wins(file_wins);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_keep_git(move |b| {
+            s.projects_keep_magpie_out_of_git.store(b, Relaxed);
+            let path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&path);
+            cfg.projects_keep_magpie_out_of_git = b;
+            let _ = magpie_app::config::save(&cfg, &path);
+            if let Some(ui) = w.upgrade() {
+                ui.set_settings_keep_git(b);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_cycle_scratch_hotkey(move || {
+            let path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&path);
+            let cur = SCRATCH_HOTKEY_PRESETS
+                .iter()
+                .position(|p| *p == cfg.scratch_hotkey)
+                .unwrap_or(0);
+            let next = SCRATCH_HOTKEY_PRESETS[(cur + 1) % SCRATCH_HOTKEY_PRESETS.len()];
+            cfg.scratch_hotkey = next.to_string();
+            let _ = magpie_app::config::save(&cfg, &path);
+            if let Some(ui) = w.upgrade() {
+                ui.set_settings_scratch_hotkey(pretty_hotkey(next).into());
+            }
+        });
     }
 }
 
@@ -6555,6 +6685,8 @@ pub fn start() {
     scratch.set_theme_index(theme_idx as i32);
     wire_scratch(&scratch, &state);
     wire_schedule(&ui, &state);
+    init_settings_props(&ui, &state, &cfg);
+    wire_settings(&ui, &state);
     popover.set_pinned(cfg.popover_pinned);
 
     // Match the native window chrome (titlebar / traffic-light strip) to the
@@ -9744,7 +9876,10 @@ pub fn start() {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(p) = pw.upgrade() {
                 refresh_popover(&p, &s);
-                p.set_tab(s.popover_default_tab);
+                p.set_tab(
+                    s.popover_default_tab
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                );
                 p.set_pinned(true);
                 present_popover(&p, &s, None);
                 let _ = p.show();
@@ -10071,7 +10206,10 @@ fn build_tray(
                                 refresh_popover(&p, &s);
                                 // Open on the user's preferred tab (clipboard by default) —
                                 // this popover is the quick, from-anywhere clipboard menu.
-                                p.set_tab(s.popover_default_tab);
+                                p.set_tab(
+                                    s.popover_default_tab
+                                        .load(std::sync::atomic::Ordering::Relaxed),
+                                );
                                 p.set_pinned(
                                     s.popover_pinned.load(std::sync::atomic::Ordering::Relaxed),
                                 );

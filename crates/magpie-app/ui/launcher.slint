@@ -76,6 +76,15 @@ export component LauncherWindow inherits Window {
     in-out property <int> theme-index: 0;
     // Select a theme by catalogue index (see themes.rs / Theme.palettes).
     callback set-theme(int);
+    // Settings → Features (wired to config).
+    in-out property <int> settings-popover-tab;
+    in-out property <bool> settings-sync-file-wins;
+    in-out property <bool> settings-keep-git;
+    in-out property <string> settings-scratch-hotkey;
+    callback set-popover-tab(int);
+    callback set-sync-policy(bool);
+    callback set-keep-git(bool);
+    callback cycle-scratch-hotkey();
     // Transforms (⌘T) palette state.
     in-out property <string> transform-input;
     in-out property <int> transform-selected;
@@ -760,6 +769,14 @@ export component LauncherWindow inherits Window {
             mode <=> root.mode;
             theme-index: root.theme-index;
             set-theme(i) => { root.set-theme(i); }
+            popover-tab: root.settings-popover-tab;
+            sync-file-wins: root.settings-sync-file-wins;
+            keep-git: root.settings-keep-git;
+            scratch-hotkey: root.settings-scratch-hotkey;
+            set-popover-tab(i) => { root.set-popover-tab(i); }
+            set-sync-policy(b) => { root.set-sync-policy(b); }
+            set-keep-git(b) => { root.set-keep-git(b); }
+            cycle-scratch-hotkey() => { root.cycle-scratch-hotkey(); }
         }
         if root.mode == "transform": TransformsView {
             mode <=> root.mode;
