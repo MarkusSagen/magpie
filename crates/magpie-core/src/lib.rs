@@ -18,6 +18,7 @@ pub mod calc_history;
 pub mod calendar;
 pub mod case;
 pub mod color;
+pub mod cron;
 pub mod delete;
 pub mod detect;
 pub mod edit;
