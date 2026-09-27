@@ -91,7 +91,7 @@ export component ProjectsView inherits HorizontalLayout {
             HorizontalLayout {
                 spacing: 8px;
                 alignment: start;
-                for chip in [ProjectsStore.detail-branch, ProjectsStore.detail-tag, ProjectsStore.detail-week]: Rectangle {
+                for chip in [ProjectsStore.detail-branch, ProjectsStore.detail-tag, ProjectsStore.detail-tags, ProjectsStore.detail-week]: Rectangle {
                     height: 28px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
                     visible: chip != "";
                     HorizontalLayout { padding-left: 10px; padding-right: 10px;

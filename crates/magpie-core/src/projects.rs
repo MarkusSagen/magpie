@@ -133,6 +133,77 @@ pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
     Some(joined)
 }
 
+/// Metadata read from a project's `.magpie/project.toml` (Phase 18b). All fields are
+/// optional; a missing or unparsable file yields defaults (folder name is used).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectMeta {
+    pub name: Option<String>,
+    pub tags: Vec<String>,
+    pub time_budget_minutes: Option<i64>,
+}
+
+/// Parse a `.magpie/project.toml`. A tiny hand-rolled reader for the documented shape
+/// (`name = "…"`, `tags = ["a", "b"]`, `time_budget_minutes = N`) — no serde/toml
+/// dependency, matching how `parse_espanso_yaml` stays dependency-free. Unknown keys
+/// and `[sections]` are ignored; `#` starts a line comment (outside quotes).
+pub fn parse_project_toml(content: &str) -> ProjectMeta {
+    let mut meta = ProjectMeta::default();
+    for raw in content.lines() {
+        let line = strip_toml_comment(raw).trim();
+        if line.is_empty() || line.starts_with('[') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        match key {
+            "name" => {
+                let n = unquote(value);
+                if !n.is_empty() {
+                    meta.name = Some(n);
+                }
+            }
+            "tags" => {
+                meta.tags = parse_toml_string_array(value);
+            }
+            "time_budget_minutes" => {
+                meta.time_budget_minutes = value.parse::<i64>().ok();
+            }
+            _ => {}
+        }
+    }
+    meta
+}
+
+/// Drop a `#` line comment, but not a `#` inside a quoted string.
+fn strip_toml_comment(line: &str) -> &str {
+    let mut in_quote = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => in_quote = !in_quote,
+            '#' if !in_quote => return &line[..i],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Strip surrounding double quotes (and trim) from a scalar TOML string.
+fn unquote(s: &str) -> String {
+    s.trim().trim_matches('"').to_string()
+}
+
+/// Parse `["a", "b"]` into the quoted strings it contains (order preserved).
+fn parse_toml_string_array(s: &str) -> Vec<String> {
+    let inner = s.trim().trim_start_matches('[').trim_end_matches(']');
+    inner
+        .split(',')
+        .map(unquote)
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
 /// How to resolve overlapping edits when reconciling a project file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictPolicy {
@@ -363,6 +434,34 @@ mod tests {
         assert_eq!(r.write, None);
         assert_eq!(r.new_baseline.as_deref(), Some(s));
         assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn parse_project_toml_reads_documented_shape() {
+        let toml = r#"
+            # a project
+            name = "Home renovation"
+            tags = ["hobby", "house"]
+            time_budget_minutes = 600
+        "#;
+        let m = parse_project_toml(toml);
+        assert_eq!(m.name.as_deref(), Some("Home renovation"));
+        assert_eq!(m.tags, vec!["hobby".to_string(), "house".to_string()]);
+        assert_eq!(m.time_budget_minutes, Some(600));
+    }
+
+    #[test]
+    fn parse_project_toml_tolerates_missing_and_extra() {
+        // Empty → all defaults.
+        assert_eq!(parse_project_toml(""), ProjectMeta::default());
+        // Unknown keys + sections ignored; `#` in a quoted value preserved.
+        let m = parse_project_toml("[meta]\nother = 1\nname = \"a # b\"\ntags = []\n");
+        assert_eq!(m.name.as_deref(), Some("a # b"));
+        assert!(m.tags.is_empty());
+        assert_eq!(m.time_budget_minutes, None);
+        // A trailing comment is stripped.
+        let m2 = parse_project_toml("name = \"x\"  # the name\n");
+        assert_eq!(m2.name.as_deref(), Some("x"));
     }
 
     #[test]

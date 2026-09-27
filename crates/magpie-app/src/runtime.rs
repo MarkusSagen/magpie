@@ -96,6 +96,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         } else {
             magpie_core::projects::ConflictPolicy::Ask
         },
+        projects_keep_magpie_out_of_git: cfg.projects_keep_magpie_out_of_git,
         project_conflicts: std::sync::Mutex::new(Vec::new()),
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
@@ -2756,9 +2757,16 @@ fn refresh_projects(ui: &LauncherWindow, state: &Arc<AppState>, rescan: bool) {
             .lock()
             .map(|g| g.ignored.clone())
             .unwrap_or_default();
+        let keep_out = state.projects_keep_magpie_out_of_git;
         std::thread::spawn(move || {
             // Include repos so editor/repo-only folders land in the Found inbox.
             let (hits, snapshots) = magpie_app::projects::scan(&roots, 4, true, &ignored);
+            // Optionally keep each project's `.magpie/` out of git (private exclude).
+            if keep_out {
+                for h in hits.iter().filter(|h| h.syncable()) {
+                    let _ = magpie_app::projects::ensure_git_excluded(&h.path);
+                }
+            }
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
                     {
@@ -2854,6 +2862,14 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
             format!("branch {}", h.branch).into()
         });
         ps.set_detail_tag(format!("#{}", magpie_core::projects::project_tag(&h.name)).into());
+        ps.set_detail_tags(
+            h.tags
+                .iter()
+                .map(|t| format!("#{t}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .into(),
+        );
         let open = h.open_tasks();
         ps.set_detail_week(format!("{open} open").into());
 

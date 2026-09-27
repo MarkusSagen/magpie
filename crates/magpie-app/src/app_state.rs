@@ -62,6 +62,8 @@ pub struct AppState {
     pub project_scan: Mutex<ProjectScanState>,
     /// How overlapping project-file edits resolve (Phase 18b): Ask or FileWins.
     pub project_conflict_policy: magpie_core::projects::ConflictPolicy,
+    /// Append `.magpie/` to each git project's `.git/info/exclude` on scan (Phase 18b).
+    pub projects_keep_magpie_out_of_git: bool,
     /// Unresolved project-file conflicts awaiting Review (Phase 18b).
     pub project_conflicts: Mutex<Vec<ProjConflict>>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
@@ -287,6 +289,7 @@ mod tests {
             projects_roots: Vec::new(),
             project_scan: std::sync::Mutex::new(crate::app_state::ProjectScanState::default()),
             project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
+            projects_keep_magpie_out_of_git: false,
             project_conflicts: std::sync::Mutex::new(Vec::new()),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),

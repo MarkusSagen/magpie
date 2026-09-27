@@ -113,6 +113,10 @@ pub struct Config {
     /// the file + surface the conflict, default) or `file` (the disk always wins).
     #[serde(default = "default_project_sync_conflict")]
     pub project_sync_conflict: String,
+    /// Keep each project's `.magpie/` out of git by appending it to that repo's
+    /// private `.git/info/exclude` on scan (never edits a tracked `.gitignore`).
+    #[serde(default)]
+    pub projects_keep_magpie_out_of_git: bool,
 }
 
 fn default_project_sync_conflict() -> String {
@@ -174,6 +178,7 @@ impl Default for Config {
             popover_height: default_popover_height(),
             sidebar_collapsed_groups: Vec::new(),
             project_sync_conflict: default_project_sync_conflict(),
+            projects_keep_magpie_out_of_git: false,
         }
     }
 }

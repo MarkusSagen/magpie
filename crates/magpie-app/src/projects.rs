@@ -29,6 +29,8 @@ pub struct ProjectHit {
     pub markers: Vec<Marker>,
     pub branch: String,
     pub tasks: Vec<ProjTask>,
+    /// Tags from `.magpie/project.toml` (Phase 18b), e.g. `["hobby"]`.
+    pub tags: Vec<String>,
 }
 
 impl ProjectHit {
@@ -151,10 +153,16 @@ pub fn scan(
         if ignored.iter().any(|ig| ig == &display) {
             continue;
         }
-        let name = dir
+        let folder_name = dir
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| display.clone());
+        // `.magpie/project.toml` may override the display name + carry tags.
+        let meta = std::fs::read_to_string(dir.join(".magpie/project.toml"))
+            .ok()
+            .map(|c| magpie_core::projects::parse_project_toml(&c))
+            .unwrap_or_default();
+        let name = meta.name.clone().unwrap_or(folder_name);
         let mut tasks = Vec::new();
         if syncable {
             // Dedupe by canonical path so a case-insensitive filesystem (macOS/Windows)
@@ -183,6 +191,7 @@ pub fn scan(
             markers,
             branch: git_branch(&dir),
             tasks,
+            tags: meta.tags,
         });
     }
     hits.sort_by_key(|h| h.name.to_lowercase());
@@ -199,6 +208,34 @@ pub fn display_path(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// Keep `.magpie/` out of git for a project by appending it to `.git/info/exclude`
+/// (a private, per-clone ignore — never touches a tracked `.gitignore`). No-op unless
+/// the folder has both a `.git` dir and a `.magpie/` dir and doesn't already exclude
+/// it. Returns true if the entry was added. Magpie never runs git itself.
+pub fn ensure_git_excluded(project_dir: &Path) -> std::io::Result<bool> {
+    let git = project_dir.join(".git");
+    if !git.is_dir() || !project_dir.join(".magpie").is_dir() {
+        return Ok(false);
+    }
+    let info = git.join("info");
+    std::fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|l| matches!(l.trim(), ".magpie/" | ".magpie"))
+    {
+        return Ok(false);
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(".magpie/\n");
+    std::fs::write(&exclude, out)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +246,62 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn ensure_git_excluded_appends_once() {
+        let root = tmp("git-exclude");
+        let proj = root.join("p");
+        std::fs::create_dir_all(proj.join(".magpie")).unwrap();
+        std::fs::create_dir_all(proj.join(".git/info")).unwrap();
+        std::fs::write(proj.join(".git/info/exclude"), "# existing\n*.log\n").unwrap();
+
+        assert!(ensure_git_excluded(&proj).unwrap(), "adds the entry");
+        let body = std::fs::read_to_string(proj.join(".git/info/exclude")).unwrap();
+        assert!(body.contains("\n.magpie/\n"));
+        assert!(
+            body.starts_with("# existing\n*.log\n"),
+            "preserves existing"
+        );
+        // Idempotent.
+        assert!(!ensure_git_excluded(&proj).unwrap(), "no double-add");
+        assert_eq!(
+            std::fs::read_to_string(proj.join(".git/info/exclude"))
+                .unwrap()
+                .matches(".magpie/")
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ensure_git_excluded_noop_without_git_or_magpie() {
+        let root = tmp("git-exclude-none");
+        let proj = root.join("p");
+        std::fs::create_dir_all(proj.join(".magpie")).unwrap(); // no .git
+        assert!(!ensure_git_excluded(&proj).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_reads_project_toml_name_and_tags() {
+        let root = tmp("meta");
+        let proj = root.join("folder-slug");
+        std::fs::create_dir_all(proj.join(".magpie")).unwrap();
+        std::fs::write(
+            proj.join(".magpie/project.toml"),
+            "name = \"Pretty Name\"\ntags = [\"hobby\"]\n",
+        )
+        .unwrap();
+        std::fs::write(proj.join(".magpie/tasks.md"), "- [ ] a\n").unwrap();
+        let (hits, _snap) = scan(&[root.to_string_lossy().to_string()], 4, true, &[]);
+        let hit = hits
+            .iter()
+            .find(|h| h.name == "Pretty Name")
+            .expect("name from project.toml");
+        assert_eq!(hit.tags, vec!["hobby".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
