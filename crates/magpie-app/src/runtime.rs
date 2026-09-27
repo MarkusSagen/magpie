@@ -1,11 +1,11 @@
 use crate::{
     ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
-    EntryRow, FavoriteRow, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM, MdSpan,
-    NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore, RecentData, RefRow,
-    SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
-    SearchTreeRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore,
-    WorldClockRow, WorldClockStore,
+    EntryRow, FavoriteRow, FileTarget, GraphEdge, GraphNode, JournalRow, LauncherWindow, MdLineVM,
+    MdSpan, NoteRender, NoteRow, Popover, ProjTaskRow, ProjectListRow, ProjectsStore, RecentData,
+    RefRow, ScratchRow, ScratchStore, ScratchWindow, SearchBookmarkRow, SearchFile, SearchLine,
+    SearchNoteRow, SearchStore, SearchTaskRow, SearchTreeRow, SlotItem, SnippetRow, SnippetsStore,
+    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -100,6 +100,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         project_conflicts: std::sync::Mutex::new(Vec::new()),
         project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
         project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
+        scratch_shown_id: std::sync::Mutex::new(-1),
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
             "today" => 1,
@@ -5458,13 +5459,381 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
 enum HotAction {
     Launcher,
     QuickPaste(usize),
+    Scratch,
 }
 
-/// Register launcher + quick-paste hotkeys and drain their events on a thread.
+/// A short title for an Earlier-scratch row: its first non-empty line.
+fn scratch_title(body: &str) -> String {
+    let first = body
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if first.is_empty() {
+        "Empty scratch".to_string()
+    } else {
+        first.chars().take(60).collect()
+    }
+}
+
+/// Load the shown scratch (body, pin, Earlier list) into the window and show the Now
+/// tab. Resolves the shown note: the last shown if it still exists, else the newest
+/// scratch (creating an empty one if there are none).
+fn refresh_scratch(sc: &ScratchWindow, state: &AppState) {
+    let now = now_ms();
+    let prev = *state
+        .scratch_shown_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (id, body, pinned, earlier) = {
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        let note = (prev >= 0)
+            .then_some(prev)
+            .and_then(|id| store.get_note(id).ok().flatten())
+            .or_else(|| store.scratch_current(now).ok());
+        let note = match note {
+            Some(n) => n,
+            None => return,
+        };
+        let pinned = store.scratch_is_pinned(note.id).unwrap_or(false);
+        let earlier: Vec<ScratchRow> = store
+            .scratch_earlier(60)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|n| ScratchRow {
+                id: n.id as i32,
+                title: SharedString::from(scratch_title(&n.body)),
+                when: SharedString::from(relative_time(n.updated_at_ms, now)),
+                pinned: store.scratch_is_pinned(n.id).unwrap_or(false),
+            })
+            .collect();
+        (note.id, note.body, pinned, earlier)
+    };
+    *state
+        .scratch_shown_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = id;
+    let ss = sc.global::<ScratchStore>();
+    ss.set_body(SharedString::from(body));
+    ss.set_pinned(pinned);
+    ss.set_earlier(ModelRc::new(VecModel::from(earlier)));
+    ss.set_tab(0);
+    ss.set_filing(false);
+}
+
+/// Show the scratch window (loading the current scratch) or hide it, returning focus
+/// to the previous app on hide.
+fn toggle_scratch(sc: &ScratchWindow, state: &AppState) {
+    if sc.window().is_visible() {
+        let _ = sc.hide();
+        magpie_platform::hide_and_yield_focus();
+    } else {
+        refresh_scratch(sc, state);
+        sc.window().set_size(slint::LogicalSize::new(720.0, 520.0));
+        let _ = sc.show();
+        magpie_platform::raise_to_front();
+    }
+}
+
+/// The non-empty lines of the scratch body (what "File all" acts on).
+fn scratch_lines(body: &str) -> Vec<String> {
+    body.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// Ensure a line is a Markdown task (`- [ ] …`) for task destinations.
+fn as_task_line(line: &str) -> String {
+    let t = line.trim_start();
+    if t.starts_with("- [ ] ") || t.starts_with("- [x] ") || t.starts_with("- [/] ") {
+        line.to_string()
+    } else {
+        format!("- [ ] {}", line.trim())
+    }
+}
+
+/// The "File N lines to…" targets (Phase 20), in the fixed order the menu renders.
+fn scratch_file_targets(state: &AppState) -> Vec<FileTarget> {
+    let proj = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        g.hits.iter().find(|h| h.syncable()).map(|h| h.name.clone())
+    };
+    let append_note = {
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .recent_notes(30)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|n| !n.is_daily && !n.name.starts_with("scratch-"))
+            .map(|n| n.name)
+    };
+    let today = abs_date(now_ms());
+    let mk = |label: &str, detail: String, key: &str| FileTarget {
+        label: SharedString::from(label),
+        detail: SharedString::from(detail),
+        key: SharedString::from(key),
+    };
+    vec![
+        mk(
+            &proj
+                .as_ref()
+                .map(|p| format!("Tasks in {p}"))
+                .unwrap_or_else(|| "Tasks in project".to_string()),
+            proj.clone().map(|_| String::new()).unwrap_or_default(),
+            "1",
+        ),
+        mk("Tasks · Inbox", "no project".to_string(), "2"),
+        mk(
+            "Append to note…",
+            append_note.clone().unwrap_or_default(),
+            "3",
+        ),
+        mk("Today's daily note", today, "4"),
+        mk("New note", String::new(), "5"),
+        mk("Snippet", String::new(), "6"),
+    ]
+}
+
+/// File `lines` to target index `idx` (see `scratch_file_targets`). Reuses the note /
+/// snippet / project-file creation paths. Never runs anything; just writes text.
+fn file_scratch_lines(state: &AppState, idx: i32, lines: &[String]) {
+    let now = now_ms();
+    let joined_tasks = lines
+        .iter()
+        .map(|l| as_task_line(l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let joined_raw = lines.join("\n");
+    let append_to_note = |name: &str, text: &str, as_tasks: bool| {
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(note) = store.upsert_note_by_name(name, now) {
+            let mut body = note.body.clone();
+            if !body.is_empty() && !body.ends_with('\n') {
+                body.push('\n');
+            }
+            body.push_str(if as_tasks { &joined_tasks } else { text });
+            body.push('\n');
+            let _ = store.update_note_body(note.id, &body, now);
+        }
+    };
+    match idx {
+        0 => {
+            // Tasks in the first syncable project: append to its primary task file.
+            let target = {
+                let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.hits.iter().find(|h| h.syncable()).and_then(|h| {
+                    h.tasks
+                        .first()
+                        .map(|t| (h.path.clone(), t.file_rel.clone(), t.file_abs.clone()))
+                        .or_else(|| {
+                            Some((
+                                h.path.clone(),
+                                ".magpie/tasks.md".to_string(),
+                                h.path.join(".magpie/tasks.md"),
+                            ))
+                        })
+                })
+            };
+            if let Some((root, rel, file_abs)) = target {
+                if let Some(parent) = file_abs.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let mut content = std::fs::read_to_string(&file_abs).unwrap_or_default();
+                if !content.is_empty() && !content.ends_with('\n') {
+                    content.push('\n');
+                }
+                content.push_str(&joined_tasks);
+                content.push('\n');
+                if std::fs::write(&file_abs, &content).is_ok() {
+                    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ =
+                        store.set_project_baseline(&root.to_string_lossy(), &rel, &content, now);
+                }
+            } else {
+                append_to_note("Inbox", "", true);
+            }
+        }
+        1 => append_to_note("Inbox", "", true),
+        2 => {
+            let name = {
+                let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                store
+                    .recent_notes(30)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|n| !n.is_daily && !n.name.starts_with("scratch-"))
+                    .map(|n| n.name)
+            };
+            append_to_note(
+                &name.unwrap_or_else(|| "Notes".to_string()),
+                &joined_raw,
+                false,
+            );
+        }
+        3 => {
+            let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+            if let Ok(note) = store.daily_note(&abs_date(now), now) {
+                let mut body = note.body.clone();
+                if !body.is_empty() && !body.ends_with('\n') {
+                    body.push('\n');
+                }
+                body.push_str(&joined_tasks);
+                body.push('\n');
+                let _ = store.update_note_body(note.id, &body, now);
+            }
+        }
+        4 => {
+            let title = scratch_title(&joined_raw);
+            let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+            if let Ok(note) = store.upsert_note_by_name(&title, now) {
+                let _ = store.update_note_body(note.id, &joined_raw, now);
+            }
+        }
+        5 => {
+            let name = scratch_title(&joined_raw);
+            let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = store.add_snippet(&name, "", &joined_raw, "snippet", now);
+        }
+        _ => {}
+    }
+}
+
+/// Wire the scratch window's callbacks (autosave, tabs, pin, new, dismiss, File-to).
+fn wire_scratch(sc: &ScratchWindow, state: &Arc<AppState>) {
+    let ss = sc.global::<ScratchStore>();
+    {
+        let s = state.clone();
+        ss.on_edited(move |text| {
+            let id = *s.scratch_shown_id.lock().unwrap_or_else(|e| e.into_inner());
+            if id >= 0 {
+                let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = store.update_note_body(id, &text, now_ms());
+            }
+        });
+    }
+    {
+        let sw = sc.as_weak();
+        ss.on_set_tab(move |t| {
+            if let Some(sc) = sw.upgrade() {
+                sc.global::<ScratchStore>().set_tab(t);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let sw = sc.as_weak();
+        ss.on_open_earlier(move |i| {
+            if let Some(sc) = sw.upgrade() {
+                let id = {
+                    let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    store
+                        .scratch_earlier(60)
+                        .ok()
+                        .and_then(|v| v.get(i as usize).map(|n| n.id))
+                };
+                if let Some(id) = id {
+                    *s.scratch_shown_id.lock().unwrap_or_else(|e| e.into_inner()) = id;
+                    refresh_scratch(&sc, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let sw = sc.as_weak();
+        ss.on_toggle_pin(move || {
+            if let Some(sc) = sw.upgrade() {
+                let id = *s.scratch_shown_id.lock().unwrap_or_else(|e| e.into_inner());
+                if id >= 0 {
+                    let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    let cur = store.scratch_is_pinned(id).unwrap_or(false);
+                    let _ = store.set_scratch_pinned(id, !cur);
+                    drop(store);
+                    refresh_scratch(&sc, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let sw = sc.as_weak();
+        ss.on_new_scratch(move || {
+            if let Some(sc) = sw.upgrade() {
+                let id = {
+                    let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    store.new_scratch(now_ms()).map(|n| n.id).unwrap_or(-1)
+                };
+                *s.scratch_shown_id.lock().unwrap_or_else(|e| e.into_inner()) = id;
+                refresh_scratch(&sc, &s);
+            }
+        });
+    }
+    {
+        let sw = sc.as_weak();
+        ss.on_dismiss(move || {
+            if let Some(sc) = sw.upgrade() {
+                let _ = sc.hide();
+            }
+            magpie_platform::hide_and_yield_focus();
+        });
+    }
+    {
+        let s = state.clone();
+        let sw = sc.as_weak();
+        ss.on_begin_file(move |_all| {
+            if let Some(sc) = sw.upgrade() {
+                let store = sc.global::<ScratchStore>();
+                let lines = scratch_lines(&store.get_body());
+                if lines.is_empty() {
+                    return;
+                }
+                store.set_filing_count(lines.len() as i32);
+                store.set_targets(ModelRc::new(VecModel::from(scratch_file_targets(&s))));
+                store.set_filing(true);
+            }
+        });
+    }
+    {
+        let sw = sc.as_weak();
+        ss.on_cancel_file(move || {
+            if let Some(sc) = sw.upgrade() {
+                sc.global::<ScratchStore>().set_filing(false);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let sw = sc.as_weak();
+        ss.on_choose_target(move |idx, keep| {
+            if let Some(sc) = sw.upgrade() {
+                let lines = scratch_lines(&sc.global::<ScratchStore>().get_body());
+                file_scratch_lines(&s, idx, &lines);
+                sc.global::<ScratchStore>().set_filing(false);
+                if keep {
+                    refresh_scratch(&sc, &s);
+                } else {
+                    // Filed lines leave the scratch: clear the body + hide.
+                    let id = *s.scratch_shown_id.lock().unwrap_or_else(|e| e.into_inner());
+                    if id >= 0 {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = store.update_note_body(id, "", now_ms());
+                    }
+                    refresh_scratch(&sc, &s);
+                    let _ = sc.hide();
+                    magpie_platform::hide_and_yield_focus();
+                }
+            }
+        });
+    }
+}
+
+/// Register launcher + quick-paste + scratch hotkeys and drain their events on a thread.
 fn spawn_hotkeys(
     cfg: &Config,
     state: Arc<AppState>,
     weak: slint::Weak<LauncherWindow>,
+    scratch: slint::Weak<ScratchWindow>,
 ) -> Result<Hotkeys, String> {
     let hk = Hotkeys::new()?;
     let mut actions: HashMap<u32, HotAction> = HashMap::new();
@@ -5478,6 +5847,21 @@ fn spawn_hotkeys(
         if let Ok(spec) = parse_hotkey(combo) {
             if let Ok(id) = hk.register(&spec) {
                 actions.insert(id, HotAction::QuickPaste(i + 1));
+            }
+        }
+    }
+    // Scratch pad hotkey (⌘⌥Space default). If it's already taken, fall back to the
+    // tray "Scratch pad" item + ⌘K action and notify once.
+    if let Ok(spec) = parse_hotkey(&cfg.scratch_hotkey) {
+        match hk.register(&spec) {
+            Ok(id) => {
+                actions.insert(id, HotAction::Scratch);
+            }
+            Err(_) => {
+                magpie_platform::notify(
+                    "Magpie — scratch hotkey unavailable",
+                    "That shortcut is already in use. Open the scratch pad from the tray menu, and rebind it in the config.",
+                );
             }
         }
     }
@@ -5497,6 +5881,15 @@ fn spawn_hotkeys(
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = w.upgrade() {
                                 show_window(&ui, &s);
+                            }
+                        });
+                    }
+                    Some(HotAction::Scratch) => {
+                        let sw = scratch.clone();
+                        let s = state.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(sc) = sw.upgrade() {
+                                toggle_scratch(&sc, &s);
                             }
                         });
                     }
@@ -5603,6 +5996,13 @@ pub fn start() {
     // Created here (before the theme-toggle handler) so the toggle can update both.
     let popover = Popover::new().expect("create popover");
     popover.set_theme_index(theme_idx as i32);
+
+    // The floating scratch pad (Phase 20): a third top-level window, always-on-top,
+    // summoned by the scratch hotkey. Kept alive for the whole run; its own `Theme`
+    // global is mirrored like the popover's.
+    let scratch = ScratchWindow::new().expect("create scratch window");
+    scratch.set_theme_index(theme_idx as i32);
+    wire_scratch(&scratch, &state);
     popover.set_pinned(cfg.popover_pinned);
 
     // Match the native window chrome (titlebar / traffic-light strip) to the
@@ -5620,6 +6020,7 @@ pub fn start() {
     {
         let w = weak.clone();
         let pw = popover.as_weak();
+        let scw = scratch.as_weak();
         ui.on_set_theme(move |idx| {
             let count = magpie_app::themes::THEMES.len() as i32;
             let idx = idx.clamp(0, count - 1);
@@ -5628,6 +6029,9 @@ pub fn start() {
             }
             if let Some(p) = pw.upgrade() {
                 p.set_theme_index(idx);
+            }
+            if let Some(sc) = scw.upgrade() {
+                sc.set_theme_index(idx);
             }
             magpie_platform::set_appearance(magpie_app::themes::is_dark(idx as usize));
             let cfg_path = data_dir().join("config.toml");
@@ -8751,11 +9155,22 @@ pub fn start() {
     // projects, and only ever watches specific project dirs (never whole roots).
     spawn_project_watcher(state.clone(), weak.clone());
     // Keep the hotkey manager alive for the whole run.
-    let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone());
+    let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone(), scratch.as_weak());
     // Keep the tray icon alive for the whole run. It lives in a thread-local
     // (not a local binding) so the ticker below can reach it from the event
     // loop; see the `TRAY` thread_local for why (`TrayIcon` isn't `Send`).
     TRAY.with(|t| *t.borrow_mut() = build_tray(weak.clone(), state.clone(), popover.as_weak()));
+
+    // Dev hook: show the scratch window on launch for screenshots (no-op otherwise).
+    if std::env::var("MAGPIE_SHOW_SCRATCH").is_ok() {
+        let sw = scratch.as_weak();
+        let s = state.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(sc) = sw.upgrade() {
+                toggle_scratch(&sc, &s);
+            }
+        });
+    }
 
     // If the panel was pinned last session, re-open it docked once the loop starts.
     // Don't raise-to-front here — re-opening on launch must not steal focus.

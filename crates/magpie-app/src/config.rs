@@ -117,6 +117,15 @@ pub struct Config {
     /// private `.git/info/exclude` on scan (never edits a tracked `.gitignore`).
     #[serde(default)]
     pub projects_keep_magpie_out_of_git: bool,
+    /// Global hotkey that shows/hides the floating scratch pad (Phase 20). Separate
+    /// from `launcher_hotkey`. Default ⌘⌥Space. If already taken, Magpie falls back to
+    /// the tray menu + ⌘K action and notifies once.
+    #[serde(default = "default_scratch_hotkey")]
+    pub scratch_hotkey: String,
+}
+
+fn default_scratch_hotkey() -> String {
+    "super+alt+space".into()
 }
 
 fn default_project_sync_conflict() -> String {
@@ -179,6 +188,7 @@ impl Default for Config {
             sidebar_collapsed_groups: Vec::new(),
             project_sync_conflict: default_project_sync_conflict(),
             projects_keep_magpie_out_of_git: false,
+            scratch_hotkey: default_scratch_hotkey(),
         }
     }
 }

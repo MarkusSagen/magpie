@@ -1,0 +1,184 @@
+import { ListView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { ScratchRow, FileTarget } from "../types.slint";
+import { ScratchStore } from "../scratch_store.slint";
+import { Keycap } from "../components/keycap.slint";
+
+// Scratch capture (Phase 20, PNG 28): a small always-on-top window summoned with the
+// scratch hotkey over whatever app is focused. Frameless + transparent like the
+// popover; has its own `Theme` global instance, so Rust mirrors the theme via
+// `set_theme_index` (see the popover for the same pattern).
+export component ScratchWindow inherits Window {
+    no-frame: true;
+    default-font-family: "Geist";
+    always-on-top: true;
+    preferred-width: 720px;
+    preferred-height: 520px;
+    min-width: 420px;
+    min-height: 320px;
+    background: transparent;
+
+    in-out property <int> theme-index: 0;
+    init => { Theme.index = root.theme-index; }
+    changed theme-index => { Theme.index = root.theme-index; }
+
+    Rectangle {
+        background: Theme.bg-app;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            // ---- Header ----
+            HorizontalLayout {
+                spacing: 10px;
+                Image { source: Icons.act-edit; colorize: Theme.text-dim; width: 18px; height: 18px;
+                    y: 2px; image-fit: contain; }
+                Text { text: "Scratch"; color: Theme.text; font-size: 18px; font-weight: 700;
+                    vertical-alignment: center; }
+                Text { text: "autosaved · kept 30 days"; color: Theme.text-faint; font-size: Theme.fs-sm;
+                    vertical-alignment: center; horizontal-stretch: 1; }
+                // Now / Earlier tabs.
+                for t[i] in [{ label: "Now", tab: 0 }, { label: "Earlier " + ScratchStore.earlier.length, tab: 1 }]: Rectangle {
+                    height: 28px;
+                    width: nowtxt.preferred-width + 20px;
+                    border-radius: Theme.r-sm;
+                    background: ScratchStore.tab == t.tab ? Theme.bg-elevated : transparent;
+                    nowtxt := Text { text: t.label; color: ScratchStore.tab == t.tab ? Theme.text : Theme.text-dim;
+                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { ScratchStore.set-tab(t.tab); } }
+                }
+                // Pin.
+                Rectangle { width: 26px; height: 28px;
+                    Image { source: Icons.act-pin; colorize: ScratchStore.pinned ? Pal.accent : (pinta.has-hover ? Theme.text : Theme.text-faint);
+                        width: 16px; height: 16px; image-fit: contain; }
+                    pinta := TouchArea { clicked => { ScratchStore.toggle-pin(); } }
+                }
+            }
+
+            // ---- Now: editor ----
+            if ScratchStore.tab == 0: Rectangle {
+                vertical-stretch: 1;
+                background: Theme.bg-panel;
+                border-radius: Theme.r-md;
+                Flickable {
+                    x: 12px; y: 10px;
+                    width: parent.width - 24px;
+                    height: parent.height - 20px;
+                    viewport-width: self.width;
+                    ed := TextInput {
+                        width: 100%;
+                        text <=> ScratchStore.body;
+                        color: Theme.text;
+                        font-size: 15px;
+                        single-line: false;
+                        wrap: word-wrap;
+                        init => { self.focus(); }
+                        edited => { ScratchStore.edited(self.text); }
+                        key-pressed(e) => {
+                            if (e.text == Key.Escape) {
+                                if (ScratchStore.filing) { ScratchStore.cancel-file(); }
+                                else { ScratchStore.dismiss(); }
+                                return accept;
+                            }
+                            // ⌘↵ file selection, ⌘⇧↵ file all (control == ⌘ on mac).
+                            if (e.text == Key.Return && e.modifiers.control) {
+                                ScratchStore.begin-file(e.modifiers.shift);
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                }
+            }
+
+            // ---- Earlier: previous scratches ----
+            if ScratchStore.tab == 1: Rectangle {
+                vertical-stretch: 1;
+                if ScratchStore.earlier.length == 0: Text { text: "No earlier scratches."; color: Theme.text-faint;
+                    font-size: Theme.fs-body; }
+                ListView {
+                    for r[i] in ScratchStore.earlier: Rectangle {
+                        height: 44px;
+                        border-radius: Theme.r-sm;
+                        background: erow.has-hover ? Theme.bg-elevated : transparent;
+                        erow := TouchArea { clicked => { ScratchStore.open-earlier(i); } }
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px; spacing: 8px;
+                            VerticalLayout { alignment: center; horizontal-stretch: 1; spacing: 2px;
+                                Text { text: r.title; color: Theme.text; font-size: Theme.fs-body; overflow: elide; }
+                                Text { text: r.when; color: Theme.text-faint; font-size: Theme.fs-xs; }
+                            }
+                            if r.pinned: Image { source: Icons.act-pin; colorize: Pal.accent; width: 14px; height: 14px;
+                                y: 15px; image-fit: contain; }
+                        }
+                    }
+                }
+            }
+
+            // ---- Bottom bar ----
+            HorizontalLayout {
+                spacing: 8px;
+                Keycap { text: "⌘"; } Keycap { text: "↵"; }
+                Text { text: "File selection"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                Rectangle { width: 10px; }
+                Keycap { text: "⌘"; } Keycap { text: "⇧"; } Keycap { text: "↵"; }
+                Text { text: "File all"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center;
+                    horizontal-stretch: 1; }
+                Keycap { text: "⌘⌥Space"; }
+                Text { text: "Show / hide anywhere"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+            }
+        }
+
+        // ---- "File N lines to…" menu overlay ----
+        if ScratchStore.filing: Rectangle {
+            background: Theme.bg-app.with-alpha(0.6);
+            TouchArea { clicked => { ScratchStore.cancel-file(); } }
+            Rectangle {
+                x: parent.width - self.width - 16px;
+                y: 64px;
+                width: 340px;
+                height: menu.preferred-height;
+                background: Theme.bg-elevated;
+                border-radius: Theme.r-md;
+                border-width: 1px;
+                border-color: Theme.line-strong;
+                menu := VerticalLayout {
+                    padding: 12px;
+                    spacing: 4px;
+                    Text { text: "File " + ScratchStore.filing-count + " lines to…"; color: Theme.text-faint;
+                        font-size: Theme.fs-sm; }
+                    for t[i] in ScratchStore.targets: Rectangle {
+                        height: 40px;
+                        border-radius: Theme.r-sm;
+                        background: trow.has-hover ? Theme.bg-panel : transparent;
+                        trow := TouchArea { clicked => { ScratchStore.choose-target(i, false); } }
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px; spacing: 8px;
+                            Text { text: t.label; color: Theme.text; font-size: Theme.fs-body;
+                                vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: t.detail; color: Theme.text-faint; font-size: Theme.fs-sm;
+                                vertical-alignment: center; }
+                            Keycap { text: t.key; }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Keycap { text: "↑"; } Keycap { text: "↓"; }
+                        Text { text: "Choose"; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        Keycap { text: "⌘"; } Keycap { text: "↵"; }
+                        Text { text: "File & keep"; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center;
+                            horizontal-stretch: 1; }
+                        Keycap { text: "esc"; }
+                        Text { text: "Cancel"; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+}

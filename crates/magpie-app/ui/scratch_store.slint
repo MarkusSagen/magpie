@@ -1,0 +1,26 @@
+import { ScratchRow, FileTarget } from "types.slint";
+
+// Scratch-capture state (Phase 20, PNG 28). A global; Rust owns the current scratch
+// note (autosaved), the Earlier list, and the "File to…" menu contents.
+export global ScratchStore {
+    in-out property <string> body;
+    in-out property <int> tab;            // 0 = Now, 1 = Earlier
+    in property <[ScratchRow]> earlier;
+    in-out property <bool> pinned;
+
+    // "File N lines to…" menu.
+    in-out property <bool> filing;
+    in property <int> filing-count;       // number of lines being filed
+    in property <[FileTarget]> targets;
+
+    callback edited(string);              // autosave the body
+    callback set-tab(int);
+    callback open-earlier(int);           // load an earlier scratch by row index
+    callback toggle-pin();
+    callback new-scratch();
+    callback dismiss();                   // hide the window (Esc / hotkey)
+
+    callback begin-file(bool);            // open the menu: true = all lines, false = selection
+    callback cancel-file();
+    callback choose-target(int, bool);    // (target index, keep-open) — file the lines
+}

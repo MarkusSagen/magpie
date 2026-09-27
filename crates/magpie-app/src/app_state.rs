@@ -72,6 +72,9 @@ pub struct AppState {
     /// Negative synthetic note id → a project's `.magpie/notes/*.md` file, so opening a
     /// "From projects" row in the Notes view opens the file (Phase 18b cross-view).
     pub project_note_refs: Mutex<std::collections::HashMap<i32, std::path::PathBuf>>,
+    /// The scratch note currently shown in the floating scratch window (Phase 20);
+    /// autosave, pin and "file" target this id. -1 = none loaded yet.
+    pub scratch_shown_id: Mutex<i64>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
@@ -312,6 +315,7 @@ mod tests {
             project_conflicts: std::sync::Mutex::new(Vec::new()),
             project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
             project_note_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
+            scratch_shown_id: std::sync::Mutex::new(-1),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),

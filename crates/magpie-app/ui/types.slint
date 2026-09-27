@@ -61,6 +61,21 @@ export struct NoteRow {
     tags: string,
 }
 
+// One "Earlier" scratch (Phase 20).
+export struct ScratchRow {
+    id: int,
+    title: string,
+    when: string,
+    pinned: bool,
+}
+
+// One target in the scratch "File N lines to…" menu (Phase 20).
+export struct FileTarget {
+    label: string,
+    detail: string,   // e.g. "from #magpie" / "no project" / "Fri 25 Sep"
+    key: string,      // digit shown on the right
+}
+
 export struct BookmarkRow {
     id: int,
     title: string,
