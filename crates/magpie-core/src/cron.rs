@@ -22,6 +22,20 @@ impl Field {
             .and_then(|i| self.allow.get(i as usize).copied())
             .unwrap_or(false)
     }
+    fn values(&self) -> Vec<u32> {
+        (0..self.allow.len())
+            .filter(|i| self.allow[*i])
+            .map(|i| i as u32 + self.min)
+            .collect()
+    }
+    /// `Some(values)` when restricted, `None` (= "every", key omitted) for a bare `*`.
+    fn opts(&self) -> Vec<Option<u32>> {
+        if self.restricted {
+            self.values().into_iter().map(Some).collect()
+        } else {
+            vec![None]
+        }
+    }
 }
 
 /// A parsed cron expression.
@@ -124,6 +138,48 @@ impl Cron {
         } else {
             dom_m && dow_m
         }
+    }
+
+    /// launchd `StartCalendarInterval` dicts (`Minute`/`Hour`/`Day`/`Weekday`/`Month`;
+    /// an omitted key means "every"). launchd, like Vixie, ORs Day and Weekday. Returns
+    /// empty when the schedule is too complex to enumerate compactly (the caller then
+    /// keeps it "While open" rather than exporting to the OS).
+    pub fn launchd_intervals(&self) -> Vec<Vec<(&'static str, i64)>> {
+        let (mins, hours) = (self.minute.opts(), self.hour.opts());
+        let (doms, months, dows) = (self.dom.opts(), self.month.opts(), self.dow.opts());
+        let total = mins.len() * hours.len() * doms.len() * months.len() * dows.len();
+        if total > 366 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for &mi in &mins {
+            for &h in &hours {
+                for &d in &doms {
+                    for &mo in &months {
+                        for &wd in &dows {
+                            let mut dict = Vec::new();
+                            if let Some(v) = mi {
+                                dict.push(("Minute", v as i64));
+                            }
+                            if let Some(v) = h {
+                                dict.push(("Hour", v as i64));
+                            }
+                            if let Some(v) = d {
+                                dict.push(("Day", v as i64));
+                            }
+                            if let Some(v) = mo {
+                                dict.push(("Month", v as i64));
+                            }
+                            if let Some(v) = wd {
+                                dict.push(("Weekday", v as i64));
+                            }
+                            out.push(dict);
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// The matching (hour, minute) firing times on a day, ascending.
@@ -431,6 +487,31 @@ mod tests {
         // The next run is the following day (not the second 01:30).
         let got2 = next_runs(&c, from, sthlm(), 2);
         assert_eq!(got2[1], at(sthlm(), 2026, 10, 26, 1, 30));
+    }
+
+    // ---- launchd intervals ----
+    #[test]
+    fn launchd_intervals_map() {
+        // Single time.
+        let iv = parse_cron("0 2 * * *").unwrap().launchd_intervals();
+        assert_eq!(iv, vec![vec![("Minute", 0), ("Hour", 2)]]);
+        // */15 → four Minute-only dicts (every hour).
+        let iv = parse_cron("*/15 * * * *").unwrap().launchd_intervals();
+        assert_eq!(iv.len(), 4);
+        assert!(iv.iter().all(|d| d.len() == 1 && d[0].0 == "Minute"));
+        // Weekday range expands to one dict per weekday.
+        let iv = parse_cron("40 8 * * 1-5").unwrap().launchd_intervals();
+        assert_eq!(iv.len(), 5);
+        assert!(iv
+            .iter()
+            .all(|d| d.contains(&("Minute", 40)) && d.contains(&("Hour", 8))));
+        // Bare `* * * * *` → one empty dict (launchd fires every minute).
+        assert_eq!(
+            parse_cron("* * * * *").unwrap().launchd_intervals(),
+            vec![vec![]]
+        );
+        // Too complex to enumerate → empty (keep it while-open).
+        assert!(parse_cron("*/2 * * * *").unwrap().launchd_intervals().len() <= 366);
     }
 
     // ---- E. natural language ----

@@ -5,6 +5,7 @@ pub mod hotkeys;
 pub mod keymonitor;
 pub mod notify;
 pub mod paste;
+pub mod scheduler;
 pub mod source_app;
 pub mod window;
 
