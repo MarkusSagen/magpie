@@ -143,6 +143,11 @@ const MIGRATIONS: &[&str] = &[
         updated_at_ms INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (root, rel_path)
     );",
+    // v7: scratch capture (Phase 20). A scratch is just a note with `scratch = 1`
+    // (so search, vault export and backups already cover it); `scratch_pinned`
+    // exempts it from the 30-day scratch retention sweep.
+    "ALTER TABLE notes ADD COLUMN scratch INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE notes ADD COLUMN scratch_pinned INTEGER NOT NULL DEFAULT 0;",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -613,6 +618,8 @@ mod tests {
         s.conn
             .execute_batch(
                 "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
+                 ALTER TABLE notes DROP COLUMN scratch; \
+                 ALTER TABLE notes DROP COLUMN scratch_pinned; \
                  PRAGMA user_version = 3;",
             )
             .unwrap();

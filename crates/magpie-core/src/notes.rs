@@ -50,6 +50,79 @@ impl Store {
             .optional()
     }
 
+    // ---- Scratch capture (Phase 20): a scratch is a note with `scratch = 1`. ----
+
+    /// The current ("Now") scratch — the newest scratch note — creating an empty one
+    /// if none exists.
+    pub fn scratch_current(&self, now_ms: i64) -> Result<Note> {
+        if let Some(n) = self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {NOTE_COLS} FROM notes WHERE scratch = 1 \
+                     ORDER BY updated_at_ms DESC, id DESC LIMIT 1"
+                ),
+                [],
+                row_to_note,
+            )
+            .optional()?
+        {
+            return Ok(n);
+        }
+        self.new_scratch(now_ms)
+    }
+
+    /// Start a fresh empty scratch and return it (becomes the new "Now").
+    pub fn new_scratch(&self, now_ms: i64) -> Result<Note> {
+        self.conn().execute(
+            "INSERT INTO notes (name, is_daily, body, created_at_ms, updated_at_ms, scratch)
+             VALUES (?1, 0, '', ?2, ?2, 1)",
+            rusqlite::params![format!("scratch-{now_ms}"), now_ms],
+        )?;
+        let id = self.conn().last_insert_rowid();
+        Ok(self.get_note(id)?.expect("row exists after insert"))
+    }
+
+    /// Previous scratches ("Earlier") — all but the newest, newest first.
+    pub fn scratch_earlier(&self, limit: i64) -> Result<Vec<Note>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {NOTE_COLS} FROM notes WHERE scratch = 1 \
+             ORDER BY updated_at_ms DESC, id DESC LIMIT ?1 OFFSET 1"
+        ))?;
+        let rows = stmt.query_map([limit], row_to_note)?;
+        rows.collect()
+    }
+
+    pub fn set_scratch_pinned(&self, id: i64, pinned: bool) -> Result<()> {
+        self.conn().execute(
+            "UPDATE notes SET scratch_pinned = ?2 WHERE id = ?1",
+            rusqlite::params![id, pinned as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn scratch_is_pinned(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT scratch_pinned FROM notes WHERE id = ?1",
+                [id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or(0)
+            == 1)
+    }
+
+    /// Delete unpinned scratch notes not updated since `older_than_ms` (30-day sweep).
+    /// Returns how many were removed.
+    pub fn prune_scratches(&self, older_than_ms: i64) -> Result<usize> {
+        Ok(self.conn().execute(
+            "DELETE FROM notes WHERE scratch = 1 AND scratch_pinned = 0 AND updated_at_ms < ?1",
+            [older_than_ms],
+        )?)
+    }
+
     pub fn upsert_note_by_name(&self, name: &str, now_ms: i64) -> Result<Note> {
         let n = name.trim();
         if n.is_empty() {
@@ -344,5 +417,50 @@ impl Store {
             .conn()
             .execute("DELETE FROM time_entries WHERE id = ?1", [id])?
             > 0)
+    }
+}
+
+#[cfg(test)]
+mod scratch_tests {
+    use crate::open_in_memory;
+
+    #[test]
+    fn scratch_current_creates_then_reuses() {
+        let s = open_in_memory().unwrap();
+        let a = s.scratch_current(100).unwrap();
+        assert!(a.body.is_empty());
+        // Same current until a new one starts.
+        let b = s.scratch_current(200).unwrap();
+        assert_eq!(a.id, b.id, "reuses the newest scratch");
+        assert!(s.scratch_earlier(50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn new_scratch_moves_prior_to_earlier() {
+        let s = open_in_memory().unwrap();
+        let first = s.scratch_current(100).unwrap();
+        s.update_note_body(first.id, "old jottings", 150).unwrap();
+        let second = s.new_scratch(200).unwrap();
+        assert_ne!(first.id, second.id);
+        // Now = second (newest); Earlier = [first].
+        assert_eq!(s.scratch_current(300).unwrap().id, second.id);
+        let earlier = s.scratch_earlier(50).unwrap();
+        assert_eq!(earlier.len(), 1);
+        assert_eq!(earlier[0].id, first.id);
+    }
+
+    #[test]
+    fn prune_respects_pin_and_age() {
+        let s = open_in_memory().unwrap();
+        let old = s.new_scratch(1_000).unwrap();
+        let pinned_old = s.new_scratch(1_100).unwrap();
+        s.set_scratch_pinned(pinned_old.id, true).unwrap();
+        assert!(s.scratch_is_pinned(pinned_old.id).unwrap());
+        let _recent = s.new_scratch(9_000).unwrap();
+        // Prune everything older than 5_000: removes `old`, keeps pinned + recent.
+        let removed = s.prune_scratches(5_000).unwrap();
+        assert_eq!(removed, 1);
+        assert!(s.get_note(old.id).unwrap().is_none());
+        assert!(s.get_note(pinned_old.id).unwrap().is_some());
     }
 }
