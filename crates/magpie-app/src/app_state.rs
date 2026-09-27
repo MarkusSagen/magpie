@@ -66,6 +66,9 @@ pub struct AppState {
     pub projects_keep_magpie_out_of_git: bool,
     /// Unresolved project-file conflicts awaiting Review (Phase 18b).
     pub project_conflicts: Mutex<Vec<ProjConflict>>,
+    /// Negative synthetic `note_id` → the project file its task came from, so a toggle
+    /// in the global Tasks view / board routes to the file (Phase 18b cross-view).
+    pub project_task_refs: Mutex<std::collections::HashMap<i32, ProjTaskRef>>,
     /// Tray-popover default tab index (0 tasks, 1 today, 2 daily, 3 clipboard).
     pub popover_default_tab: i32,
     /// Per-category "open with" app map (from `Config::open_with`).
@@ -114,6 +117,16 @@ pub struct ProjectScanState {
     /// Cached read-only code-comment scan for the selected project (Phase 18b): the
     /// project path it was computed for + the results, so re-populates don't re-walk.
     pub code_todos: (std::path::PathBuf, Vec<crate::projects::CodeTodo>),
+}
+
+/// Where a project file-task (surfaced in the global Tasks view / board with a
+/// negative synthetic `note_id`) actually lives, so its toggle routes to the file
+/// (Phase 18b cross-view).
+#[derive(Debug, Clone)]
+pub struct ProjTaskRef {
+    pub root: std::path::PathBuf,
+    pub rel: String,
+    pub file_abs: std::path::PathBuf,
 }
 
 /// An unresolved project-file sync conflict awaiting Review (Phase 18b, PNG 25).
@@ -294,6 +307,7 @@ mod tests {
             project_conflict_policy: magpie_core::projects::ConflictPolicy::Ask,
             projects_keep_magpie_out_of_git: false,
             project_conflicts: std::sync::Mutex::new(Vec::new()),
+            project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
             popover_default_tab: 3,
             open_with: std::collections::BTreeMap::new(),
             popover_pinned: std::sync::atomic::AtomicBool::new(false),

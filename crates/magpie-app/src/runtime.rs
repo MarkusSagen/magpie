@@ -98,6 +98,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         },
         projects_keep_magpie_out_of_git: cfg.projects_keep_magpie_out_of_git,
         project_conflicts: std::sync::Mutex::new(Vec::new()),
+        project_task_refs: std::sync::Mutex::new(std::collections::HashMap::new()),
         popover_default_tab: match cfg.popover_default_tab.as_str() {
             "tasks" => 0,
             "today" => 1,
@@ -2706,6 +2707,55 @@ fn toggle_project_task(
     false
 }
 
+/// Route a global Tasks/board toggle on a project file-task (negative synthetic
+/// `note_id`) to its file via `toggle_project_task`. Returns true if a conflict held.
+fn toggle_project_task_by_id(state: &AppState, note_id: i32, line: usize) -> bool {
+    let r = state
+        .project_task_refs
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&note_id).cloned());
+    match r {
+        Some(r) => toggle_project_task(state, &r.root, &r.rel, &r.file_abs, line),
+        None => false,
+    }
+}
+
+/// Current done-state of a project file-task's line (by negative synthetic id), read
+/// fresh from disk. `None` if unknown (not a project task / line gone).
+fn project_task_is_done(state: &AppState, note_id: i32, line: usize) -> Option<bool> {
+    let r = state
+        .project_task_refs
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&note_id).cloned())?;
+    let content = std::fs::read_to_string(&r.file_abs).ok()?;
+    let fmt = magpie_core::projects::TaskFormat::for_file(&r.rel);
+    magpie_core::projects::parse_task_lines(&content, fmt)
+        .into_iter()
+        .find(|p| p.line == line)
+        .map(|p| p.done)
+}
+
+/// Open the file behind a project file-task (negative synthetic `note_id`) in the
+/// editor. Returns true if it was a project task (handled).
+fn open_project_task_by_id(state: &AppState, note_id: i32) -> bool {
+    let r = state
+        .project_task_refs
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&note_id).cloned());
+    if let Some(r) = r {
+        let _ = std::process::Command::new("open")
+            .arg("-t")
+            .arg(&r.file_abs)
+            .spawn();
+        true
+    } else {
+        false
+    }
+}
+
 /// Resolve the selected project's first pending conflict by writing the chosen side
 /// ("keep mine" or "keep disk"), advancing the baseline, and clearing it from the
 /// Review queue. Returns true if a conflict was resolved.
@@ -3721,6 +3771,94 @@ fn task_row_with_tracking(
     }
 }
 
+/// Build synthetic `Task`s for every syncable project's file tasks so they appear in
+/// the global Tasks view and board alongside note tasks (Phase 18b cross-view). Each
+/// file gets a unique negative `note_id`; markdown files reuse the note parser (full
+/// inline `!prio @due #tag` syntax), org/todo.txt use the format-aware line parser.
+/// Also records `note_id → file` in `state.project_task_refs` so a toggle routes to
+/// the file. Returns the tasks (project set to the project's name).
+fn project_file_tasks(state: &AppState, now: i64) -> Vec<magpie_app::tasks::Task> {
+    use magpie_app::tasks::{Status, Task};
+    let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tasks = Vec::new();
+    let mut refs: std::collections::HashMap<i32, magpie_app::app_state::ProjTaskRef> =
+        std::collections::HashMap::new();
+    let mut next_id: i32 = -1000;
+    for h in g.hits.iter().filter(|h| h.syncable()) {
+        // Distinct task files in first-seen order.
+        let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
+        for t in &h.tasks {
+            if !files.iter().any(|(r, _)| r == &t.file_rel) {
+                files.push((t.file_rel.clone(), t.file_abs.clone()));
+            }
+        }
+        for (rel, file_abs) in files {
+            let content = g
+                .file_snapshots
+                .get(&file_abs)
+                .cloned()
+                .or_else(|| std::fs::read_to_string(&file_abs).ok())
+                .unwrap_or_default();
+            let fmt = magpie_core::projects::TaskFormat::for_file(&rel);
+            let mut file_tasks: Vec<Task> = if fmt == magpie_core::projects::TaskFormat::Markdown {
+                let note = magpie_core::notes::Note {
+                    id: next_id as i64,
+                    name: rel.clone(),
+                    is_daily: false,
+                    body: content,
+                    created_at_ms: 0,
+                    updated_at_ms: 0,
+                    source_app_id: None,
+                    source_entry_id: None,
+                };
+                magpie_app::tasks::parse_tasks_in(&note, now)
+            } else {
+                // org / todo.txt: basic tasks (no inline prio/due parsing).
+                magpie_core::projects::parse_task_lines(&content, fmt)
+                    .into_iter()
+                    .map(|p| Task {
+                        note_id: next_id as i64,
+                        note_name: rel.clone(),
+                        line_index: p.line,
+                        done: p.done,
+                        status: if p.done { Status::Done } else { Status::Todo },
+                        title: p.title,
+                        priority: magpie_app::tasks::Priority::None,
+                        due_ms: None,
+                        due_time_min: None,
+                        recur: None,
+                        bookmarked: false,
+                        project: None,
+                        source_app_id: None,
+                        source_entry_id: None,
+                    })
+                    .collect()
+            };
+            for ft in &mut file_tasks {
+                ft.project = Some(h.name.clone());
+                ft.note_name = format!("⇄ {rel}");
+            }
+            if !file_tasks.is_empty() {
+                refs.insert(
+                    next_id,
+                    magpie_app::app_state::ProjTaskRef {
+                        root: h.path.clone(),
+                        rel: rel.clone(),
+                        file_abs: file_abs.clone(),
+                    },
+                );
+                tasks.append(&mut file_tasks);
+            }
+            next_id -= 1;
+        }
+    }
+    drop(g);
+    if let Ok(mut m) = state.project_task_refs.lock() {
+        *m = refs;
+    }
+    tasks
+}
+
 /// Rebuild the Tasks-mode list: every task across all notes, grouped/sorted, then
 /// flattened into a flat model. Done tasks are skipped unless "Show done" is on;
 /// `due_ms` is formatted as an absolute date and `Priority` mapped to 0..3
@@ -3730,6 +3868,8 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
     let filter = ui.get_task_filter();
+    // Project file-tasks (computed before the store lock — it locks project_scan).
+    let proj_tasks = project_file_tasks(state, now);
     // The running timer (set inside the lock, reused for the header below).
     let active;
     let rows: Vec<TaskRow> = {
@@ -3738,7 +3878,8 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
             Err(e) => e.into_inner(),
         };
         active = store.active_timer().ok().flatten();
-        let tasks = magpie_app::tasks::all_tasks(&store, now);
+        let mut tasks = magpie_app::tasks::all_tasks(&store, now);
+        tasks.extend(proj_tasks);
         magpie_app::tasks::group_sort(tasks)
             .into_iter()
             .flat_map(|g| g.tasks)
@@ -3824,12 +3965,15 @@ fn refresh_board(ui: &LauncherWindow, state: &AppState) {
         tracking: false,
         time_total: SharedString::from(""),
     };
+    // Project file-tasks (before the store lock — locks project_scan).
+    let proj_tasks = project_file_tasks(state, now);
     let (columns, projects): (Vec<BoardColumn>, Vec<SharedString>) = {
         let store = match state.store.lock() {
             Ok(g) => g,
             Err(e) => e.into_inner(),
         };
-        let all = magpie_app::tasks::all_tasks(&store, now);
+        let mut all = magpie_app::tasks::all_tasks(&store, now);
+        all.extend(proj_tasks);
         // Distinct projects across ALL tasks (unfiltered), "No project" last.
         let mut projects: Vec<String> = all
             .iter()
@@ -7901,7 +8045,10 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_toggle_task(move |note_id, line_index| {
-            {
+            if note_id < 0 {
+                // A project file-task: route the toggle to its file.
+                toggle_project_task_by_id(&s, note_id, line_index as usize);
+            } else {
                 let store = match s.store.lock() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
@@ -7922,7 +8069,8 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_toggle_bookmark(move |note_id, line_index| {
-            {
+            // Project file-tasks (negative id) have no DB row to bookmark — skip.
+            if note_id >= 0 {
                 let store = match s.store.lock() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
@@ -8019,7 +8167,10 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_open_task_note(move |note_id| {
-            if let Some(ui) = w.upgrade() {
+            // A project file-task opens its file; a note task opens the note.
+            if note_id < 0 {
+                open_project_task_by_id(&s, note_id);
+            } else if let Some(ui) = w.upgrade() {
                 open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
@@ -8389,7 +8540,9 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_board_open_task(move |note_id| {
-            if let Some(ui) = w.upgrade() {
+            if note_id < 0 {
+                open_project_task_by_id(&s, note_id);
+            } else if let Some(ui) = w.upgrade() {
                 open_note_into_notes_mode(&ui, &s, note_id);
             }
         });
@@ -8398,7 +8551,18 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_board_set_status(move |note_id, line_index, status| {
-            {
+            if note_id < 0 {
+                // Project file-task: only a done⇄open flip is meaningful on a file.
+                // Route drops onto Done/To-do through the line toggle; ignore "Doing".
+                let target = magpie_app::tasks::status_from_column(status);
+                if !matches!(target, magpie_app::tasks::Status::Doing) {
+                    let want_done = matches!(target, magpie_app::tasks::Status::Done);
+                    let is_done = project_task_is_done(&s, note_id, line_index as usize);
+                    if is_done != Some(want_done) {
+                        toggle_project_task_by_id(&s, note_id, line_index as usize);
+                    }
+                }
+            } else {
                 let store = match s.store.lock() {
                     Ok(g) => g,
                     Err(e) => e.into_inner(),
