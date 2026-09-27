@@ -111,6 +111,9 @@ pub struct ProjectScanState {
     /// Sync snapshot per task file (`file_abs` → exact bytes read at scan): the merge
     /// pivot whose line indices match the displayed tasks (Phase 18b).
     pub file_snapshots: std::collections::HashMap<std::path::PathBuf, String>,
+    /// Cached read-only code-comment scan for the selected project (Phase 18b): the
+    /// project path it was computed for + the results, so re-populates don't re-walk.
+    pub code_todos: (std::path::PathBuf, Vec<crate::projects::CodeTodo>),
 }
 
 /// An unresolved project-file sync conflict awaiting Review (Phase 18b, PNG 25).

@@ -376,4 +376,5 @@ export struct ProjTaskRow {
     done: bool,
     source: string,        // "TODO.md:12"
     idx: int,              // index into the flat task list (for toggle/editor)
+    read-only: bool,       // code-comment lens rows: no checkbox, open in editor only
 }

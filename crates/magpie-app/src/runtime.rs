@@ -2657,9 +2657,10 @@ fn toggle_project_task(
         g.file_snapshots.get(file_abs).cloned()
     }
     .unwrap_or_else(|| disk.clone());
-    let mine = match magpie_core::projects::toggle_task_line(&baseline, line) {
+    let fmt = magpie_core::projects::TaskFormat::for_file(rel);
+    let mine = match magpie_core::projects::toggle_task_line_fmt(&baseline, line, fmt) {
         Some(m) => m,
-        None => return false, // not a checkbox line
+        None => return false, // not a task line in this format
     };
     let r = magpie_core::projects::reconcile_file(
         &baseline,
@@ -2892,6 +2893,7 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
                     done: false,
                     source: SharedString::new(),
                     idx: -1,
+                    read_only: false,
                 });
             }
             rows.push(ProjTaskRow {
@@ -2902,9 +2904,54 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
                 done: t.done,
                 source: format!("{}:{}", t.file_rel, t.line + 1).into(),
                 idx: idx as i32,
+                read_only: false,
             });
         }
         let _ = Marker::badge;
+
+        // Read-only code-comment lens (Phase 18b, PNG 25): TODO/FIXME/HACK/XXX found in
+        // source, cached per selected project so re-populates don't re-walk.
+        let code_todos = {
+            let need = {
+                let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.code_todos.0 != h.path
+            };
+            if need {
+                let found = magpie_app::projects::scan_code_comments(&h.path, 40);
+                let mut g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                g.code_todos = (h.path.clone(), found);
+            }
+            let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+            g.code_todos.1.clone()
+        };
+        if !code_todos.is_empty() {
+            rows.push(ProjTaskRow {
+                is_file_header: true,
+                file_label: format!("Code comments  {} · TODO / FIXME", code_todos.len()).into(),
+                sync_label: "read-only".into(),
+                title: SharedString::new(),
+                done: false,
+                source: SharedString::new(),
+                idx: -1,
+                read_only: true,
+            });
+            for c in &code_todos {
+                rows.push(ProjTaskRow {
+                    is_file_header: false,
+                    file_label: SharedString::new(),
+                    sync_label: SharedString::new(),
+                    title: if c.text.is_empty() {
+                        c.kind.clone().into()
+                    } else {
+                        format!("{}: {}", c.kind, c.text).into()
+                    },
+                    done: false,
+                    source: format!("{}:{}", c.rel, c.line).into(),
+                    idx: -1,
+                    read_only: true,
+                });
+            }
+        }
         ps.set_detail_tasks(ModelRc::new(VecModel::from(rows)));
     } else {
         ps.set_has_selection(false);
@@ -6154,6 +6201,34 @@ pub fn start() {
             };
             if let Some(f) = file {
                 let _ = std::process::Command::new("open").arg("-t").arg(&f).spawn();
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        // Open a read-only code-comment ("rel:line") in the editor, resolved against
+        // the selected project's path.
+        ui.global::<ProjectsStore>().on_open_source(move |source| {
+            let root = {
+                let g = s.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+                let sel = w
+                    .upgrade()
+                    .map(|ui| ui.global::<ProjectsStore>().get_selected())
+                    .unwrap_or(0);
+                g.hits
+                    .iter()
+                    .filter(|h| h.syncable())
+                    .nth(sel.max(0) as usize)
+                    .map(|h| h.path.clone())
+            };
+            if let Some(root) = root {
+                let s = source.to_string();
+                let rel = s.rsplit_once(':').map(|(p, _)| p).unwrap_or(&s);
+                let _ = std::process::Command::new("open")
+                    .arg("-t")
+                    .arg(root.join(rel))
+                    .spawn();
             }
         });
     }

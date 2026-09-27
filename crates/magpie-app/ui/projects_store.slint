@@ -26,6 +26,7 @@ export global ProjectsStore {
     callback ignore-found(int);
     callback toggle-task(int);
     callback open-task(int);      // open the file at file:line in the editor
+    callback open-source(string); // open a read-only "rel:line" (code comment) in the editor
     callback open-folder();
     callback rescan();
     callback review();            // toggle the Review choices open/closed

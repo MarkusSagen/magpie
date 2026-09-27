@@ -5,6 +5,7 @@
 
 use ignore::WalkBuilder;
 use magpie_core::projects::{markers_for, Marker};
+use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -55,33 +56,21 @@ fn git_branch(dir: &Path) -> String {
     String::new()
 }
 
-/// Parse `- [ ]`/`- [x]` task lines out of a file's `content` (line-indexed). Pure so
-/// the exact bytes the caller keeps as a sync snapshot match the parsed line indices.
+/// Parse task lines out of a file's `content`, choosing the syntax (Markdown / org /
+/// todo.txt) by the file's extension. Pure, so the exact bytes the caller keeps as a
+/// sync snapshot match the parsed line indices.
 fn parse_tasks(content: &str, file_abs: &Path, file_rel: &str) -> Vec<ProjTask> {
-    let mut out = Vec::new();
-    for (i, raw) in content.lines().enumerate() {
-        let t = raw.trim_start();
-        let (done, rest) = if let Some(r) = t.strip_prefix("- [ ] ") {
-            (false, r)
-        } else if let Some(r) = t.strip_prefix("- [/] ") {
-            (false, r)
-        } else if let Some(r) = t
-            .strip_prefix("- [x] ")
-            .or_else(|| t.strip_prefix("- [X] "))
-        {
-            (true, r)
-        } else {
-            continue;
-        };
-        out.push(ProjTask {
-            title: rest.trim().to_string(),
-            done,
+    let fmt = magpie_core::projects::TaskFormat::for_file(file_rel);
+    magpie_core::projects::parse_task_lines(content, fmt)
+        .into_iter()
+        .map(|p| ProjTask {
+            title: p.title,
+            done: p.done,
             file_rel: file_rel.to_string(),
             file_abs: file_abs.to_path_buf(),
-            line: i,
-        });
-    }
-    out
+            line: p.line,
+        })
+        .collect()
 }
 
 fn is_marker_name(name: &str) -> bool {
@@ -172,7 +161,9 @@ pub fn scan(
                 ("TODO.md", dir.join("TODO.md")),
                 ("todo.md", dir.join("todo.md")),
                 ("TODO.txt", dir.join("TODO.txt")),
+                ("TODO.org", dir.join("TODO.org")),
                 (".magpie/tasks.md", dir.join(".magpie/tasks.md")),
+                (".magpie/tasks.org", dir.join(".magpie/tasks.org")),
             ] {
                 if let Ok(canon) = std::fs::canonicalize(&abs) {
                     if !seen.insert(canon) {
@@ -206,6 +197,82 @@ pub fn display_path(p: &Path) -> String {
         }
     }
     p.display().to_string()
+}
+
+/// One read-only code-comment marker (TODO/FIXME/HACK/XXX) found in a project's
+/// source (Phase 18b). Never synced or toggled — it links to the file at the line.
+#[derive(Debug, Clone)]
+pub struct CodeTodo {
+    pub rel: String,  // path relative to the project root
+    pub line: usize,  // 1-based
+    pub kind: String, // TODO / FIXME / HACK / XXX
+    pub text: String,
+}
+
+/// Scan a project's source for comment markers, read-only. Walks with the `ignore`
+/// crate (honours .gitignore, skips node_modules/target and dotdirs like `.git`/
+/// `.magpie`), skips the synced task files, large/binary files, and stops at `cap`
+/// matches (and a file budget) so a huge repo can't stall the UI.
+pub fn scan_code_comments(project_dir: &Path, cap: usize) -> Vec<CodeTodo> {
+    let re = Regex::new(r"(?://|/\*|<!--|#|;;?|--|%)\s*(TODO|FIXME|HACK|XXX)\b[:\-]?\s*(.*)")
+        .expect("valid regex");
+    let mut out = Vec::new();
+    let mut files_seen = 0usize;
+    let walk = WalkBuilder::new(project_dir)
+        .hidden(true) // skip dotdirs (.git/.magpie) for the comment lens
+        .git_ignore(true)
+        .git_global(true)
+        .max_depth(Some(8))
+        .build();
+    for dent in walk.flatten() {
+        if out.len() >= cap || files_seen >= 4000 {
+            break;
+        }
+        if !dent.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = dent.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // The synced task files are shown as tasks, not comments.
+        if matches!(name, "TODO.md" | "todo.md" | "TODO.txt" | "TODO.org") {
+            continue;
+        }
+        // Skip files too large to be worth scanning (bounds worst-case time).
+        if std::fs::metadata(path)
+            .map(|m| m.len() > 512 * 1024)
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        files_seen += 1;
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue, // binary / non-UTF-8
+        };
+        let rel = path
+            .strip_prefix(project_dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        for (i, raw) in content.lines().enumerate() {
+            if out.len() >= cap {
+                break;
+            }
+            if let Some(m) = re.captures(raw) {
+                out.push(CodeTodo {
+                    rel: rel.clone(),
+                    line: i + 1,
+                    kind: m.get(1).map(|g| g.as_str()).unwrap_or("TODO").to_string(),
+                    text: m
+                        .get(2)
+                        .map(|g| g.as_str().trim())
+                        .unwrap_or("")
+                        .to_string(),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Keep `.magpie/` out of git for a project by appending it to `.git/info/exclude`
@@ -281,6 +348,32 @@ mod tests {
         let proj = root.join("p");
         std::fs::create_dir_all(proj.join(".magpie")).unwrap(); // no .git
         assert!(!ensure_git_excluded(&proj).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_code_comments_finds_markers_readonly() {
+        let root = tmp("codetodos");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src/main.rs"),
+            "fn main() {\n    // TODO: wire the thing\n    let x = 1; // FIXME off-by-one\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("README.md"), "This mentions TODO in prose only\n").unwrap();
+        // A synced task file must NOT show up in the comment lens.
+        std::fs::write(root.join("TODO.md"), "- [ ] real task\n").unwrap();
+
+        let todos = scan_code_comments(&root, 40);
+        assert_eq!(
+            todos.len(),
+            2,
+            "two comment markers, prose + TODO.md excluded"
+        );
+        assert!(todos
+            .iter()
+            .any(|c| c.kind == "TODO" && c.text == "wire the thing"));
+        assert!(todos.iter().any(|c| c.kind == "FIXME" && c.line == 3));
         let _ = std::fs::remove_dir_all(&root);
     }
 

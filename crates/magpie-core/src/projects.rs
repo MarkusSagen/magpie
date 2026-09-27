@@ -109,12 +109,115 @@ fn toggled_marker(rest: &str) -> Option<String> {
     None
 }
 
-/// Toggle the checkbox on line `line_index` of `content` between `- [ ]`/`- [/]`
-/// and `- [x]`, rewriting ONLY that line (leading whitespace, trailing text, and
-/// the file's other lines + final-newline state preserved). Returns the new
-/// content, or `None` if the line isn't a checkbox task. This is the two-way
-/// sync's line-level patch primitive.
-pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
+/// The task-file syntax a project file uses (Phase 18b). Chosen by extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskFormat {
+    /// Markdown checklists (`- [ ]` / `- [x]` / `- [/]`).
+    Markdown,
+    /// org-mode headlines (`* TODO` / `* DONE`).
+    Org,
+    /// todo.txt lines (leading `x ` marks completion).
+    TodoTxt,
+}
+
+impl TaskFormat {
+    /// Pick the format from a file name / relative path by extension: `.org` → Org,
+    /// `.txt` → TodoTxt, everything else (incl. `.md`) → Markdown.
+    pub fn for_file(name: &str) -> TaskFormat {
+        let l = name.to_ascii_lowercase();
+        if l.ends_with(".org") {
+            TaskFormat::Org
+        } else if l.ends_with(".txt") {
+            TaskFormat::TodoTxt
+        } else {
+            TaskFormat::Markdown
+        }
+    }
+}
+
+/// One task parsed from a file (format-agnostic): its 0-based line, done state, and
+/// display title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedTask {
+    pub line: usize,
+    pub done: bool,
+    pub title: String,
+}
+
+/// Split a `\r` off the end so CRLF files round-trip byte-for-byte: returns
+/// `(without_cr, "\r" | "")`.
+fn split_trailing_cr(s: &str) -> (&str, &str) {
+    match s.strip_suffix('\r') {
+        Some(core) => (core, "\r"),
+        None => (s, ""),
+    }
+}
+
+/// Match a leading org keyword (`TODO`/`DONE`) that's a whole word, returning it and
+/// the remainder (which starts with the separating space, `\r`, or is empty).
+fn split_org_keyword(body: &str) -> Option<(&str, &str)> {
+    for kw in ["TODO", "DONE"] {
+        if let Some(rest) = body.strip_prefix(kw) {
+            if rest.is_empty() || rest.starts_with([' ', '\t', '\r']) {
+                return Some((kw, rest));
+            }
+        }
+    }
+    None
+}
+
+/// Toggle an org headline's keyword (indent already stripped): `* TODO x` ↔ `* DONE x`,
+/// preserving stars, the title, trailing tags, and a trailing `\r`.
+fn toggled_org(rest: &str) -> Option<String> {
+    let stars = rest.chars().take_while(|c| *c == '*').count();
+    if stars == 0 {
+        return None;
+    }
+    let body = rest[stars..].strip_prefix(' ')?;
+    let (kw, remainder) = split_org_keyword(body)?;
+    let new_kw = if kw == "TODO" { "DONE" } else { "TODO" };
+    Some(format!("{} {new_kw}{remainder}", &rest[..stars]))
+}
+
+/// Drop a leading `YYYY-MM-DD ` completion date, if present.
+fn strip_leading_date(s: &str) -> &str {
+    let b = s.as_bytes();
+    if b.len() >= 11
+        && b[..10].iter().enumerate().all(|(i, &c)| {
+            if i == 4 || i == 7 {
+                c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
+        && b[10] == b' '
+    {
+        &s[11..]
+    } else {
+        s
+    }
+}
+
+/// Toggle a todo.txt line's completion (indent already stripped): a leading `x ` marks
+/// done. Open → done prepends `x `; done → open drops `x ` and an optional completion
+/// date. Preserves the rest (priority, `+project`, `@context`) and a trailing `\r`.
+fn toggled_todotxt(rest: &str) -> Option<String> {
+    let (core, tail) = split_trailing_cr(rest);
+    if core.trim().is_empty() {
+        return None;
+    }
+    if let Some(after) = core.strip_prefix("x ") {
+        Some(format!("{}{tail}", strip_leading_date(after)))
+    } else {
+        Some(format!("x {core}{tail}"))
+    }
+}
+
+/// Toggle the task on line `line_index` of `content` for the given `fmt`, rewriting
+/// ONLY that line (leading whitespace, trailing text, the other lines, and the
+/// final-newline state preserved byte-for-byte). `None` if the line isn't a task in
+/// that format. This is the two-way sync's line-level patch primitive.
+pub fn toggle_task_line_fmt(content: &str, line_index: usize, fmt: TaskFormat) -> Option<String> {
     let had_final_nl = content.ends_with('\n');
     let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
     // `split('\n')` on a trailing-newline string yields a trailing "" — drop it so
@@ -125,12 +228,77 @@ pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
     let line = lines.get_mut(line_index)?;
     let indent_len = line.len() - line.trim_start().len();
     let (indent, rest) = line.split_at(indent_len);
-    *line = format!("{indent}{}", toggled_marker(rest)?);
+    let toggled = match fmt {
+        TaskFormat::Markdown => toggled_marker(rest)?,
+        TaskFormat::Org => toggled_org(rest)?,
+        TaskFormat::TodoTxt => toggled_todotxt(rest)?,
+    };
+    *line = format!("{indent}{toggled}");
     let mut joined = lines.join("\n");
     if had_final_nl {
         joined.push('\n');
     }
     Some(joined)
+}
+
+/// Markdown convenience wrapper (the common case + back-compat).
+pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
+    toggle_task_line_fmt(content, line_index, TaskFormat::Markdown)
+}
+
+/// Parse the task lines out of `content` for `fmt` (line-indexed). Pure, so the exact
+/// bytes a caller keeps as a sync snapshot match the parsed line indices.
+pub fn parse_task_lines(content: &str, fmt: TaskFormat) -> Vec<ParsedTask> {
+    let mut out = Vec::new();
+    for (i, raw) in content.lines().enumerate() {
+        let t = raw.trim_start().trim_end_matches('\r');
+        let parsed = match fmt {
+            TaskFormat::Markdown => parse_md_task(t),
+            TaskFormat::Org => parse_org_task(t),
+            TaskFormat::TodoTxt => parse_todotxt_task(t),
+        };
+        if let Some((done, title)) = parsed {
+            out.push(ParsedTask {
+                line: i,
+                done,
+                title,
+            });
+        }
+    }
+    out
+}
+
+fn parse_md_task(t: &str) -> Option<(bool, String)> {
+    if let Some(r) = t
+        .strip_prefix("- [ ] ")
+        .or_else(|| t.strip_prefix("- [/] "))
+    {
+        return Some((false, r.trim().to_string()));
+    }
+    t.strip_prefix("- [x] ")
+        .or_else(|| t.strip_prefix("- [X] "))
+        .map(|r| (true, r.trim().to_string()))
+}
+
+fn parse_org_task(t: &str) -> Option<(bool, String)> {
+    let stars = t.chars().take_while(|c| *c == '*').count();
+    if stars == 0 {
+        return None;
+    }
+    let body = t[stars..].strip_prefix(' ')?;
+    let (kw, remainder) = split_org_keyword(body)?;
+    Some((kw == "DONE", remainder.trim().to_string()))
+}
+
+fn parse_todotxt_task(t: &str) -> Option<(bool, String)> {
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(after) = t.strip_prefix("x ") {
+        Some((true, strip_leading_date(after).trim().to_string()))
+    } else {
+        Some((false, t.trim().to_string()))
+    }
 }
 
 /// Metadata read from a project's `.magpie/project.toml` (Phase 18b). All fields are
@@ -434,6 +602,81 @@ mod tests {
         assert_eq!(r.write, None);
         assert_eq!(r.new_baseline.as_deref(), Some(s));
         assert!(r.conflicts.is_empty());
+    }
+
+    // ---- formats: org + todo.txt (Phase 18b) ----
+
+    #[test]
+    fn task_format_by_extension() {
+        assert_eq!(TaskFormat::for_file("TODO.md"), TaskFormat::Markdown);
+        assert_eq!(
+            TaskFormat::for_file(".magpie/tasks.md"),
+            TaskFormat::Markdown
+        );
+        assert_eq!(TaskFormat::for_file("TODO.org"), TaskFormat::Org);
+        assert_eq!(TaskFormat::for_file("TODO.txt"), TaskFormat::TodoTxt);
+    }
+
+    #[test]
+    fn org_toggle_flips_keyword_preserving_rest() {
+        let base =
+            "#+TITLE: x\n* TODO write tests :work:\n  SCHEDULED: <2026-09-27>\n** DONE sub\n";
+        // Toggle the TODO headline (line 1) → DONE; SCHEDULED line untouched.
+        let out = toggle_task_line_fmt(base, 1, TaskFormat::Org).unwrap();
+        assert_eq!(
+            out,
+            "#+TITLE: x\n* DONE write tests :work:\n  SCHEDULED: <2026-09-27>\n** DONE sub\n"
+        );
+        // Toggle the DONE sub-headline (line 3, two stars) → TODO.
+        let out2 = toggle_task_line_fmt(base, 3, TaskFormat::Org).unwrap();
+        assert!(out2.contains("** TODO sub\n"));
+        // A non-headline line isn't a task.
+        assert!(toggle_task_line_fmt(base, 2, TaskFormat::Org).is_none());
+    }
+
+    #[test]
+    fn org_toggle_headline_without_title() {
+        let base = "* TODO\n";
+        assert_eq!(
+            toggle_task_line_fmt(base, 0, TaskFormat::Org).unwrap(),
+            "* DONE\n"
+        );
+    }
+
+    #[test]
+    fn todotxt_toggle_adds_and_removes_completion() {
+        let base = "(A) ship +magpie @home\nx clean desk\n";
+        // Open → done: prepend `x `.
+        let out = toggle_task_line_fmt(base, 0, TaskFormat::TodoTxt).unwrap();
+        assert_eq!(out, "x (A) ship +magpie @home\nx clean desk\n");
+        // Done → open: drop `x ` (and a completion date if present).
+        let out2 = toggle_task_line_fmt(base, 1, TaskFormat::TodoTxt).unwrap();
+        assert_eq!(out2, "(A) ship +magpie @home\nclean desk\n");
+        let dated = "x 2026-09-27 wrote report\n";
+        assert_eq!(
+            toggle_task_line_fmt(dated, 0, TaskFormat::TodoTxt).unwrap(),
+            "wrote report\n"
+        );
+    }
+
+    #[test]
+    fn parse_task_lines_per_format() {
+        let md = parse_task_lines("# T\n- [ ] a\n- [x] b\n", TaskFormat::Markdown);
+        assert_eq!(md.len(), 2);
+        assert_eq!(
+            (md[0].line, md[0].done, md[0].title.as_str()),
+            (1, false, "a")
+        );
+        assert!(md[1].done);
+
+        let org = parse_task_lines("* TODO a\n* DONE b\nplain\n", TaskFormat::Org);
+        assert_eq!(org.len(), 2);
+        assert_eq!((org[1].done, org[1].title.as_str()), (true, "b"));
+
+        let tt = parse_task_lines("(A) a +p\nx done one\n\n", TaskFormat::TodoTxt);
+        assert_eq!(tt.len(), 2);
+        assert_eq!((tt[0].done, tt[0].title.as_str()), (false, "(A) a +p"));
+        assert_eq!((tt[1].done, tt[1].title.as_str()), (true, "done one"));
     }
 
     #[test]
