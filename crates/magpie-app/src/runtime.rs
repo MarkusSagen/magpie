@@ -5106,6 +5106,20 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             write("magpie/TODO.md", "# magpie\n\n- [ ] Task card redesign !high @mon #ui\n- [ ] Link favicons + titles #clipboard\n- [x] Split launcher.slint\n");
                             write("magpie/.magpie/tasks.md", "- [ ] Decide tz boundary data source !med\n- [ ] Wordlist license check\n");
                             write("magpie/.git/HEAD", "ref: refs/heads/graphite/p9b\n");
+                            // Phase 18b showcase: project.toml (name+tags), notes, code comments.
+                            write(
+                                "magpie/.magpie/project.toml",
+                                "name = \"magpie\"\ntags = [\"hobby\", \"rust\"]\n",
+                            );
+                            write(
+                                "magpie/.magpie/notes/architecture.md",
+                                "# Architecture\n\nlocal-first, three crates.\n",
+                            );
+                            write(
+                                "magpie/.magpie/notes/ideas.md",
+                                "# Ideas\n\n- split-screen quick paste\n",
+                            );
+                            write("magpie/src/main.rs", "fn main() {\n    // TODO: wire the sync watcher into projects\n    let _ = 1; // FIXME: handle CRLF on Windows\n}\n");
                             write(
                                 "dotfiles/TODO.md",
                                 "- [ ] tidy zshrc\n- [ ] prune brew\n- [ ] backup gpg keys\n",
