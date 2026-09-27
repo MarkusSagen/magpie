@@ -208,6 +208,13 @@ pub fn next_runs(cron: &Cron, from_epoch: i64, tz: Tz, n: usize) -> Vec<i64> {
     out
 }
 
+/// Like [`next_runs`], but takes an IANA tz name (falling back to UTC) so callers
+/// don't need a `chrono-tz` dependency.
+pub fn next_runs_in_tz(cron: &Cron, from_epoch: i64, tz_name: &str, n: usize) -> Vec<i64> {
+    let tz: Tz = tz_name.parse().unwrap_or(chrono_tz::UTC);
+    next_runs(cron, from_epoch, tz, n)
+}
+
 /// Best-effort natural-language → cron. Returns `None` if it can't confidently parse
 /// (the UI then lets the user type/edit the cron directly — never a wrong guess).
 pub fn natural_to_cron(text: &str) -> Option<String> {

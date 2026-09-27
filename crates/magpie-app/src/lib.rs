@@ -16,6 +16,7 @@ pub mod format_time;
 pub mod graph;
 pub mod grouping;
 pub mod image_cache;
+pub mod job_runner;
 pub mod link_meta;
 pub mod mask_view;
 pub mod merge_view;

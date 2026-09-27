@@ -4881,6 +4881,81 @@ fn spawn_vault_watcher(
 /// watch set is re-synced from the latest scan every couple of seconds, so opening or
 /// ignoring projects updates what's watched. Idle (watches nothing) until the user
 /// has opened Projects at least once.
+/// In-app ("While open") job scheduler (Phase 21): wakes each minute and runs the
+/// enabled non-OS-managed jobs that are due this minute, in the user's home timezone.
+/// OS-managed jobs fire via the OS scheduler (which calls `magpie --run-job`), so they
+/// are skipped here. Store locks are held only for the quick DB ops, never across a
+/// job's execution.
+fn spawn_job_scheduler(state: Arc<AppState>) {
+    use std::panic::AssertUnwindSafe;
+    std::thread::spawn(move || {
+        let tz = state.world_clock_home.clone();
+        let log = data_dir().join("logs").join("magpie.log");
+        loop {
+            // Sleep to just past the next minute boundary.
+            let now = now_ms() / 1000;
+            let to_next = 60 - (now % 60);
+            std::thread::sleep(Duration::from_secs(to_next as u64 + 1));
+            let step = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let tick = now_ms() / 1000;
+                let minute_start = tick - (tick % 60);
+                let jobs = {
+                    let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                    st.list_jobs().unwrap_or_default()
+                };
+                for job in jobs.into_iter().filter(|j| j.enabled && !j.os_managed) {
+                    let Ok(cron) = magpie_core::cron::parse_cron(&job.cron) else {
+                        continue;
+                    };
+                    let due = magpie_core::cron::next_runs_in_tz(&cron, minute_start - 1, &tz, 1)
+                        .first()
+                        .map(|&n| n < minute_start + 60)
+                        .unwrap_or(false);
+                    if !due {
+                        continue;
+                    }
+                    // Verify + start under the lock, execute WITHOUT it, finish under it.
+                    let vjob = {
+                        let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                        st.job_for_run(job.id).ok().flatten()
+                    };
+                    let Some(vjob) = vjob else { continue };
+                    let run = {
+                        let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                        st.start_job_run(vjob.id, now_ms()).ok()
+                    };
+                    let res = magpie_app::job_runner::execute_job(&vjob);
+                    if let Some(run) = run {
+                        let st = state.store.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = st.finish_job_run(
+                            run,
+                            vjob.id,
+                            now_ms(),
+                            res.exit_code,
+                            &res.stdout,
+                            &res.stderr,
+                            20,
+                        );
+                    }
+                    let ok = res.exit_code == Some(0)
+                        || matches!(vjob.kind, magpie_core::jobs::JobKind::Notification);
+                    if !ok && vjob.notify_on_failure {
+                        magpie_platform::notify(
+                            &format!("Magpie job failed: {}", vjob.name),
+                            &res.exit_code
+                                .map(|c| format!("exit {c}"))
+                                .unwrap_or_else(|| "did not complete".to_string()),
+                        );
+                    }
+                }
+            }));
+            if step.is_err() {
+                magpie_app::diagnostics::log_line(&log, "job scheduler tick panicked; continuing");
+            }
+        }
+    });
+}
+
 fn spawn_project_watcher(state: Arc<AppState>, weak: slint::Weak<LauncherWindow>) {
     use notify::{EventKind, RecursiveMode, Watcher};
     std::thread::spawn(move || {
@@ -9154,6 +9229,8 @@ pub fn start() {
     // refresh the Projects view when they change on disk. Idle until a scan populates
     // projects, and only ever watches specific project dirs (never whole roots).
     spawn_project_watcher(state.clone(), weak.clone());
+    // In-app scheduler for "While open" jobs (Phase 21).
+    spawn_job_scheduler(state.clone());
     // Keep the hotkey manager alive for the whole run.
     let _hotkeys = spawn_hotkeys(&cfg, state.clone(), weak.clone(), scratch.as_weak());
     // Keep the tray icon alive for the whole run. It lives in a thread-local
