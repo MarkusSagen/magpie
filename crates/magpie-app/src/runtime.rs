@@ -9159,7 +9159,14 @@ pub fn start() {
     // Keep the tray icon alive for the whole run. It lives in a thread-local
     // (not a local binding) so the ticker below can reach it from the event
     // loop; see the `TRAY` thread_local for why (`TrayIcon` isn't `Send`).
-    TRAY.with(|t| *t.borrow_mut() = build_tray(weak.clone(), state.clone(), popover.as_weak()));
+    TRAY.with(|t| {
+        *t.borrow_mut() = build_tray(
+            weak.clone(),
+            state.clone(),
+            popover.as_weak(),
+            scratch.as_weak(),
+        )
+    });
 
     // Dev hook: show the scratch window on launch for screenshots (no-op otherwise).
     if std::env::var("MAGPIE_SHOW_SCRATCH").is_ok() {
@@ -9413,17 +9420,21 @@ fn build_tray(
     weak: slint::Weak<LauncherWindow>,
     state: Arc<AppState>,
     popover: slint::Weak<Popover>,
+    scratch: slint::Weak<ScratchWindow>,
 ) -> Option<tray_icon::TrayIcon> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let menu = Menu::new();
     let show = MenuItem::new("Show Magpie", true, None);
+    let scratch_item = MenuItem::new("Scratch pad", true, None);
     let quit = MenuItem::new("Quit Magpie", true, None);
     menu.append(&show).ok()?;
+    menu.append(&scratch_item).ok()?;
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
     let show_id = show.id().clone();
+    let scratch_id = scratch_item.id().clone();
     let quit_id = quit.id().clone();
 
     let mut builder = TrayIconBuilder::new()
@@ -9460,6 +9471,14 @@ fn build_tray(
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(ui) = w.upgrade() {
                             show_window(&ui, &s);
+                        }
+                    });
+                } else if ev.id == scratch_id {
+                    let sw = scratch.clone();
+                    let s = s.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(sc) = sw.upgrade() {
+                            toggle_scratch(&sc, &s);
                         }
                     });
                 }
