@@ -17,8 +17,18 @@ export global Shortcuts {
         { group: "Navigation", keys: "Esc", desc: "Clear search, then close" },
         { group: "Navigation", keys: "⌘1–9", desc: "Paste the Nth entry" },
         { group: "Navigation", keys: "⌘⇧Space", desc: "Summon Magpie anywhere" },
+        // Search & filters (clipboard search bar — type these inline)
+        { group: "Search & filters", keys: "app:vivaldi", desc: "From a source app (try app:ghostty)" },
+        { group: "Search & filters", keys: "url:  /  site:", desc: "Clip URL, or the page it came from" },
+        { group: "Search & filters", keys: "type:image", desc: "Content kind (link, text, color, file…)" },
+        { group: "Search & filters", keys: "is:pinned", desc: "Pinned entries only" },
+        { group: "Search & filters", keys: "after:  before:  on:", desc: "Date range, YYYY[-MM[-DD]]" },
+        { group: "Search & filters", keys: "browser  editor  terminal", desc: "By source category (bare)" },
+        { group: "Search & filters", keys: "cat:notes", desc: "Other categories (chat, design…)" },
+        { group: "Search & filters", keys: "> command", desc: "Run a command / transform" },
+        { group: "Search & filters", keys: "⌘F", desc: "Append filters (source app, time)" },
         // Sections
-        { group: "Sections", keys: "G then C/T/N/B/S", desc: "Jump to a section" },
+        { group: "Sections", keys: "G then C/T/N/B/K", desc: "Jump to a section (K = Secrets)" },
         { group: "Sections", keys: "⌘[ / ⌘]", desc: "Back / forward through screens" },
         { group: "Sections", keys: "⌘⌥←", desc: "Jump to the previous screen" },
         { group: "Sections", keys: "⌘⌥↑ / ⌘⌥↓", desc: "Cycle the section's views" },
@@ -33,6 +43,7 @@ export global Shortcuts {
         { group: "Actions", keys: "⌘S", desc: "Assign to a ⌘1–9 slot" },
         { group: "Actions", keys: "⌘G", desc: "Add to merge" },
         { group: "Actions", keys: "⌘J", desc: "New note from this entry" },
+        { group: "Actions", keys: "⌘K → Save as secret", desc: "Promote a clip to the Secrets vault" },
         { group: "Actions", keys: "⌘V", desc: "Paste clipboard into search" },
         { group: "Actions", keys: "⌘⌫", desc: "Delete the entry" },
         // Views

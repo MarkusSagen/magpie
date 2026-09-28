@@ -1,6 +1,6 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow } from "types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow, SuggestRow } from "types.slint";
 import { Theme, Pal } from "theme.slint";
 import { Icons } from "icons.slint";
 import { TypeIcon, ActionIcon } from "components/glyphs.slint";
@@ -119,6 +119,9 @@ export component LauncherWindow inherits Window {
 
     in property <[EntryRow]> entries;
     in-out property <string> query;
+    in-out property <string> search-placeholder: "Search clipboard…";
+    in property <[SuggestRow]> search-suggestions;
+    callback apply-suggestion(string);
     in-out property <int> selected: 0;
     // "list" | "edit" | "actions" — gates keyboard routing.
     in-out property <string> mode: "list";
@@ -524,6 +527,9 @@ export component LauncherWindow inherits Window {
             preview-text: root.preview-text;
             preview-truncated: root.preview-truncated;
             query <=> root.query;
+            search-placeholder: root.search-placeholder;
+            search-suggestions: root.search-suggestions;
+            apply-suggestion(a0) => { root.apply-suggestion(a0); }
             range-index <=> root.range-index;
             remove-tag(a0, a1) => { root.remove-tag(a0, a1); }
             revealed <=> root.revealed;

@@ -349,6 +349,16 @@ export struct SnippetRow {
     is-command: bool,
 }
 
+// ---- Search token autocomplete (clipboard search bar) ----
+export struct SuggestRow {
+    // What to show on the chip (e.g. "app:vivaldi  12").
+    label: string,
+    // The full new query text to set when this suggestion is chosen.
+    insert: string,
+    // Optional short hint (e.g. a count or category), dimmed.
+    hint: string,
+}
+
 // ---- Secrets vault ----
 export struct SecretRow {
     id: int,

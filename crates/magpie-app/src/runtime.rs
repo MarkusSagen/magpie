@@ -5,8 +5,8 @@ use crate::{
     MdLineVM, MdSpan, NoteRender, NoteRow, NoteVersionRow, Popover, ProjTaskRow, ProjectListRow,
     ProjectsStore, RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow,
     SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
-    SearchTreeRow, SecretRow, SecretsStore, SlotItem, SnippetRow, SnippetsStore, TaskRow,
-    TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
+    SearchTreeRow, SecretRow, SecretsStore, SlotItem, SnippetRow, SnippetsStore, SuggestRow,
+    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -1900,6 +1900,24 @@ fn on_nav_cycle_view(ui: &LauncherWindow, state: &Arc<AppState>, dir: i32) {
 /// callers. `tasks-view`/`notes-view` are left as-is by Slint's `in-out`
 /// bindings whenever we (re)enter that same section, which is what gives
 /// "remember the last view shown" for free.
+/// The placeholder for the shared top search bar on a given section.
+fn section_search_placeholder(section: &str) -> &'static str {
+    match section {
+        "clipboard" => "Search clipboard…   app:vivaldi · is:pinned · after:2026-01-01 · >command",
+        "notes" => "Search notes…",
+        "tasks" => "Search tasks…",
+        "bookmarks" => "Search bookmarks…",
+        "snippets" => "Search snippets & commands…",
+        "secrets" => "Search secrets by key or value…",
+        "files" => "Search files…   in:~/code term",
+        "projects" => "Search projects…",
+        "calculator" => "Type math, dates, units, or a function to plot…",
+        "data" => "Search data…",
+        "stats" => "Stats",
+        _ => "Search…",
+    }
+}
+
 fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &str) {
     ui.set_today_mode(false);
     ui.set_journal_mode(false);
@@ -1911,6 +1929,13 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
     ui.set_search_mode(false);
     ui.set_view(SharedString::from("list"));
     ui.set_section(SharedString::from(section));
+    // Context-aware top search bar: a per-section placeholder, and a fresh query so one
+    // screen's filter doesn't leak into the next.
+    ui.set_search_placeholder(SharedString::from(section_search_placeholder(section)));
+    ui.set_query(SharedString::from(""));
+    if let Ok(mut u) = state.ui.lock() {
+        u.text = String::new();
+    }
     match (section, view) {
         ("tasks", "today") => {
             ui.set_tasks_view(SharedString::from("today"));
@@ -1983,6 +2008,9 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
         }
         ("secrets", _) => {
             ui.set_view(SharedString::from("secrets"));
+            // The shared top bar drives the vault search; start unfiltered.
+            ui.global::<SecretsStore>()
+                .set_query(SharedString::from(""));
             refresh_secrets(ui, state);
         }
         ("projects", _) => {
@@ -2641,12 +2669,20 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     ss.set_count_commands(count_commands);
 
     let tab = ss.get_tab();
+    // Free-text filter from the shared top search bar (name / keyword / body).
+    let query = ui.get_query().to_string().trim().to_lowercase();
     let filtered: Vec<&magpie_core::snippets::Snippet> = store_snips
         .iter()
         .filter(|s| match tab {
             1 => !s.is_command(),
             2 => s.is_command(),
             _ => true,
+        })
+        .filter(|s| {
+            query.is_empty()
+                || s.name.to_lowercase().contains(&query)
+                || s.keyword.to_lowercase().contains(&query)
+                || s.body.to_lowercase().contains(&query)
         })
         .collect();
 
@@ -2686,6 +2722,99 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
     } else {
         ss.set_has_selection(false);
     }
+}
+
+/// Live token autocomplete for the clipboard search bar: from the token currently being
+/// typed, suggest filter keys, or values for `app:`/`type:`/`cat:`. Cleared on any other
+/// section. Chosen via the chip strip (`apply-suggestion`).
+fn refresh_search_suggestions(ui: &LauncherWindow, state: &AppState, text: &str) {
+    if ui.get_section() != "clipboard" {
+        ui.set_search_suggestions(ModelRc::new(VecModel::from(Vec::<SuggestRow>::new())));
+        return;
+    }
+    // The token being edited = text after the last whitespace; `prefix` is what precedes it.
+    let split = text.rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
+    let prefix = &text[..split];
+    let last = &text[split..];
+    let low = last.to_lowercase();
+    let mut out: Vec<SuggestRow> = Vec::new();
+    let mk = |label: String, insert: String, hint: String| SuggestRow {
+        label: label.into(),
+        insert: insert.into(),
+        hint: hint.into(),
+    };
+
+    let value_after =
+        |key: &str| -> Option<String> { low.strip_prefix(key).map(|s| s.to_string()) };
+
+    if let Some(p) = value_after("app:") {
+        let apps = {
+            let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+            store.apps_in_use_with_counts().unwrap_or_default()
+        };
+        for (_, name, count) in apps
+            .into_iter()
+            .filter(|(_, n, _)| n.to_lowercase().contains(&p))
+        {
+            out.push(mk(
+                format!("app:{name}"),
+                format!("{prefix}app:{} ", name.to_lowercase()),
+                format!("{count}"),
+            ));
+            if out.len() >= 8 {
+                break;
+            }
+        }
+    } else if let Some(p) = value_after("type:").or_else(|| value_after("kind:")) {
+        for k in ["text", "link", "image", "color", "email", "file", "html"] {
+            if k.starts_with(&p) {
+                out.push(mk(
+                    format!("type:{k}"),
+                    format!("{prefix}type:{k} "),
+                    String::new(),
+                ));
+            }
+        }
+    } else if let Some(p) = value_after("cat:").or_else(|| value_after("category:")) {
+        for c in ["browser", "editor", "terminal", "chat", "notes", "design"] {
+            if c.starts_with(&p) {
+                out.push(mk(
+                    format!("cat:{c}"),
+                    format!("{prefix}cat:{c} "),
+                    String::new(),
+                ));
+            }
+        }
+    } else {
+        // Suggest filter keys/tokens that start with what's being typed.
+        let keys: &[(&str, &str)] = &[
+            ("app:", "source app"),
+            ("url:", "clip URL / source page"),
+            ("site:", "source page"),
+            ("type:", "content kind"),
+            ("is:pinned", "pinned only"),
+            ("after:", "date ≥ (YYYY-MM-DD)"),
+            ("before:", "date ≤"),
+            ("on:", "on a date"),
+            ("browser", "source category"),
+            ("editor", "source category"),
+            ("terminal", "source category"),
+            ("cat:", "other categories"),
+        ];
+        for (k, hint) in keys {
+            if !low.is_empty() && k.starts_with(&low) {
+                out.push(mk(
+                    (*k).to_string(),
+                    format!("{prefix}{k}"),
+                    (*hint).to_string(),
+                ));
+            }
+            if out.len() >= 8 {
+                break;
+            }
+        }
+    }
+    ui.set_search_suggestions(ModelRc::new(VecModel::from(out)));
 }
 
 /// The DB id of the currently-selected secret row, if any.
@@ -8362,27 +8491,77 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_search_changed(move |text| {
-            if let Ok(mut u) = s.ui.lock() {
-                u.text = text.to_string();
+            let Some(ui) = w.upgrade() else { return };
+            // `>` prefix opens the command palette (actions / transforms). Clear the top
+            // bar and hand control to the palette, which owns its own input (like ⌘K).
+            if text.starts_with('>') {
+                ui.set_query(SharedString::from(""));
+                if let Ok(mut u) = s.ui.lock() {
+                    u.text = String::new();
+                }
+                let rest = text.trim_start_matches('>').trim().to_string();
+                ui.invoke_open_actions();
+                if !rest.is_empty() {
+                    set_actions_filtered(&ui, &rest);
+                }
+                return;
             }
-            if let Some(ui) = w.upgrade() {
-                // New query text → start the answer card at its first format.
-                ui.set_answer_format_index(0);
-                refresh(&ui, &s);
-                // In the Files view, the query drives the file search.
-                if ui.get_view() == "files" {
+            // The shared top bar filters whatever screen is active (context-aware).
+            match ui.get_section().as_str() {
+                "secrets" => {
+                    ui.global::<SecretsStore>().set_query(text.clone());
+                    ui.global::<SecretsStore>().set_selected(0);
+                    refresh_secrets(&ui, &s);
+                }
+                "snippets" => {
+                    ui.global::<SnippetsStore>().set_selected(0);
+                    refresh_snippets(&ui, &s);
+                }
+                "files" => {
+                    if let Ok(mut u) = s.ui.lock() {
+                        u.text = text.to_string();
+                    }
                     refresh_files(&ui, &s);
                 }
-                // In the calculator, auto-detect the input syntax and re-typeset.
-                if ui.get_view() == "calculator" {
+                "calculator" => {
+                    if let Ok(mut u) = s.ui.lock() {
+                        u.text = text.to_string();
+                    }
                     let mode = match magpie_core::mathsvg::detect_syntax(text.as_str()) {
                         magpie_core::mathsvg::Syntax::Latex => 1,
                         magpie_core::mathsvg::Syntax::Typst => 2,
                         magpie_core::mathsvg::Syntax::Plain => 0,
                     };
                     ui.global::<CalcStore>().set_syntax_mode(mode);
+                    refresh(&ui, &s);
                     update_calc_math(&ui, &s);
                 }
+                _ => {
+                    // Clipboard (and any list section): text search + inline answer card.
+                    if let Ok(mut u) = s.ui.lock() {
+                        u.text = text.to_string();
+                    }
+                    ui.set_answer_format_index(0);
+                    refresh(&ui, &s);
+                }
+            }
+            // Live token suggestions for the clipboard search bar.
+            refresh_search_suggestions(&ui, &s, text.as_str());
+        });
+    }
+    {
+        // A search-suggestion chip was chosen: complete the query and re-run.
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_apply_suggestion(move |insert| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_query(insert.clone());
+                if let Ok(mut u) = s.ui.lock() {
+                    u.text = insert.to_string();
+                }
+                ui.set_answer_format_index(0);
+                refresh(&ui, &s);
+                refresh_search_suggestions(&ui, &s, insert.as_str());
             }
         });
     }

@@ -1,7 +1,7 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SuggestRow } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
@@ -95,6 +95,11 @@ export component MainView inherits VerticalLayout {
     in property <string> preview-text;
     in property <bool> preview-truncated;
     in-out property <string> query;
+    // Placeholder for the shared top search bar — context-aware (set per section by Rust).
+    in property <string> search-placeholder: "Search clipboard…";
+    // Live token autocomplete for the clipboard search bar.
+    in property <[SuggestRow]> search-suggestions;
+    callback apply-suggestion(string);
     in-out property <int> range-index;
     callback remove-tag(int, string);
     in-out property <bool> revealed;
@@ -231,7 +236,7 @@ export component MainView inherits VerticalLayout {
                         horizontal-stretch: 1;
                         if root.query == "": Text {
                             x: 0;
-                            text: "Search clipboard…";
+                            text: root.search-placeholder;
                             color: Theme.text-faint;
                             font-size: Theme.fs-lg;
                             vertical-alignment: center;
@@ -517,6 +522,25 @@ export component MainView inherits VerticalLayout {
                         }
                     }
                 }
+            }
+
+            // ---- Search token suggestions (clipboard bar autocomplete) ----
+            if root.search-suggestions.length > 0: HorizontalLayout {
+                padding-left: 24px; padding-right: 24px; padding-bottom: 6px; spacing: 6px;
+                for sug in root.search-suggestions: Rectangle {
+                    height: 26px; border-radius: Theme.r-sm;
+                    background: sgta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                    border-width: 1px; border-color: Theme.line;
+                    sgta := TouchArea { clicked => { root.apply-suggestion(sug.insert); } }
+                    HorizontalLayout {
+                        padding-left: 8px; padding-right: 8px; spacing: 6px;
+                        Text { text: sug.label; color: Theme.text; font-family: "Geist Mono";
+                            font-size: Theme.fs-sm; vertical-alignment: center; }
+                        if sug.hint != "": Text { text: sug.hint; color: Theme.text-faint;
+                            font-size: Theme.fs-xs; vertical-alignment: center; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
             }
 
             // ---- List view ----
