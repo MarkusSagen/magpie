@@ -6745,6 +6745,9 @@ pub fn start() {
     diag::install_panic_hook(log_path.clone());
     let prev_exit = diag::read_prev_exit(&session_path);
     diag::mark_running(&session_path);
+    // A kill/pkill (e.g. install replacing a running copy), Ctrl-C, or logout marks the
+    // session clean instead of looking like a crash on the next launch.
+    diag::install_clean_exit_on_signal(&session_path);
     diag::log_line(&log_path, "startup");
 
     let cfg = magpie_app::config::load_or_default(&data_dir().join("config.toml"));

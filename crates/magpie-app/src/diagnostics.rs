@@ -76,6 +76,62 @@ pub fn mark_clean(state_path: &Path) {
     let _ = std::fs::write(state_path, b"clean");
 }
 
+#[cfg(unix)]
+mod signal_clean {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+    use std::sync::OnceLock;
+
+    static SESSION_PATH: OnceLock<CString> = OnceLock::new();
+
+    /// Async-signal-safe: only open/write/close/_exit. Writes "clean" so the next
+    /// launch doesn't treat a `kill`/logout as a crash, then exits immediately.
+    extern "C" fn handle(_sig: libc::c_int) {
+        if let Some(p) = SESSION_PATH.get() {
+            unsafe {
+                let fd = libc::open(
+                    p.as_ptr(),
+                    libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+                    0o644,
+                );
+                if fd >= 0 {
+                    let buf = b"clean";
+                    let _ = libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len());
+                    let _ = libc::close(fd);
+                }
+            }
+        }
+        unsafe { libc::_exit(0) }
+    }
+
+    pub fn install(state_path: &Path) {
+        let Ok(c) = CString::new(state_path.as_os_str().as_bytes()) else {
+            return;
+        };
+        let _ = SESSION_PATH.set(c);
+        // Go item → fn-pointer → integer; a direct fn-item-to-int cast trips clippy.
+        let h: extern "C" fn(libc::c_int) = handle;
+        let sigh = h as *const () as libc::sighandler_t;
+        unsafe {
+            libc::signal(libc::SIGTERM, sigh);
+            libc::signal(libc::SIGINT, sigh);
+            libc::signal(libc::SIGHUP, sigh);
+        }
+    }
+}
+
+/// Install a handler for SIGTERM/SIGINT/SIGHUP that marks the session clean before
+/// exiting — so a `kill`/`pkill` (e.g. `just install-macos` replacing a running copy),
+/// a Ctrl-C in dev, or a logout is not mistaken for a crash on the next launch. No-op
+/// off Unix.
+pub fn install_clean_exit_on_signal(state_path: &Path) {
+    #[cfg(unix)]
+    signal_clean::install(state_path);
+    #[cfg(not(unix))]
+    let _ = state_path;
+}
+
 /// Append `at_ms` to the crash-timestamp log, keeping only the most recent 10.
 pub fn record_crash(crashes_path: &Path, at_ms: i64) {
     let mut times = read_crash_times(crashes_path);

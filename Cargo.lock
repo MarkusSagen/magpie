@@ -3617,6 +3617,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "image",
+ "libc",
  "magpie-core",
  "magpie-platform",
  "notify",

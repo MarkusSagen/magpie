@@ -33,6 +33,10 @@ grep-matcher = "0.1"
 # project task files (FSEvents/kqueue/inotify). Watched non-recursively per project
 # dir, so it never crawls whole roots.
 notify = "6"
+# Signal handler (SIGTERM/SIGINT/SIGHUP → mark the session clean before exit) so a
+# kill/pkill/Ctrl-C/logout isn't mistaken for a crash. Unix only; already in the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 slint-build = "1.8"
