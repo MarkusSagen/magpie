@@ -51,6 +51,43 @@ pub fn raise_to_front() {
 #[cfg(not(target_os = "macos"))]
 pub fn raise_to_front() {}
 
+/// Bring the menu-bar **popover** to the front WITHOUT un-hiding the rest of the app.
+/// Unlike [`raise_to_front`], this never calls `unhide`, so an app-hidden main launcher
+/// window is NOT resurrected alongside the popover — clicking the tray icon then behaves
+/// like a normal macOS menu-bar dropdown (one surface), not "popover + full window".
+/// Only already-visible windows (the popover we just showed) are ordered front.
+#[cfg(target_os = "macos")]
+pub fn raise_popover_front() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindowCollectionBehavior};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    // NB: deliberately no `app.unhide(None)` here — that is what pulled the hidden main
+    // window back. Order only the currently-visible windows to the front; an app-hidden
+    // launcher reports `!isVisible` and is skipped.
+    for window in app.windows().iter() {
+        if !window.isVisible() {
+            continue;
+        }
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+        );
+        window.orderFrontRegardless();
+    }
+    // Foreground the process so the popover takes clicks/keys, but only after the
+    // visibility guard above decided what to raise (so the hidden launcher isn't lifted).
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+}
+
+/// No-op fallback: on Windows/Linux the WM focuses the window on show.
+#[cfg(not(target_os = "macos"))]
+pub fn raise_popover_front() {}
+
 /// Hide Magpie and return keyboard focus to the app that was active before us, so
 /// a subsequent paste keystroke lands in that app. On macOS `-[NSApplication
 /// hide:]` hides all our windows and activates the next app in line — even when we

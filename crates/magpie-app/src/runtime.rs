@@ -10816,7 +10816,10 @@ fn build_tray(
                                 // screen edge; otherwise anchor under the tray icon.
                                 present_popover(&p, &s, Some((px, py)));
                                 let _ = p.show();
-                                magpie_platform::raise_to_front();
+                                // Raise ONLY the popover — never un-hide the main launcher
+                                // window, so a tray click behaves like a normal menu-bar
+                                // dropdown (one surface), not "popover + full app window".
+                                magpie_platform::raise_popover_front();
                             }
                         }
                     });

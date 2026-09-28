@@ -26,7 +26,9 @@ pub use os::paste::send_backspaces;
 pub use os::scheduler::{
     install_job as install_os_job, job_label, remove_job as remove_os_job, Interval,
 };
-pub use os::window::{hide_and_yield_focus, main_screen_size, raise_to_front, set_appearance};
+pub use os::window::{
+    hide_and_yield_focus, main_screen_size, raise_popover_front, raise_to_front, set_appearance,
+};
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 pub use watcher::Watcher;
