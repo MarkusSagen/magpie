@@ -12,6 +12,11 @@ set shell := ["bash", "-uc"]
 tc := env_var('HOME') + "/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin"
 cargo := "env -u RUSTUP_TOOLCHAIN RUSTC=" + tc + "/rustc PATH=\"" + tc + ":$PATH\" " + tc + "/cargo"
 
+# Cargo profile the LOCAL macOS install uses. Debug by default so `just install-macos`
+# is fast (reuses `just run`'s warm artifacts); `PROFILE=release just install-macos`
+# for an optimized build. Distribution (`package-macos`, `dmg`) is always release.
+profile := env_var_or_default("PROFILE", "debug")
+
 # Run the full test suite
 test:
     {{cargo}} test --workspace
@@ -163,16 +168,21 @@ install: release
     #!/usr/bin/env bash
     echo "Windows: copy target/release/magpie.exe onto your PATH, then run: magpie --install-autostart"
 
-# macOS: assemble a minimal .app bundle around the release binary
+# macOS: assemble (+ ad-hoc sign) target/Magpie.app from a cargo PROFILE
+# ("release" or "debug"). Internal — use package-macos / install-macos.
 [macos]
-[group('package')]
-package-macos: release
+_app-macos PROFILE:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ "{{PROFILE}}" = "release" ]; then
+      {{cargo}} build --release -p magpie-app; BIN="target/release/magpie"
+    else
+      {{cargo}} build -p magpie-app; BIN="target/debug/magpie"
+    fi
     APP="target/Magpie.app"
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    cp target/release/magpie "$APP/Contents/MacOS/magpie"
+    cp "$BIN" "$APP/Contents/MacOS/magpie"
     cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
     cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
     # Stamp the real crate version into the bundle (the checked-in plist carries a
@@ -186,15 +196,21 @@ package-macos: release
     # `just make-signing-cert`) and the grant persists across rebuilds.
     SIGN_ID="${SIGN_ID:--}"
     codesign --force --deep --sign "$SIGN_ID" --identifier io.magpie "$APP" \
-      && echo "built $APP (signed: $SIGN_ID)" \
-      || echo "built $APP (unsigned — codesign unavailable)"
+      && echo "built $APP ({{PROFILE}}, signed: $SIGN_ID)" \
+      || echo "built $APP ({{PROFILE}}, unsigned — codesign unavailable)"
     if [ "$SIGN_ID" = "-" ]; then echo "NOTE: ad-hoc signed — the Accessibility grant resets each rebuild. See 'just make-signing-cert' for a stable grant."; fi
 
-# Install into /Applications, register login autostart, and launch (SIGN_ID=… for a
-# stable Accessibility grant; AUTOSTART=0 to skip the login item).
+# macOS: assemble an optimized (release) .app for distribution.
+[macos]
+[group('package')]
+package-macos: (_app-macos "release")
+
+# Install into /Applications, register login autostart, and launch. Uses the fast DEBUG
+# build by default (PROFILE=release for an optimized bundle); SIGN_ID=… for a stable
+# Accessibility grant; AUTOSTART=0 to skip the login item.
 [macos]
 [group('install')]
-install-macos: package-macos
+install-macos: (_app-macos profile)
     #!/usr/bin/env bash
     set -euo pipefail
     SRC="target/Magpie.app"

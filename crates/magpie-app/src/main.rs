@@ -1,3 +1,8 @@
+// The debug binary's DWARF unwind tables exceed the 16MB compact-unwind limit (large
+// generated Slint code + line-tables debuginfo), so the linker prints a benign
+// "__eh_frame section too large" note. It doesn't affect correctness — silence the lint.
+#![allow(linker_messages)]
+
 slint::include_modules!();
 
 mod runtime;
