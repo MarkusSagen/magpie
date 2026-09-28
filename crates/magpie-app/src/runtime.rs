@@ -2133,8 +2133,8 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         all_tags.sort();
         all_tags.dedup();
         let filter = ui.get_note_tag_filter().to_string();
-        // Free-text filter from the shared top search bar (title / body).
-        let query = ui.get_query().to_string().trim().to_lowercase();
+        // Free-text filter from the Notes search box (title / body).
+        let query = ui.get_note_filter().to_string().trim().to_lowercase();
         let rows: Vec<NoteRow> = recent
             .iter()
             .zip(tags_by_note.iter())
@@ -3106,6 +3106,16 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
         let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
         g.hits.clone()
     };
+    // Free-text filter from the shared top search bar (project name / path).
+    let query = ui.get_query().to_string().trim().to_lowercase();
+    let hits: Vec<_> = hits
+        .into_iter()
+        .filter(|h| {
+            query.is_empty()
+                || h.name.to_lowercase().contains(&query)
+                || h.path.to_string_lossy().to_lowercase().contains(&query)
+        })
+        .collect();
     let (syncable, found): (Vec<_>, Vec<_>) = hits.iter().partition(|h| h.syncable());
 
     // Pending conflicts (Phase 18b): mark their projects in the list + show the banner.
@@ -4655,8 +4665,8 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
     let filter = ui.get_task_filter();
-    // Free-text filter from the shared top search bar (task title).
-    let query = ui.get_query().to_string().trim().to_lowercase();
+    // Free-text filter from the Tasks search box (task title).
+    let query = ui.get_task_search().to_string().trim().to_lowercase();
     // Project file-tasks (computed before the store lock — it locks project_scan).
     let proj_tasks = project_file_tasks(state, now);
     // The running timer (set inside the lock, reused for the header below).
@@ -8549,6 +8559,10 @@ pub fn start() {
                 "bookmarks" => {
                     ui.set_bookmark_query(text.clone());
                     refresh_bookmarks(&ui, &s);
+                }
+                "projects" => {
+                    // populate_projects reads ui.get_query() (no rescan).
+                    refresh_projects(&ui, &s, false);
                 }
                 "calculator" => {
                     if let Ok(mut u) = s.ui.lock() {

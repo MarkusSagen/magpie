@@ -150,6 +150,9 @@ export component NotesView inherits Rectangle {
                                     font-size: Theme.fs-body;
                                     single-line: true;
                                     vertical-alignment: center;
+                                    // Live-filter the list as you type (reuses the tag-filter
+                                    // refresh path, keeping the current tag selection).
+                                    edited => { root.filter-notes-by-tag(root.note-tag-filter); }
                                 }
                             }
                         }

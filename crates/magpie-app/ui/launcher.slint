@@ -326,6 +326,7 @@ export component LauncherWindow inherits Window {
     // Keyboard-selected task row index (Tasks mode).
     in-out property <int> task-selected: 0;
     in-out property <string> task-filter: "all";
+    in-out property <string> task-search;
     // Time tracking: the running task's title ("" if none) + live elapsed seconds.
     in property <string> active-title;
     in-out property <int> active-elapsed-sec;
@@ -624,6 +625,7 @@ export component LauncherWindow inherits Window {
             show-done <=> root.show-done;
             sidebar-w <=> root.sidebar-w;
             task-filter <=> root.task-filter;
+            task-search <=> root.task-search;
             task-selected <=> root.task-selected;
             tasks: root.tasks;
             tasks-mode <=> root.tasks-mode;
