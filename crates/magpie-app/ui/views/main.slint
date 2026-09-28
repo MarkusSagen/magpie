@@ -361,6 +361,11 @@ export component MainView inherits VerticalLayout {
                                     root.nav-leader = true;
                                     return accept;
                                 }
+                                // Tab accepts the first search-token suggestion (autocomplete).
+                                if event.text == Key.Tab && root.view == "list" && root.search-suggestions.length > 0 {
+                                    root.apply-suggestion(root.search-suggestions[0].insert);
+                                    return accept;
+                                }
                                 // ---- calculator view: ↵ commit/copy, Tab reuse, ⌘⌫ delete ----
                                 if root.view == "calculator" {
                                     if CalcStore.graphs-open {

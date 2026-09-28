@@ -2133,10 +2133,17 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         all_tags.sort();
         all_tags.dedup();
         let filter = ui.get_note_tag_filter().to_string();
+        // Free-text filter from the shared top search bar (title / body).
+        let query = ui.get_query().to_string().trim().to_lowercase();
         let rows: Vec<NoteRow> = recent
             .iter()
             .zip(tags_by_note.iter())
             .filter(|(_, tags)| filter.is_empty() || tags.iter().any(|t| t == &filter))
+            .filter(|(n, _)| {
+                query.is_empty()
+                    || n.name.to_lowercase().contains(&query)
+                    || n.body.to_lowercase().contains(&query)
+            })
             .map(|(n, tags)| NoteRow {
                 id: n.id as i32,
                 title: SharedString::from(magpie_app::notes_view::note_list_title(
@@ -4648,6 +4655,8 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
     let show_done = ui.get_show_done();
     let filter = ui.get_task_filter();
+    // Free-text filter from the shared top search bar (task title).
+    let query = ui.get_query().to_string().trim().to_lowercase();
     // Project file-tasks (computed before the store lock — it locks project_scan).
     let proj_tasks = project_file_tasks(state, now);
     // The running timer (set inside the lock, reused for the header below).
@@ -4670,6 +4679,7 @@ fn refresh_tasks(ui: &LauncherWindow, state: &AppState) {
                 "star" => t.bookmarked,
                 _ => true,
             })
+            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .map(|t| task_row_with_tracking(t, today_ms, &active, &store, now))
             .collect()
     };
@@ -8522,6 +8532,23 @@ pub fn start() {
                         u.text = text.to_string();
                     }
                     refresh_files(&ui, &s);
+                }
+                "notes" => {
+                    // refresh_notes reads ui.get_query() for its free-text filter.
+                    refresh_notes(&ui, &s);
+                }
+                "tasks" => {
+                    if ui.get_tasks_view() == "board" {
+                        ui.set_board_query(text.clone());
+                        refresh_board(&ui, &s);
+                    } else {
+                        // refresh_tasks reads ui.get_query() for its free-text filter.
+                        refresh_tasks(&ui, &s);
+                    }
+                }
+                "bookmarks" => {
+                    ui.set_bookmark_query(text.clone());
+                    refresh_bookmarks(&ui, &s);
                 }
                 "calculator" => {
                     if let Ok(mut u) = s.ui.lock() {
