@@ -188,6 +188,18 @@ const MIGRATIONS: &[&str] = &[
     // v10: capture the source window title with each clip so `url:`/`site:` search can
     // match the page a clip came from (browsers put the site/page name in the title).
     "ALTER TABLE entries ADD COLUMN source_title TEXT NOT NULL DEFAULT '';",
+    // v11: secrets vault (1Password-style). key→value secrets in this encrypted DB;
+    // `entry_id` links a secret back to the clipboard entry it was promoted from (that
+    // entry's text is scrubbed to a fixed mask so the plaintext leaves entries + FTS).
+    "CREATE TABLE secrets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        entry_id INTEGER,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -665,6 +677,7 @@ mod tests {
             .execute_batch(
                 "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
                  DROP TABLE jobs; DROP TABLE job_runs; DROP TABLE note_versions; \
+                 DROP TABLE secrets; \
                  ALTER TABLE notes DROP COLUMN scratch; \
                  ALTER TABLE notes DROP COLUMN scratch_pinned; \
                  ALTER TABLE entries DROP COLUMN source_title; \

@@ -44,6 +44,7 @@ pub mod random;
 pub mod retention;
 pub mod search;
 pub mod searchtokens;
+pub mod secrets;
 pub mod slots;
 pub mod snippets;
 pub mod stats;
@@ -62,6 +63,7 @@ pub use notes::Note;
 pub use retention::{Removed, RetentionPolicy};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
 pub use searchtokens::{parse_search_tokens, ParsedSearch};
+pub use secrets::{looks_like_secret, Secret, SECRET_MASK};
 pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};
 pub use store::{
     open, open_encrypted, open_in_memory, open_or_migrate_encrypted, ImageStore, Ingested, Store,
