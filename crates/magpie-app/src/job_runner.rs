@@ -145,6 +145,21 @@ pub fn run_job_by_id(store: &Store, id: i64) -> bool {
             return false;
         }
     };
+    // Confirm-on-first-automatic-run: an OS-scheduled job runs headlessly, so it can't
+    // block on a dialog (the save flow already confirms the command in-app). The first
+    // time such a job ever fires, surface a notification showing exactly what it runs, so
+    // an unexpected automated action can never happen silently the first time.
+    if job.os_managed
+        && store
+            .recent_job_runs(id, 1)
+            .map(|r| r.is_empty())
+            .unwrap_or(false)
+    {
+        magpie_platform::notify(
+            &format!("Magpie is running “{}” for the first time", job.name),
+            &format!("{}: {}", job.kind.as_str(), job.command),
+        );
+    }
     let run = store.start_job_run(id, now_ms()).ok();
     let res = execute_job(&job);
     let ok = res.exit_code == Some(0) || matches!(job.kind, JobKind::Notification);

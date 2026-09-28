@@ -4023,9 +4023,14 @@ fn job_id_at(state: &AppState, row: i32) -> Option<i64> {
 fn apply_os_schedule(job: &magpie_core::jobs::Job) -> Result<(), String> {
     if job.os_managed && job.enabled {
         let cron = magpie_core::cron::parse_cron(&job.cron)?;
-        let intervals = cron.launchd_intervals();
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        magpie_platform::install_os_job(job.id, &intervals, &exe)
+        magpie_platform::install_os_job(
+            job.id,
+            &exe,
+            &cron.launchd_intervals(),
+            &cron.systemd_oncalendar(),
+            &cron.schtasks_args().unwrap_or_default(),
+        )
     } else {
         let _ = magpie_platform::remove_os_job(job.id);
         Ok(())

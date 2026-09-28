@@ -182,6 +182,121 @@ impl Cron {
         out
     }
 
+    /// systemd `OnCalendar=` expressions (Phase 21 Linux adapter). One line unless
+    /// both day-of-month and day-of-week are restricted (cron ORs them, systemd ANDs
+    /// within a line), in which case two lines approximate the OR. Comma-lists keep the
+    /// mapping exact for `*/n`, ranges and lists.
+    pub fn systemd_oncalendar(&self) -> Vec<String> {
+        let list = |f: &Field, pad: bool| -> String {
+            if !f.restricted {
+                "*".to_string()
+            } else {
+                f.values()
+                    .iter()
+                    .map(|v| {
+                        if pad {
+                            format!("{v:02}")
+                        } else {
+                            v.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        };
+        let dow_names = || {
+            self.dow
+                .values()
+                .iter()
+                .map(|v| ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][*v as usize])
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let month = list(&self.month, false);
+        let time = format!("{}:{}:00", list(&self.hour, true), list(&self.minute, true));
+        if self.dom.restricted && self.dow.restricted {
+            // OR: one line by weekday, one by day-of-month.
+            vec![
+                format!("{} *-{}-* {}", dow_names(), month, time),
+                format!("*-{}-{} {}", month, list(&self.dom, false), time),
+            ]
+        } else {
+            let dom = list(&self.dom, false);
+            let prefix = if self.dow.restricted {
+                format!("{} ", dow_names())
+            } else {
+                String::new()
+            };
+            vec![format!("{}*-{}-{} {}", prefix, month, dom, time)]
+        }
+    }
+
+    /// Windows `schtasks` `/sc …` args for the common shapes (Phase 21 Windows
+    /// adapter). `None` if the schedule can't be expressed as a single schtasks
+    /// trigger (the caller then keeps it While-open). Best-effort; lossy by design.
+    pub fn schtasks_args(&self) -> Option<Vec<String>> {
+        let one = |f: &Field| -> Option<u32> {
+            let v = f.values();
+            (v.len() == 1).then(|| v[0])
+        };
+        // Detect a `*/n` minute set: {0, n, 2n, …} filling 0..60.
+        let minute_step = || -> Option<u32> {
+            let v = self.minute.values();
+            if v.len() < 2 || v[0] != 0 {
+                return None;
+            }
+            let step = v[1];
+            (step > 0 && (0..60).step_by(step as usize).eq(v.iter().copied())).then_some(step)
+        };
+        let full = |f: &Field| !f.restricted;
+        // every-N-minutes
+        if let Some(step) = minute_step() {
+            if full(&self.hour) && full(&self.dom) && full(&self.month) && full(&self.dow) {
+                return Some(vec![
+                    "/sc".into(),
+                    "MINUTE".into(),
+                    "/mo".into(),
+                    step.to_string(),
+                ]);
+            }
+        }
+        let (mi, h) = (one(&self.minute)?, one(&self.hour)?);
+        let at = format!("{h:02}:{mi:02}");
+        if full(&self.month) && self.dow.restricted && full(&self.dom) {
+            let days = self
+                .dow
+                .values()
+                .iter()
+                .map(|v| ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][*v as usize])
+                .collect::<Vec<_>>()
+                .join(",");
+            return Some(vec![
+                "/sc".into(),
+                "WEEKLY".into(),
+                "/d".into(),
+                days,
+                "/st".into(),
+                at,
+            ]);
+        }
+        if full(&self.month) && full(&self.dom) && full(&self.dow) {
+            return Some(vec!["/sc".into(), "DAILY".into(), "/st".into(), at]);
+        }
+        if full(&self.month) && !self.dow.restricted {
+            if let Some(d) = one(&self.dom) {
+                return Some(vec![
+                    "/sc".into(),
+                    "MONTHLY".into(),
+                    "/d".into(),
+                    d.to_string(),
+                    "/st".into(),
+                    at,
+                ]);
+            }
+        }
+        None
+    }
+
     /// The matching (hour, minute) firing times on a day, ascending.
     fn day_times(&self) -> Vec<(u32, u32)> {
         let mut out = Vec::new();
@@ -522,6 +637,52 @@ mod tests {
         );
         // Too complex to enumerate → empty (keep it while-open).
         assert!(parse_cron("*/2 * * * *").unwrap().launchd_intervals().len() <= 366);
+    }
+
+    #[test]
+    fn systemd_oncalendar_map() {
+        assert_eq!(
+            parse_cron("0 2 * * *").unwrap().systemd_oncalendar(),
+            vec!["*-*-* 02:00:00"]
+        );
+        assert_eq!(
+            parse_cron("40 8 * * 1-5").unwrap().systemd_oncalendar(),
+            vec!["Mon,Tue,Wed,Thu,Fri *-*-* 08:40:00"]
+        );
+        assert_eq!(
+            parse_cron("*/15 * * * *").unwrap().systemd_oncalendar(),
+            vec!["*-*-* *:00,15,30,45:00"]
+        );
+        // dom AND dow restricted → two lines (OR).
+        assert_eq!(
+            parse_cron("0 0 1 * 1").unwrap().systemd_oncalendar().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn schtasks_args_map() {
+        assert_eq!(
+            parse_cron("0 9 * * *").unwrap().schtasks_args().unwrap(),
+            vec!["/sc", "DAILY", "/st", "09:00"]
+        );
+        assert_eq!(
+            parse_cron("40 8 * * 1-5").unwrap().schtasks_args().unwrap(),
+            vec!["/sc", "WEEKLY", "/d", "MON,TUE,WED,THU,FRI", "/st", "08:40"]
+        );
+        assert_eq!(
+            parse_cron("*/15 * * * *").unwrap().schtasks_args().unwrap(),
+            vec!["/sc", "MINUTE", "/mo", "15"]
+        );
+        assert_eq!(
+            parse_cron("0 10 1 * *").unwrap().schtasks_args().unwrap(),
+            vec!["/sc", "MONTHLY", "/d", "1", "/st", "10:00"]
+        );
+        // Multiple discrete hours can't be a single schtasks trigger.
+        assert!(parse_cron("0 9,17 * * *")
+            .unwrap()
+            .schtasks_args()
+            .is_none());
     }
 
     // ---- E. natural language ----

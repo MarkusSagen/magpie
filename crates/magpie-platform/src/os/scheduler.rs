@@ -68,41 +68,116 @@ fn dirs_home() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
-/// Install (or replace) the OS scheduler entry for job `id`. `intervals` is empty when
-/// the cron is too complex to enumerate compactly — then this refuses so the job stays
-/// "While open".
-#[cfg(target_os = "macos")]
-pub fn install_job(id: i64, intervals: &[Interval], exe: &std::path::Path) -> Result<(), String> {
-    if intervals.is_empty() {
-        return Err("schedule too complex for the OS scheduler — keep it While open".into());
+/// Install (or replace) the OS scheduler entry for job `id`, running `exe --run-job
+/// <id>` on the given schedule. The caller passes each platform's native schedule
+/// (from `magpie_core::cron`): `launchd` intervals (macOS), `systemd` OnCalendar lines
+/// (Linux), `schtasks` args (Windows). The one for this OS must be non-empty, else the
+/// schedule is too complex to export and this refuses (keep it While open).
+// Each `#[cfg]` block ends in `return` because it is not the last statement on every
+// platform — only on the one it's compiled for. clippy sees the active block as final.
+#[allow(clippy::needless_return)]
+pub fn install_job(
+    id: i64,
+    exe: &std::path::Path,
+    launchd: &[Interval],
+    systemd: &[String],
+    schtasks: &[String],
+) -> Result<(), String> {
+    let _ = (id, exe, launchd, systemd, schtasks);
+    #[cfg(target_os = "macos")]
+    {
+        if launchd.is_empty() {
+            return Err("schedule too complex for launchd — keep it While open".into());
+        }
+        let path = plist_path(id).ok_or("no HOME")?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, launchd_plist(id, launchd, &exe.to_string_lossy()))
+            .map_err(|e| e.to_string())?;
+        let _ = std::process::Command::new("launchctl")
+            .arg("unload")
+            .arg(&path)
+            .output();
+        let out = std::process::Command::new("launchctl")
+            .arg("load")
+            .arg("-w")
+            .arg(&path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        return if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).into_owned())
+        };
     }
-    let path = plist_path(id).ok_or("no HOME")?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    {
+        if systemd.is_empty() {
+            return Err("schedule too complex for a systemd timer — keep it While open".into());
+        }
+        let dir = systemd_dir().ok_or("no HOME")?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let label = job_label(id);
+        let service = format!(
+            "[Unit]\nDescription=Magpie job {id}\n\n[Service]\nType=oneshot\nExecStart={} --run-job {id}\n",
+            exe.to_string_lossy()
+        );
+        let cal = systemd
+            .iter()
+            .map(|c| format!("OnCalendar={c}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let timer = format!(
+            "[Unit]\nDescription=Magpie job {id} timer\n\n[Timer]\n{cal}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+        );
+        std::fs::write(dir.join(format!("{label}.service")), service).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("{label}.timer")), timer).map_err(|e| e.to_string())?;
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
+        let out = std::process::Command::new("systemctl")
+            .args(["--user", "enable", "--now", &format!("{label}.timer")])
+            .output()
+            .map_err(|e| e.to_string())?;
+        return if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).into_owned())
+        };
     }
-    let plist = launchd_plist(id, intervals, &exe.to_string_lossy());
-    std::fs::write(&path, plist).map_err(|e| e.to_string())?;
-    // Reload: unload any prior definition, then load with -w (persist across logins).
-    let _ = std::process::Command::new("launchctl")
-        .arg("unload")
-        .arg(&path)
-        .output();
-    let out = std::process::Command::new("launchctl")
-        .arg("load")
-        .arg("-w")
-        .arg(&path)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    #[cfg(target_os = "windows")]
+    {
+        if schtasks.is_empty() {
+            return Err("schedule too complex for Task Scheduler — keep it While open".into());
+        }
+        let tr = format!("\"{}\" --run-job {id}", exe.to_string_lossy());
+        let out = std::process::Command::new("schtasks")
+            .args(["/create", "/f", "/tn", &job_label(id), "/tr", &tr])
+            .args(schtasks.iter().map(|s| s.as_str()))
+            .output()
+            .map_err(|e| e.to_string())?;
+        return if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).into_owned())
+        };
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err("OS scheduling isn't supported on this platform — keep it While open".into())
     }
 }
 
+#[cfg(target_os = "linux")]
+fn systemd_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/systemd/user"))
+}
+
 /// Remove the OS scheduler entry for job `id` (idempotent).
-#[cfg(target_os = "macos")]
 pub fn remove_job(id: i64) -> Result<(), String> {
+    let _ = id;
+    #[cfg(target_os = "macos")]
     if let Some(path) = plist_path(id) {
         let _ = std::process::Command::new("launchctl")
             .arg("unload")
@@ -110,21 +185,24 @@ pub fn remove_job(id: i64) -> Result<(), String> {
             .output();
         let _ = std::fs::remove_file(&path);
     }
-    Ok(())
-}
-
-// ---- Non-macOS: not yet supported (the trait + While-open scheduler still work). ----
-#[cfg(not(target_os = "macos"))]
-pub fn install_job(
-    _id: i64,
-    _intervals: &[Interval],
-    _exe: &std::path::Path,
-) -> Result<(), String> {
-    Err("OS scheduling isn't supported on this platform yet — keep it While open".into())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn remove_job(_id: i64) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = systemd_dir() {
+        let label = job_label(id);
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "disable", "--now", &format!("{label}.timer")])
+            .output();
+        let _ = std::fs::remove_file(dir.join(format!("{label}.timer")));
+        let _ = std::fs::remove_file(dir.join(format!("{label}.service")));
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("schtasks")
+            .args(["/delete", "/f", "/tn", &job_label(id)])
+            .output();
+    }
     Ok(())
 }
 
@@ -146,7 +224,8 @@ mod tests {
 
     #[test]
     fn install_refuses_too_complex() {
+        // Empty launchd intervals on macOS ⇒ refused (keep it While open).
         let exe = std::path::Path::new("/bin/echo");
-        assert!(install_job(1, &[], exe).is_err());
+        assert!(install_job(1, exe, &[], &[], &[]).is_err());
     }
 }
