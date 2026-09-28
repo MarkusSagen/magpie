@@ -10725,23 +10725,28 @@ fn build_tray(
     scratch: slint::Weak<ScratchWindow>,
 ) -> Option<tray_icon::TrayIcon> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tray_icon::TrayIconBuilder;
 
     let menu = Menu::new();
-    let show = MenuItem::new("Show Magpie", true, None);
+    let show = MenuItem::new("Open Magpie", true, None);
+    let clipboard_item = MenuItem::new("Quick clipboard…", true, None);
     let scratch_item = MenuItem::new("Scratch pad", true, None);
     let quit = MenuItem::new("Quit Magpie", true, None);
     menu.append(&show).ok()?;
+    menu.append(&clipboard_item).ok()?;
     menu.append(&scratch_item).ok()?;
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
     let show_id = show.id().clone();
+    let clipboard_id = clipboard_item.id().clone();
     let scratch_id = scratch_item.id().clone();
     let quit_id = quit.id().clone();
 
     let mut builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_menu_on_left_click(false)
+        // Clicking the menu-bar icon shows this dropdown (standard macOS behavior) — it
+        // does NOT open the mini clipboard GUI directly; the user picks from the menu.
+        .with_menu_on_left_click(true)
         .with_tooltip("Magpie");
     // Menu-bar icon: the magpie silhouette as a template image (macOS tints it for
     // the light/dark menu bar). No emoji fallback if decoding fails — an empty
@@ -10756,10 +10761,12 @@ fn build_tray(
     }
     let tray = builder.build().ok()?;
 
-    // Menu clicks (right-click menu): Show / Quit.
+    // Menu clicks: Open Magpie / Quick clipboard / Scratch pad / Quit. This IS the
+    // tray dropdown (shown on left-click now) — no separate popover-on-click handler.
     {
         let w = weak.clone();
         let s = state.clone();
+        let pop = popover.clone();
         std::thread::spawn(move || {
             let rx = MenuEvent::receiver();
             while let Ok(ev) = rx.recv() {
@@ -10775,50 +10782,16 @@ fn build_tray(
                             show_window(&ui, &s);
                         }
                     });
-                } else if ev.id == scratch_id {
-                    let sw = scratch.clone();
+                } else if ev.id == clipboard_id {
+                    // The quick clipboard popover, opened only when chosen from the menu.
+                    let pw = pop.clone();
                     let s = s.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(sc) = sw.upgrade() {
-                            toggle_scratch(&sc, &s);
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    // Left-click on the icon toggles the popover, anchored under the tray icon
-    // (macOS/Windows; Linux emits no click events, so "Show Magpie" is the door).
-    {
-        let popover = popover.clone();
-        let state = state.clone();
-        std::thread::spawn(move || {
-            let rx = TrayIconEvent::receiver();
-            while let Ok(ev) = rx.recv() {
-                if let TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    rect,
-                    ..
-                } = ev
-                {
-                    let pw = popover.clone();
-                    let s = state.clone();
-                    // Centre the 360px-wide popover under the icon, clamped to the
-                    // left screen edge, and drop it just below the menu bar.
-                    let (px, py) = (
-                        (rect.position.x + rect.size.width as f64 / 2.0 - 180.0).max(0.0) as i32,
-                        (rect.position.y + rect.size.height as f64) as i32,
-                    );
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(p) = pw.upgrade() {
                             if p.window().is_visible() {
                                 let _ = p.hide();
                             } else {
                                 refresh_popover(&p, &s);
-                                // Open on the user's preferred tab (clipboard by default) —
-                                // this popover is the quick, from-anywhere clipboard menu.
                                 p.set_tab(
                                     s.popover_default_tab
                                         .load(std::sync::atomic::Ordering::Relaxed),
@@ -10826,15 +10799,18 @@ fn build_tray(
                                 p.set_pinned(
                                     s.popover_pinned.load(std::sync::atomic::Ordering::Relaxed),
                                 );
-                                // Apply the persisted size and, when pinned, dock to the
-                                // screen edge; otherwise anchor under the tray icon.
-                                present_popover(&p, &s, Some((px, py)));
+                                present_popover(&p, &s, None);
                                 let _ = p.show();
-                                // Raise ONLY the popover — never un-hide the main launcher
-                                // window, so a tray click behaves like a normal menu-bar
-                                // dropdown (one surface), not "popover + full app window".
                                 magpie_platform::raise_popover_front();
                             }
+                        }
+                    });
+                } else if ev.id == scratch_id {
+                    let sw = scratch.clone();
+                    let s = s.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(sc) = sw.upgrade() {
+                            toggle_scratch(&sc, &s);
                         }
                     });
                 }
