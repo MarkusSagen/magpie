@@ -33,6 +33,13 @@ pub struct SearchQuery {
     pub mode: SearchMode,
     pub kind: Option<Kind>,
     pub source_app_id: Option<i64>,
+    /// `app:` token — match the source app by name substring (independent of the
+    /// numeric `source_app_id` filter set from the Filter popover; both AND if present).
+    pub source_app_name: Option<String>,
+    /// `browser`/`editor`/… — match any source app in a curated category.
+    pub category: Option<String>,
+    /// `url:`/`site:` — match the clip's URL or the source page it was copied from.
+    pub url_contains: Option<String>,
     pub time: TimeRange,
     pub sort: Sort,
     pub tag: Option<String>,
@@ -46,6 +53,9 @@ pub fn default_query() -> SearchQuery {
         mode: SearchMode::Word,
         kind: None,
         source_app_id: None,
+        source_app_name: None,
+        category: None,
+        url_contains: None,
         time: TimeRange::default(),
         sort: Sort::Recency,
         tag: None,
@@ -132,7 +142,7 @@ fn entry_cols_prefixed() -> String {
 pub(crate) const ENTRY_COLUMNS: &str =
     "id, content_hash, kind, preview_text, full_text, image_path, \
     byte_size, char_count, word_count, line_count, first_copied_at_ms, last_copied_at_ms, \
-    copy_count, pinned, source_app_id";
+    copy_count, pinned, source_app_id, source_title";
 
 pub(crate) fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
     let kind_str: String = row.get(2)?;
@@ -152,6 +162,7 @@ pub(crate) fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
         copy_count: row.get(12)?,
         pinned: row.get::<_, i64>(13)? != 0,
         source_app_id: row.get(14)?,
+        source_title: row.get(15)?,
     })
 }
 
@@ -313,6 +324,47 @@ impl Store {
             clauses.push("e.source_app_id = ?".to_string());
             params.push(Value::Integer(app));
         }
+        if let Some(name) = &q.source_app_name {
+            let name = name.trim().to_lowercase();
+            if !name.is_empty() {
+                clauses.push(
+                    "e.source_app_id IN (SELECT id FROM apps \
+                     WHERE lower(display_name || ' ' || identifier) LIKE ?)"
+                        .to_string(),
+                );
+                params.push(Value::Text(format!("%{}%", like_escape(&name))));
+            }
+        }
+        if let Some(cat) = &q.category {
+            let pats = crate::appcat::category_patterns(cat.trim());
+            if !pats.is_empty() {
+                let ors = vec!["lower(display_name || ' ' || identifier) LIKE ?"; pats.len()]
+                    .join(" OR ");
+                clauses.push(format!(
+                    "e.source_app_id IN (SELECT id FROM apps WHERE {ors})"
+                ));
+                for p in pats {
+                    params.push(Value::Text(format!("%{p}%")));
+                }
+            } else {
+                // A category with no known members can never match.
+                clauses.push("0".to_string());
+            }
+        }
+        if let Some(url) = &q.url_contains {
+            let url = url.trim().to_lowercase();
+            if !url.is_empty() {
+                // The clip's own URL text (link kinds) OR the source page's title.
+                clauses.push(
+                    "(lower(e.source_title) LIKE ? \
+                      OR (e.kind IN ('link','git_remote') AND lower(e.full_text) LIKE ?))"
+                        .to_string(),
+                );
+                let like = format!("%{}%", like_escape(&url));
+                params.push(Value::Text(like.clone()));
+                params.push(Value::Text(like));
+            }
+        }
         if let Some(since) = q.time.since_ms {
             clauses.push("e.last_copied_at_ms >= ?".to_string());
             params.push(Value::Integer(since));
@@ -374,6 +426,7 @@ mod tests {
         CaptureEvent {
             content: Content::Text(t.into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: ms,
         }
     }
@@ -404,6 +457,21 @@ mod tests {
                 display_name: ident.into(),
                 icon_path: None,
             }),
+            source_title: String::new(),
+            copied_at_ms: ms,
+        }
+    }
+
+    /// A capture with a source app name AND a window title (source page).
+    fn app_title_ev(t: &str, ms: i64, app: &str, title: &str) -> CaptureEvent {
+        CaptureEvent {
+            content: Content::Text(t.into()),
+            source_app: Some(AppInfo {
+                identifier: app.into(),
+                display_name: app.into(),
+                icon_path: None,
+            }),
+            source_title: title.into(),
             copied_at_ms: ms,
         }
     }
@@ -604,5 +672,77 @@ mod tests {
 
         q.text = r"order-(".into(); // invalid
         assert_eq!(s.search(&q).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn filter_by_source_app_name() {
+        let s = open_in_memory().unwrap();
+        s.ingest(&app_ev("from vivaldi", 1, "Vivaldi"), &FakeImages)
+            .unwrap();
+        s.ingest(&app_ev("from ghostty", 2, "Ghostty"), &FakeImages)
+            .unwrap();
+        let mut q = default_query();
+        q.source_app_name = Some("vivaldi".into());
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].full_text, "from vivaldi");
+    }
+
+    #[test]
+    fn filter_by_category_browser() {
+        let s = open_in_memory().unwrap();
+        s.ingest(&app_ev("web clip", 1, "Vivaldi"), &FakeImages)
+            .unwrap();
+        s.ingest(&app_ev("also web", 2, "Google Chrome"), &FakeImages)
+            .unwrap();
+        s.ingest(&app_ev("terminal clip", 3, "Ghostty"), &FakeImages)
+            .unwrap();
+        let mut q = default_query();
+        q.category = Some("browser".into());
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 2, "both browsers match, terminal excluded");
+        assert!(rows.iter().all(|r| r.full_text != "terminal clip"));
+    }
+
+    #[test]
+    fn filter_by_url_matches_source_title_and_link() {
+        let s = open_in_memory().unwrap();
+        // A clip copied from a page whose title carries the site/domain.
+        s.ingest(
+            &app_title_ev("account 123", 1, "Vivaldi", "Dashboard — enablebanking.com"),
+            &FakeImages,
+        )
+        .unwrap();
+        // A link clip whose own URL contains the term.
+        s.ingest(&text_ev("https://enablebanking.com/app", 2), &FakeImages)
+            .unwrap();
+        // Unrelated clip.
+        s.ingest(&text_ev("nothing relevant here", 3), &FakeImages)
+            .unwrap();
+        let mut q = default_query();
+        q.url_contains = Some("enablebanking".into());
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 2, "source-title match AND link match");
+    }
+
+    #[test]
+    fn url_and_text_combine() {
+        let s = open_in_memory().unwrap();
+        s.ingest(
+            &app_title_ev("invoice total 42", 1, "Vivaldi", "Stripe Billing"),
+            &FakeImages,
+        )
+        .unwrap();
+        s.ingest(
+            &app_title_ev("shipping note", 2, "Vivaldi", "Stripe Billing"),
+            &FakeImages,
+        )
+        .unwrap();
+        let mut q = default_query();
+        q.url_contains = Some("stripe".into());
+        q.text = "invoice".into();
+        let rows = s.search(&q).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].full_text, "invoice total 42");
     }
 }

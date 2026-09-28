@@ -89,6 +89,7 @@ fn create_note_from_entry_copies_provenance() {
             &CaptureEvent {
                 content: Content::Text("Fix the mount\nsecond line".into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 42,
             },
             &NoopImg,
@@ -111,6 +112,7 @@ fn create_note_from_entry_blank_text_falls_back_to_timestamp_name() {
             &CaptureEvent {
                 content: Content::Text("   \n\n\t  ".into()), // whitespace-only
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 42,
             },
             &NoopImg,

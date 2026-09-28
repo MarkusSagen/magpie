@@ -345,6 +345,7 @@ mod tests {
             &CaptureEvent {
                 content: Content::Text("hello".into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 1,
             },
         )
@@ -362,6 +363,7 @@ mod tests {
             &CaptureEvent {
                 content: Content::Text("hello".into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 1,
             },
         )
@@ -390,6 +392,7 @@ mod tests {
             &CaptureEvent {
                 content: Content::Text("alpha".into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 1,
             },
         )
@@ -399,6 +402,7 @@ mod tests {
             &CaptureEvent {
                 content: Content::Text("beta".into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 2,
             },
         )

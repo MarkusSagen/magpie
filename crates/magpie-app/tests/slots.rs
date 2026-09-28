@@ -18,6 +18,7 @@ fn entry(id: i64, text: &str) -> Entry {
         copy_count: 1,
         pinned: false,
         source_app_id: None,
+        source_title: String::new(),
     }
 }
 

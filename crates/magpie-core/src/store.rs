@@ -185,6 +185,9 @@ const MIGRATIONS: &[&str] = &[
         body TEXT NOT NULL,
         created_at_ms INTEGER NOT NULL
     );",
+    // v10: capture the source window title with each clip so `url:`/`site:` search can
+    // match the page a clip came from (browsers put the site/page name in the title).
+    "ALTER TABLE entries ADD COLUMN source_title TEXT NOT NULL DEFAULT '';",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -258,8 +261,9 @@ impl Store {
                     "INSERT INTO entries
                        (content_hash, kind, preview_text, full_text, image_path,
                         byte_size, char_count, word_count, line_count,
-                        first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11)",
+                        first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id,
+                        source_title)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11,?12)",
                     rusqlite::params![
                         p.hash,
                         p.kind.as_str(),
@@ -271,7 +275,8 @@ impl Store {
                         p.word_count,
                         p.line_count,
                         ev.copied_at_ms,
-                        app_id
+                        app_id,
+                        ev.source_title,
                     ],
                 )?;
                 self.conn.last_insert_rowid()
@@ -462,6 +467,7 @@ mod tests {
                 &CaptureEvent {
                     content: Content::Text("keep me".into()),
                     source_app: None,
+                    source_title: String::new(),
                     copied_at_ms: 1,
                 },
                 &FakeImages,
@@ -486,6 +492,7 @@ mod tests {
         let ev = CaptureEvent {
             content: Content::Text("hello".into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1000,
         };
         let out = s.ingest(&ev, &FakeImages).unwrap();
@@ -523,6 +530,7 @@ mod tests {
                 display_name: "Ghostty".into(),
                 icon_path: None,
             }),
+            source_title: String::new(),
             copied_at_ms: 5,
         };
         let out = s.ingest(&ev, &FakeImages).unwrap();
@@ -544,6 +552,7 @@ mod tests {
         let mk = |ms| CaptureEvent {
             content: Content::Text("same".into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: ms,
         };
 
@@ -658,6 +667,7 @@ mod tests {
                  DROP TABLE jobs; DROP TABLE job_runs; DROP TABLE note_versions; \
                  ALTER TABLE notes DROP COLUMN scratch; \
                  ALTER TABLE notes DROP COLUMN scratch_pinned; \
+                 ALTER TABLE entries DROP COLUMN source_title; \
                  PRAGMA user_version = 3;",
             )
             .unwrap();

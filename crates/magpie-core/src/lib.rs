@@ -9,10 +9,11 @@
 //!     fn put(&self, h: &str, _b: &[u8]) -> std::io::Result<String> { Ok(h.into()) }
 //! }
 //! let s = open_in_memory().unwrap();
-//! s.ingest(&CaptureEvent { content: Content::Text("hi".into()), source_app: None, copied_at_ms: 1 }, &NoImages).unwrap();
+//! s.ingest(&CaptureEvent { content: Content::Text("hi".into()), source_app: None, source_title: String::new(), copied_at_ms: 1 }, &NoImages).unwrap();
 //! assert_eq!(s.search(&default_query()).unwrap().len(), 1);
 //! ```
 
+pub mod appcat;
 pub mod bookmarks;
 pub mod calc_history;
 pub mod calendar;
@@ -42,6 +43,7 @@ pub mod projects;
 pub mod random;
 pub mod retention;
 pub mod search;
+pub mod searchtokens;
 pub mod slots;
 pub mod snippets;
 pub mod stats;
@@ -59,6 +61,7 @@ pub use model::{AppInfo, CaptureEvent, Content, Entry};
 pub use notes::Note;
 pub use retention::{Removed, RetentionPolicy};
 pub use search::{default_query, SearchMode, SearchQuery, Sort, TimeRange};
+pub use searchtokens::{parse_search_tokens, ParsedSearch};
 pub use stats::{AppCount, DayBucket, KindCount, MostCopied, Stats, StatsRange, Totals};
 pub use store::{
     open, open_encrypted, open_in_memory, open_or_migrate_encrypted, ImageStore, Ingested, Store,

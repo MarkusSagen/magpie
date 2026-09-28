@@ -14,6 +14,7 @@ fn text(s: &str, ms: i64) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
         source_app: None,
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }

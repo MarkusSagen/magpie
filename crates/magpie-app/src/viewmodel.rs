@@ -105,13 +105,20 @@ const DAY_MS: i64 = 86_400_000;
 
 pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
     let mut q = default_query();
-    q.text = ui.text.clone();
+    // Pull streamlined source/type tokens (app:, url:, type:, is:pinned, bare
+    // categories) out of the query; what's left is the free-text needle.
+    let parsed = magpie_core::parse_search_tokens(&ui.text);
+    q.text = parsed.text;
     q.mode = ui.mode;
-    q.kind = ui.type_filter.to_kind();
+    // A `type:` token overrides the type-filter chip; otherwise the chip applies.
+    q.kind = parsed.kind.or_else(|| ui.type_filter.to_kind());
     q.source_app_id = ui.app_filter;
+    q.source_app_name = parsed.app;
+    q.category = parsed.category;
+    q.url_contains = parsed.url;
     q.sort = ui.sort;
     q.tag = ui.tag.clone();
-    q.pinned_only = ui.pinned_only;
+    q.pinned_only = ui.pinned_only || parsed.pinned;
     q.time = match ui.time_filter {
         TimeFilter::All => TimeRange::default(),
         TimeFilter::Today => TimeRange {
@@ -127,6 +134,13 @@ pub fn to_query(ui: &UiState, now_ms: i64) -> SearchQuery {
             until_ms: None,
         },
     };
+    // Explicit `after:`/`before:`/`on:` date tokens override the preset time bound.
+    if let Some(a) = parsed.after {
+        q.time.since_ms = Some(a);
+    }
+    if let Some(b) = parsed.before {
+        q.time.until_ms = Some(b);
+    }
     q
 }
 

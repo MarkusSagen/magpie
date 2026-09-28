@@ -27,6 +27,7 @@ fn text(s: &str, ms: i64) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
         source_app: None,
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }
@@ -110,6 +111,7 @@ fn grouping_sections_today_yesterday_older() {
         copy_count: 1,
         pinned: false,
         source_app_id: None,
+        source_title: String::new(),
     };
     let now = 100 * DAY + 5;
     let entries = vec![mk(100 * DAY), mk(99 * DAY), mk(50 * DAY), mk(100 * DAY + 1)];
@@ -210,6 +212,7 @@ fn entry(text: &str) -> Entry {
         copy_count: 1,
         pinned: false,
         source_app_id: None,
+        source_title: String::new(),
     }
 }
 
