@@ -319,6 +319,25 @@ vendors OpenSSL, adds ~tens of seconds and a few MB). FTS5 + WAL still work.
 
 ## Packaging (see the spec)
 
-`just package-macos` → unsigned `target/Magpie.app`. Install/autostart/summon design
-lives in `docs/superpowers/specs/2026-08-03-magpie-install-autostart-summon-design.md`.
-Specs live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`.
+`just package-macos` → ad-hoc-signed `target/Magpie.app` (version stamped from
+Cargo.toml via `plutil`). `just install-macos` builds it, copies to
+`/Applications/Magpie.app`, registers login autostart (`AUTOSTART=0` to skip), and
+launches it — the local "make it a startable desktop app" path. `just dmg` →
+`target/Magpie-<version>.dmg` (drag-to-Applications) for distributing to other Macs.
+Pass `SIGN_ID="Magpie Dev"` to any of them for a stable Accessibility grant. Install/
+autostart/summon design lives in
+`docs/superpowers/specs/2026-08-03-magpie-install-autostart-summon-design.md`. Specs
+live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`.
+
+## Clipboard source/type search tokens
+
+The clipboard search box accepts inline filter tokens (pure parser
+`magpie_core::searchtokens::parse_search_tokens` → `SearchQuery`, applied in
+`viewmodel::to_query`): `app:<name>` (source app), `url:`/`site:<sub>` (clip URL or the
+source page — matched against `entries.source_title`, the window title captured with
+each clip since migration v10, plus link-kind full_text), `type:`/`kind:<kind>`,
+`is:pinned`, `after:`/`before:`/`on:<date>` (date range, `YYYY[-MM[-DD]]`, inclusive),
+and bare `browser`/`editor`/`terminal` (source category via
+`magpie_core::appcat` name lists; `cat:notes` etc. for the rest). Categories match by
+app name — no bundle-id column. Only those three category words are bare (others are too
+common as search text). Everything unrecognized stays literal free text.
