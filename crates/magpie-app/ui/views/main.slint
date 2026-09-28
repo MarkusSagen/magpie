@@ -12,6 +12,7 @@ import { StatsView } from "stats.slint";
 import { DataView } from "data.slint";
 import { CalcView } from "calculator.slint";
 import { SnippetsView } from "snippets.slint";
+import { SecretsView } from "secrets.slint";
 import { FilesView } from "files.slint";
 import { ProjectsView } from "projects.slint";
 import { CalcStore } from "../calc_store.slint";
@@ -72,6 +73,7 @@ export component MainView inherits VerticalLayout {
     callback open-selected-url();
     callback bookmark-selected();
     callback favorite-selected();
+    callback save-secret-selected();
     callback open-search();
     callback open-slots();
     in property <[Bar]> over-time-bars;
@@ -345,6 +347,7 @@ export component MainView inherits VerticalLayout {
                                     if event.text == "d" { root.nav-section("data"); return accept; }
                                     if event.text == "=" { root.nav-section("calculator"); return accept; }
                                     if event.text == "x" || event.text == "X" { root.nav-section("snippets"); return accept; }
+                                    if event.text == "k" || event.text == "K" { root.nav-section("secrets"); return accept; }
                                     if event.text == "f" || event.text == "F" { root.nav-section("files"); return accept; }
                                     if event.text == "p" || event.text == "P" { root.nav-section("projects"); return accept; }
                                     return accept;
@@ -600,6 +603,7 @@ export component MainView inherits VerticalLayout {
 
             // ---- Snippets view (screen 20): reads the SnippetsStore global ----
             if root.view == "snippets": SnippetsView { }
+            if root.view == "secrets": SecretsView { }
 
             // ---- Files view (screens 19/21/22/23): reads the SearchStore global ----
             if root.view == "files": FilesView { }

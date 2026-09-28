@@ -25,6 +25,9 @@ export struct EntryRow {
     has_thumb: bool,
     swatch: color,
     has_swatch: bool,
+    // This clip was promoted to the Secrets vault: its text is scrubbed to a fixed
+    // mask; the list shows a lock badge and pasting reads the value back from the vault.
+    is_secret: bool,
 }
 
 export struct Bar {
@@ -344,6 +347,15 @@ export struct SnippetRow {
     name: string,
     keyword: string,     // ";meet" (snippet) or the command text chip
     is-command: bool,
+}
+
+// ---- Secrets vault ----
+export struct SecretRow {
+    id: int,
+    key: string,
+    value-masked: string,   // SECRET_MASK, or the real value when this row is revealed
+    notes: string,
+    revealed: bool,
 }
 
 // ---- File search (Phase 15, PNGs 19/21/22/23) ----

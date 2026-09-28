@@ -352,6 +352,7 @@ export component ClipboardView inherits VerticalLayout {
                                     HorizontalLayout {
                                         spacing: 6px;
                                         if row.pinned: Image { source: Icons.act-pin; colorize: Theme.text-dim; width: 11px; height: 11px; image-fit: contain; }
+                                        if row.is-secret: Image { source: Icons.lock; colorize: Theme.accent; width: 11px; height: 11px; image-fit: contain; }
                                         Text { text: row.title;
                                             // Links light up in the accent colour on hover.
                                             color: (row.kind == "link" && rowta.has-hover) ? Theme.accent : Theme.text;

@@ -18,6 +18,7 @@ import { SnippetsStore } from "snippets_store.slint";
 import { SearchStore } from "search_store.slint";
 import { TimeStore } from "time_store.slint";
 import { ProjectsStore } from "projects_store.slint";
+import { SecretsStore } from "secrets_store.slint";
 export { DataStore }
 export { CalcStore }
 export { DateStore }
@@ -27,6 +28,7 @@ export { SnippetsStore }
 export { SearchStore }
 export { TimeStore }
 export { ProjectsStore }
+export { SecretsStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { BoardView } from "views/board.slint";
@@ -225,7 +227,9 @@ export component LauncherWindow inherits Window {
         else if id == "theme" { root.mode = "settings"; }
         else if id == "open-as-table" { root.open-selected-as-table(); }
         else if id == "favorite" { root.favorite-selected(); }
+        else if id == "save-secret" { root.save-secret-selected(); }
     }
+    callback save-secret-selected(); // ⌘K → Save as secret: promote the selection to the vault
     callback open-selected-as-table();
     callback export-data();
 
@@ -498,6 +502,7 @@ export component LauncherWindow inherits Window {
             open-selected-url() => { root.open-selected-url(); }
             bookmark-selected() => { root.bookmark-selected(); }
             favorite-selected() => { root.favorite-selected(); }
+            save-secret-selected() => { root.save-secret-selected(); }
             open-search() => { root.open-search(); }
             open-slots() => { root.open-slots(); }
             over-time-bars: root.over-time-bars;
@@ -732,6 +737,7 @@ export component LauncherWindow inherits Window {
             show-snippets: true;
             show-files: true;
             show-projects: true;
+            show-secrets: true;
             theme-index: root.theme-index;
             grp-capture-collapsed <=> root.grp-capture-collapsed;
             grp-organize-collapsed <=> root.grp-organize-collapsed;

@@ -106,6 +106,10 @@ pub struct AppState {
     /// `graph_g` empty = a single-function plot. Set when a graph is opened.
     pub calc_graph_f: Mutex<String>,
     pub calc_graph_g: Mutex<String>,
+    /// Content hashes to skip ONCE on the next capture — set when Magpie itself puts a
+    /// secret's value on the clipboard (copy/paste from the vault), so the plaintext
+    /// doesn't re-enter clipboard history. Consumed on match in [`ingest_event`].
+    pub suppress_capture: Mutex<std::collections::HashSet<String>>,
 }
 
 /// The last local-projects scan (screens 25/26).
@@ -257,6 +261,18 @@ impl Default for ChartState {
 }
 
 pub fn ingest_event(state: &AppState, ev: &CaptureEvent) -> Result<(), String> {
+    // Skip a capture Magpie itself triggered by putting a secret value on the clipboard
+    // (consumed once), so the plaintext never re-enters clipboard history.
+    {
+        let hash = magpie_core::model::content_hash(&ev.content);
+        let mut sup = state
+            .suppress_capture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if sup.remove(&hash) {
+            return Ok(());
+        }
+    }
     let store = state.store.lock().map_err(|e| e.to_string())?;
     store
         .ingest(ev, &state.images)
@@ -334,6 +350,7 @@ mod tests {
             data_chart: std::sync::Mutex::new(crate::app_state::ChartState::default()),
             calc_graph_f: std::sync::Mutex::new(String::new()),
             calc_graph_g: std::sync::Mutex::new(String::new()),
+            suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 

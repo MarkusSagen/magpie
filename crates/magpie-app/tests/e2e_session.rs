@@ -95,6 +95,7 @@ fn state() -> AppState {
         data_chart: Mutex::new(magpie_app::app_state::ChartState::default()),
         calc_graph_f: Mutex::new(String::new()),
         calc_graph_g: Mutex::new(String::new()),
+        suppress_capture: Mutex::new(std::collections::HashSet::new()),
     }
 }
 

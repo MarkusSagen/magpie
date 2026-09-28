@@ -5,8 +5,8 @@ use crate::{
     MdLineVM, MdSpan, NoteRender, NoteRow, NoteVersionRow, Popover, ProjTaskRow, ProjectListRow,
     ProjectsStore, RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow,
     SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
-    SearchTreeRow, SlotItem, SnippetRow, SnippetsStore, TaskRow, TimeEntryRow, TimeStore,
-    WorldClockRow, WorldClockStore,
+    SearchTreeRow, SecretRow, SecretsStore, SlotItem, SnippetRow, SnippetsStore, TaskRow,
+    TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -131,6 +131,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         data_chart: std::sync::Mutex::new(magpie_app::app_state::ChartState::default()),
         calc_graph_f: std::sync::Mutex::new(String::new()),
         calc_graph_g: std::sync::Mutex::new(String::new()),
+        suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 
@@ -241,6 +242,7 @@ fn to_rows(
     now: i64,
     rules: &MaskRules,
     visible: usize,
+    secret_ids: &std::collections::HashSet<i64>,
 ) -> Vec<EntryRow> {
     entries
         .iter()
@@ -342,6 +344,7 @@ fn to_rows(
                     None => slint::Color::default(),
                 },
                 has_swatch: swatch_rgb.is_some(),
+                is_secret: secret_ids.contains(&e.id),
             }
         })
         .collect()
@@ -503,6 +506,16 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         .unwrap_or_default();
     ui.set_merge_count(merge_set.len() as i32);
 
+    // Which visible entries are promoted secrets (for the lock badge).
+    let secret_ids: std::collections::HashSet<i64> = {
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .secret_entry_ids()
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+
     // The preview binds directly to the selected row's `full` text in the UI,
     // so there is no separate detail string to push here.
     ui.set_entries(ModelRc::new(VecModel::from(to_rows(
@@ -517,6 +530,7 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         now_ms(),
         &rules,
         visible,
+        &secret_ids,
     ))));
 
     // Keep the selection where it was across refresh/reopen; only reset when it
@@ -1967,6 +1981,10 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
             ui.set_view(SharedString::from("snippets"));
             refresh_snippets(ui, state);
         }
+        ("secrets", _) => {
+            ui.set_view(SharedString::from("secrets"));
+            refresh_secrets(ui, state);
+        }
         ("projects", _) => {
             ui.set_view(SharedString::from("projects"));
             refresh_projects(ui, state, true);
@@ -2667,6 +2685,59 @@ fn refresh_snippets(ui: &LauncherWindow, state: &AppState) {
         ss.set_detail_preview(preview.into());
     } else {
         ss.set_has_selection(false);
+    }
+}
+
+/// The DB id of the currently-selected secret row, if any.
+fn selected_secret_id(ui: &LauncherWindow) -> Option<i64> {
+    use slint::Model;
+    let ss = ui.global::<SecretsStore>();
+    let sel = ss.get_selected().max(0) as usize;
+    ss.get_rows().row_data(sel).map(|r| r.id as i64)
+}
+
+fn refresh_secrets(ui: &LauncherWindow, state: &AppState) {
+    let ss = ui.global::<SecretsStore>();
+    let query = ss.get_query().to_string();
+    let secrets = {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        store.search_secrets(&query).unwrap_or_default()
+    };
+    // The list is always masked; only the selected detail can be revealed.
+    let rows: Vec<SecretRow> = secrets
+        .iter()
+        .map(|s| SecretRow {
+            id: s.id as i32,
+            key: s.key.clone().into(),
+            value_masked: SharedString::from(magpie_core::SECRET_MASK),
+            notes: s.notes.clone().into(),
+            revealed: false,
+        })
+        .collect();
+    let n = rows.len() as i32;
+    ss.set_rows(ModelRc::new(VecModel::from(rows)));
+
+    let mut sel = ss.get_selected();
+    if sel >= n {
+        sel = 0;
+        ss.set_selected(0);
+    }
+    let revealed = ss.get_detail_revealed();
+    if let Some(s) = secrets.get(sel.max(0) as usize) {
+        ss.set_has_selection(true);
+        ss.set_detail_key(s.key.clone().into());
+        ss.set_detail_value(if revealed {
+            s.value.clone().into()
+        } else {
+            SharedString::from(magpie_core::SECRET_MASK)
+        });
+        ss.set_detail_notes(s.notes.clone().into());
+    } else {
+        ss.set_has_selection(false);
+        ss.set_detail_revealed(false);
     }
 }
 
@@ -4842,6 +4913,7 @@ const ACTIONS: &[(&str, &str, &str, &str, &str)] = &[
     ("snippet", "", "New snippet", "⌘N", "Entry"),
     ("transform", "", "Transform…", "⌘T", "Convert"),
     ("open-as-table", "", "Open as table", "", "Convert"),
+    ("save-secret", "", "Save as secret", "", "Convert"),
     ("bookmark", "", "Bookmark this link", "", "Convert"),
     ("task-from-link", "", "Create task from link", "", "Convert"),
     ("export", "", "Export data…", "", "Convert"),
@@ -5066,6 +5138,28 @@ fn open_selected_default(ui: &LauncherWindow, state: &AppState) {
 
 /// The Enter / ⌘Enter flow: copy the entry at `idx`, hide Magpie so the previous
 /// app regains focus, then paste into it. `keep_open` re-shows Magpie afterward.
+/// If `entry` is a promoted secret (its history text is masked), return a copy whose
+/// `full_text` is the real value from the vault and register that value for one-time
+/// capture suppression (so pasting it doesn't re-enter history as plaintext). Otherwise
+/// returns the entry unchanged.
+fn resolve_secret_entry(state: &AppState, entry: &Entry) -> Entry {
+    let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(Some(sec)) = store.secret_for_entry(entry.id) {
+        drop(store);
+        let hash = magpie_core::model::content_hash(&Content::Text(sec.value.clone()));
+        state
+            .suppress_capture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(hash);
+        let mut e = entry.clone();
+        e.full_text = sec.value;
+        e
+    } else {
+        entry.clone()
+    }
+}
+
 fn paste_and_close(
     state: &AppState,
     weak: &slint::Weak<LauncherWindow>,
@@ -5076,9 +5170,18 @@ fn paste_and_close(
     let Some(entry) = recent.get(idx) else {
         return;
     };
+    // A promoted secret's history text is masked — paste the REAL value from the vault,
+    // and suppress re-capturing that plaintext back into clipboard history.
+    let resolved = resolve_secret_entry(state, entry);
     if let Ok(mut clip) = magpie_platform::platform_clipboard() {
         // Copy only here; the keystroke is sent after the window hides.
-        let _ = perform_paste(&mut clip, &EnigoPaster, entry, PasteKind::Formatted, false);
+        let _ = perform_paste(
+            &mut clip,
+            &EnigoPaster,
+            &resolved,
+            PasteKind::Formatted,
+            false,
+        );
     }
     // Auto-paste synthesizes ⌘V, which needs Accessibility on macOS. Only gate the
     // *installed app* on it: as a bare dev binary the grant belongs to the launching
@@ -6088,6 +6191,21 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                                 }
                             }
                             ui.invoke_set_section(SharedString::from("snippets"));
+                        }
+                        "secrets" => {
+                            if let Ok(store) = st.store.lock() {
+                                if store.list_secrets().map(|s| s.is_empty()).unwrap_or(false) {
+                                    let seed: &[(&str, &str, &str)] = &[
+                                        ("STRIPE_API_KEY", "sk-live-4eC39Hq...", "prod"),
+                                        ("DB_PASSWORD", "hunter2!", ""),
+                                        ("GITHUB_TOKEN", "ghp_0123456789abcdef", ""),
+                                    ];
+                                    for (k, v, n) in seed {
+                                        let _ = store.add_secret(k, v, n, None, now_ms());
+                                    }
+                                }
+                            }
+                            ui.invoke_set_section(SharedString::from("secrets"));
                         }
                         // World clock (Phase 12): Calculator → World clock tab.
                         "worldclock" => {
@@ -7146,6 +7264,164 @@ pub fn start() {
                 let mut cfg = magpie_app::config::load_or_default(&cfg_path);
                 cfg.expand_as_you_type = actual;
                 let _ = magpie_app::config::save(&cfg, &cfg_path);
+            }
+        });
+    }
+    // ---- Secrets vault ----
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_search(move |q| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<SecretsStore>().set_query(q);
+                ui.global::<SecretsStore>().set_selected(0);
+                ui.global::<SecretsStore>().set_detail_revealed(false);
+                refresh_secrets(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_select(move |i| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<SecretsStore>().set_selected(i);
+                ui.global::<SecretsStore>().set_detail_revealed(false);
+                refresh_secrets(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_reveal_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<SecretsStore>();
+                ss.set_detail_revealed(!ss.get_detail_revealed());
+                refresh_secrets(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_copy_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                if let Some(id) = selected_secret_id(&ui) {
+                    let value = {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        store.get_secret(id).ok().flatten().map(|sec| sec.value)
+                    };
+                    if let Some(value) = value {
+                        // Suppress the resulting capture so the plaintext doesn't re-enter
+                        // history, then place it on the clipboard and paste.
+                        let hash = magpie_core::model::content_hash(&Content::Text(value.clone()));
+                        s.suppress_capture
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(hash);
+                        if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                            let _ = clip.set_text(&value);
+                        }
+                        hide_launcher(&ui);
+                        let _ = slint::invoke_from_event_loop(|| {
+                            let _ = magpie_platform::Paster::paste(&EnigoPaster);
+                        });
+                    }
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_new_secret(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<SecretsStore>();
+                ss.set_edit_id(0);
+                ss.set_edit_key(SharedString::from(""));
+                ss.set_edit_value(SharedString::from(""));
+                ss.set_edit_notes(SharedString::from(""));
+                ss.set_editing(true);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_edit_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                if let Some(id) = selected_secret_id(&ui) {
+                    let sec = {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        store.get_secret(id).ok().flatten()
+                    };
+                    if let Some(sec) = sec {
+                        let ss = ui.global::<SecretsStore>();
+                        ss.set_edit_id(sec.id as i32);
+                        ss.set_edit_key(sec.key.into());
+                        ss.set_edit_value(sec.value.into());
+                        ss.set_edit_notes(sec.notes.into());
+                        ss.set_editing(true);
+                    }
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_delete_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                if let Some(id) = selected_secret_id(&ui) {
+                    {
+                        let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = store.delete_secret(id);
+                    }
+                    ui.global::<SecretsStore>().set_selected(0);
+                    refresh_secrets(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_save_edit(move || {
+            if let Some(ui) = w.upgrade() {
+                let ss = ui.global::<SecretsStore>();
+                let id = ss.get_edit_id();
+                let key = ss.get_edit_key().to_string();
+                let key = if key.trim().is_empty() {
+                    "Secret".to_string()
+                } else {
+                    key
+                };
+                let value = ss.get_edit_value().to_string();
+                let notes = ss.get_edit_notes().to_string();
+                {
+                    let store = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                    if id < 0 {
+                        // Promote the clipboard entry (-id): value comes from the clip.
+                        let _ = store.promote_entry_to_secret((-id) as i64, &key, now_ms());
+                    } else if id == 0 {
+                        let _ = store.add_secret(&key, &value, &notes, None, now_ms());
+                    } else {
+                        let _ = store.update_secret(id as i64, &key, &value, &notes, now_ms());
+                    }
+                }
+                ss.set_editing(false);
+                ss.set_selected(0);
+                refresh_secrets(&ui, &s);
+                // The promoted clip is now masked — refresh the clipboard list too.
+                refresh(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.global::<SecretsStore>().on_cancel_edit(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<SecretsStore>().set_editing(false);
             }
         });
     }
@@ -9581,6 +9857,37 @@ pub fn start() {
                         let _ = st.toggle_favorite(kind, &payload, &label, now_ms());
                     }
                     refresh_favorites(&ui, &s);
+                }
+            }
+        });
+    }
+    {
+        // ⌘K → Save as secret: promote the selected clip to the vault. Opens the Secrets
+        // section with the create/promote modal (value from the clip, key = suggestion).
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_save_secret_selected(move || {
+            if let Some(ui) = w.upgrade() {
+                let idx = ui.get_selected();
+                let recent = current_results(&s, now_ms());
+                if let Some(e) = (idx >= 0).then(|| recent.get(idx as usize)).flatten() {
+                    let already = {
+                        let st = s.store.lock().unwrap_or_else(|e| e.into_inner());
+                        st.secret_for_entry(e.id).ok().flatten().is_some()
+                    };
+                    let suggested =
+                        magpie_core::looks_like_secret(&e.full_text).unwrap_or("Secret");
+                    let value = e.full_text.clone();
+                    let eid = e.id;
+                    nav_apply(&ui, &s, "secrets", "list");
+                    if !already {
+                        let ss = ui.global::<SecretsStore>();
+                        ss.set_edit_id(-(eid as i32));
+                        ss.set_edit_key(SharedString::from(suggested));
+                        ss.set_edit_value(value.into());
+                        ss.set_edit_notes(SharedString::from(""));
+                        ss.set_editing(true);
+                    }
                 }
             }
         });

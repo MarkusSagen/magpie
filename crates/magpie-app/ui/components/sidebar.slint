@@ -76,6 +76,7 @@ export component Sidebar inherits Rectangle {
     in property <bool> show-snippets;       // reveal Snippets (screen 20)
     in property <bool> show-files;          // reveal Files (screens 19/21/22/23)
     in property <bool> show-projects;       // reveal Projects (screens 25/26)
+    in property <bool> show-secrets;         // reveal Secrets vault
     // Collapsible group state (Phase 19, screen 27) — session-scoped.
     in-out property <bool> grp-capture-collapsed;
     in-out property <bool> grp-organize-collapsed;
@@ -171,6 +172,10 @@ export component Sidebar inherits Rectangle {
                     NavItem {
                         label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
                         active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
+                    }
+                    if root.show-secrets: NavItem {
+                        label: "Secrets"; icon: Icons.lock; hint: "G K"; cmd-held: root.cmd-held;
+                        active: root.section == "secrets"; clicked => { root.set-section("secrets"); }
                     }
                 }
 
