@@ -44,7 +44,9 @@ fn row_to_secret(r: &rusqlite::Row) -> rusqlite::Result<Secret> {
 
 /// Escape LIKE metacharacters for a literal substring match.
 fn like_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Heuristic: does `text` look like a credential worth offering to save as a secret?
@@ -54,7 +56,10 @@ fn like_escape(s: &str) -> String {
 pub fn looks_like_secret(text: &str) -> Option<&'static str> {
     let t = text.trim();
     // A bearer header is the one multi-token shape we accept.
-    if let Some(tok) = t.strip_prefix("Bearer ").or_else(|| t.strip_prefix("bearer ")) {
+    if let Some(tok) = t
+        .strip_prefix("Bearer ")
+        .or_else(|| t.strip_prefix("bearer "))
+    {
         return looks_like_secret(tok).or(Some("bearer token"));
     }
     // Otherwise a secret is a single opaque token — reject anything with whitespace,
@@ -82,7 +87,12 @@ pub fn looks_like_secret(text: &str) -> Option<&'static str> {
     {
         return Some("Slack token");
     }
-    if t.starts_with("AKIA") && t.len() == 20 && t[4..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
+    if t.starts_with("AKIA")
+        && t.len() == 20
+        && t[4..]
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    {
         return Some("AWS access key");
     }
     // JWT: three base64url segments separated by dots, starting with the `eyJ` header.
@@ -121,9 +131,9 @@ impl Store {
     }
 
     pub fn list_secrets(&self) -> Result<Vec<Secret>> {
-        let mut stmt = self
-            .conn()
-            .prepare(&format!("SELECT {SECRET_COLS} FROM secrets ORDER BY key COLLATE NOCASE"))?;
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {SECRET_COLS} FROM secrets ORDER BY key COLLATE NOCASE"
+        ))?;
         let rows = stmt.query_map([], row_to_secret)?;
         rows.collect()
     }
@@ -244,14 +254,17 @@ mod tests {
     #[test]
     fn add_search_and_update() {
         let s = open_in_memory().unwrap();
-        s.add_secret("STRIPE_KEY", "sk-live-abc", "prod", None, 10).unwrap();
-        s.add_secret("DB_PASSWORD", "hunter2", "", None, 11).unwrap();
+        s.add_secret("STRIPE_KEY", "sk-live-abc", "prod", None, 10)
+            .unwrap();
+        s.add_secret("DB_PASSWORD", "hunter2", "", None, 11)
+            .unwrap();
         // Search matches key OR value, case-insensitive.
         assert_eq!(s.search_secrets("stripe").unwrap().len(), 1);
         assert_eq!(s.search_secrets("hunter").unwrap().len(), 1);
         assert_eq!(s.search_secrets("").unwrap().len(), 2);
         let id = s.search_secrets("stripe").unwrap()[0].id;
-        s.update_secret(id, "STRIPE_KEY", "sk-live-xyz", "rotated", 12).unwrap();
+        s.update_secret(id, "STRIPE_KEY", "sk-live-xyz", "rotated", 12)
+            .unwrap();
         assert_eq!(s.get_secret(id).unwrap().unwrap().value, "sk-live-xyz");
         s.delete_secret(id).unwrap();
         assert!(s.get_secret(id).unwrap().is_none());
@@ -269,7 +282,9 @@ mod tests {
         // The history entry is scrubbed to the fixed mask.
         let masked: String = s
             .conn()
-            .query_row("SELECT full_text FROM entries WHERE id=?1", [eid], |r| r.get(0))
+            .query_row("SELECT full_text FROM entries WHERE id=?1", [eid], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(masked, SECRET_MASK);
         // Lookups the paste path / list use.
@@ -294,17 +309,35 @@ mod tests {
 
     #[test]
     fn detection_flags_credentials_not_prose() {
-        assert_eq!(looks_like_secret("sk-live-1234567890abcdef"), Some("API key"));
-        assert_eq!(looks_like_secret("ghp_0123456789abcdefABCDEF0123456789abcd"), Some("GitHub token"));
-        assert_eq!(looks_like_secret(concat!("xox", "b-123456789-abcdefghijklmno")), Some("Slack token"));
-        assert_eq!(looks_like_secret("AKIAIOSFODNN7EXAMPLE"), Some("AWS access key"));
-        assert_eq!(looks_like_secret("Bearer abcDEF123456ghijkl7890"), Some("bearer token"));
+        assert_eq!(
+            looks_like_secret("sk-live-1234567890abcdef"),
+            Some("API key")
+        );
+        assert_eq!(
+            looks_like_secret("ghp_0123456789abcdefABCDEF0123456789abcd"),
+            Some("GitHub token")
+        );
+        assert_eq!(
+            looks_like_secret(concat!("xox", "b-123456789-abcdefghijklmno")),
+            Some("Slack token")
+        );
+        assert_eq!(
+            looks_like_secret("AKIAIOSFODNN7EXAMPLE"),
+            Some("AWS access key")
+        );
+        assert_eq!(
+            looks_like_secret("Bearer abcDEF123456ghijkl7890"),
+            Some("bearer token")
+        );
         assert_eq!(
             looks_like_secret("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.abc123"),
             Some("JWT")
         );
         // Generic long high-entropy token.
-        assert_eq!(looks_like_secret("A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"), Some("token"));
+        assert_eq!(
+            looks_like_secret("A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            Some("token")
+        );
         // Not secrets: prose, URLs, short words, plain words without digits.
         assert!(looks_like_secret("the quick brown fox jumps").is_none());
         assert!(looks_like_secret("https://example.com/very/long/path/here/now").is_none());
