@@ -1,7 +1,7 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SuggestRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SuggestRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
@@ -94,6 +94,8 @@ export component MainView inherits VerticalLayout {
     in property <image> preview-link-image;
     in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     in property <string> preview-text;
     in property <bool> preview-truncated;
     in-out property <string> query;
@@ -590,6 +592,8 @@ export component MainView inherits VerticalLayout {
                 preview-link-image: root.preview-link-image;
                 preview-has-link-image: root.preview-has-link-image;
                 preview-lines: root.preview-lines;
+                preview-hl-lines: root.preview-hl-lines;
+                preview-hl-first: root.preview-hl-first;
                 preview-text: root.preview-text;
                 preview-truncated: root.preview-truncated;
                 query <=> root.query;

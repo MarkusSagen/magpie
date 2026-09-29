@@ -1,6 +1,6 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow, SuggestRow } from "types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow, SuggestRow, SearchLine } from "types.slint";
 import { Theme, Pal } from "theme.slint";
 import { Icons } from "icons.slint";
 import { TypeIcon, ActionIcon } from "components/glyphs.slint";
@@ -164,6 +164,8 @@ export component LauncherWindow inherits Window {
     callback search-changed(string);
     // Detail preview is a virtualized line list — Rust pushes the (bounded) lines
     in property <[string]> preview-lines;
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     // Image entries: the decoded bitmap for the selected entry. Without this the
     in property <image> preview-image;
     in property <bool> preview-has-image: false;
@@ -529,6 +531,8 @@ export component LauncherWindow inherits Window {
             preview-link-image: root.preview-link-image;
             preview-has-link-image: root.preview-has-link-image;
             preview-lines: root.preview-lines;
+            preview-hl-lines: root.preview-hl-lines;
+            preview-hl-first: root.preview-hl-first;
             preview-text: root.preview-text;
             preview-truncated: root.preview-truncated;
             query <=> root.query;

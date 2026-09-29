@@ -1,7 +1,7 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
@@ -43,6 +43,9 @@ export component ClipboardView inherits VerticalLayout {
     in property <image> preview-link-image;
     in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
+    // Search-match highlight lines (pre/mid/post) + the first matching line index.
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     in property <string> preview-text;
     in property <bool> preview-truncated;
     in-out property <string> query;
@@ -615,12 +618,39 @@ export component ClipboardView inherits VerticalLayout {
                                         for c in root.color-harmony: Rectangle { width: 40px; background: c; border-radius: Theme.r-xs; border-width: 1px; border-color: Theme.line; }
                                     }
                                 }
+                                // Search active: a highlighted line list, scrolled to the
+                                // first match, so you SEE what/where you matched.
+                                if !root.preview-has-image && root.preview-hl-lines.length > 0: Rectangle {
+                                    hlist := ListView {
+                                        viewport-y: root.preview-hl-first > 0
+                                            ? -(root.preview-hl-first * root.preview-font-size * 1.6)
+                                            : 0px;
+                                        for hl in root.preview-hl-lines: Rectangle {
+                                            height: root.preview-font-size * 1.6;
+                                            HorizontalLayout {
+                                                alignment: start;
+                                                Text { text: hl.pre; color: Theme.text-dim;
+                                                    font-size: root.preview-font-size; vertical-alignment: center; overflow: elide; }
+                                                if hl.mid != "": Rectangle {
+                                                    background: Theme.accent;
+                                                    border-radius: 2px;
+                                                    HorizontalLayout { padding-left: 1px; padding-right: 1px;
+                                                        Text { text: hl.mid; color: Theme.on-accent;
+                                                            font-size: root.preview-font-size; vertical-alignment: center; } }
+                                                }
+                                                Text { text: hl.post; color: Theme.text-dim;
+                                                    font-size: root.preview-font-size; vertical-alignment: center;
+                                                    overflow: elide; horizontal-stretch: 1; }
+                                            }
+                                        }
+                                    }
+                                }
                                 // Normal-size entries: a selectable, scrollable,
                                 // zoomable read-only TextInput (drag to select, ⌘C).
                                 // Plain TextInput (not std TextEdit) so we control the
                                 // text color — the themed TextEdit rendered invisibly
                                 // on the dark pane.
-                                if !root.preview-has-image && root.preview-text != "" && !(root.selected < entries.length && entries[root.selected].has-swatch): Flickable {
+                                if !root.preview-has-image && root.preview-hl-lines.length == 0 && root.preview-text != "" && !(root.selected < entries.length && entries[root.selected].has-swatch): Flickable {
                                     y: 0px;
                                     viewport-width: self.width;
                                     viewport-height: pvtext.preferred-height;
@@ -637,7 +667,7 @@ export component ClipboardView inherits VerticalLayout {
                                 // Huge entries: fast virtualized line list (not
                                 // selectable) so selection stays instant. Wrapped so
                                 // `plist` stays in scope for its custom scrollbar.
-                                if !root.preview-has-image && root.preview-text == "": Rectangle {
+                                if !root.preview-has-image && root.preview-hl-lines.length == 0 && root.preview-text == "": Rectangle {
                                     plist := ListView {
                                         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                                         for ln in root.preview-lines: Rectangle {

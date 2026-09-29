@@ -3817,6 +3817,66 @@ fn apply_sed_replace(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>) {
 /// Byte-safe split of `text` around `[start,end)` into (pre, mid, post), with pre
 /// trimmed to a tail window and post to a head window so the match stays visible
 /// near the left of the row (a leading/trailing `…` marks truncation).
+/// First case-insensitive match of `needle_lc` (already lowercase) in `hay`, as original
+/// byte offsets. Skips (None) when lowercasing would shift byte offsets (rare non-ASCII).
+fn find_ci(hay: &str, needle_lc: &str) -> Option<(usize, usize)> {
+    if needle_lc.is_empty() {
+        return None;
+    }
+    let hay_lc = hay.to_lowercase();
+    if hay_lc.len() != hay.len() {
+        return None;
+    }
+    hay_lc.find(needle_lc).map(|s| (s, s + needle_lc.len()))
+}
+
+/// Build highlighted preview lines: each line split around the earliest matching query
+/// term (`mid` is the match, rendered highlighted; non-matching lines have `mid` empty).
+/// Returns the lines (capped) and the index of the first matching line (-1 if none), so
+/// the preview can scroll to it. `terms` are lowercased word tokens.
+fn highlight_preview_lines(
+    full_text: &str,
+    terms: &[String],
+    cap: usize,
+) -> (Vec<SearchLine>, i32) {
+    let mut out: Vec<SearchLine> = Vec::new();
+    let mut first: i32 = -1;
+    for (i, line) in full_text.split('\n').enumerate() {
+        if i >= cap {
+            break;
+        }
+        let best = terms
+            .iter()
+            .filter_map(|t| find_ci(line, t))
+            .min_by_key(|(s, _)| *s);
+        let sl = match best {
+            Some((s, e)) => {
+                if first < 0 {
+                    first = i as i32;
+                }
+                // Trim around the match so it stays visible on long lines.
+                let (pre, mid, post) = split3(line, s, e);
+                SearchLine {
+                    line_no: SharedString::from(format!("{}", i + 1)),
+                    pre: SharedString::from(pre),
+                    mid: SharedString::from(mid),
+                    post: SharedString::from(post),
+                    replaced: SharedString::new(),
+                }
+            }
+            None => SearchLine {
+                line_no: SharedString::from(format!("{}", i + 1)),
+                pre: SharedString::from(line),
+                mid: SharedString::new(),
+                post: SharedString::new(),
+                replaced: SharedString::new(),
+            },
+        };
+        out.push(sl);
+    }
+    (out, first)
+}
+
 fn split3(text: &str, start: usize, end: usize) -> (String, String, String) {
     const PRE: usize = 40;
     const POST: usize = 120;
@@ -8695,6 +8755,24 @@ pub fn start() {
                 }
                 _ => String::new(),
             };
+            // Search match highlighting: split the preview into lines with the matched
+            // query terms marked, and note the first matching line so the preview can
+            // scroll to it. Only when there's a text query and the entry is visible.
+            let hl_terms: Vec<String> = {
+                let u = s.ui.lock().unwrap_or_else(|e| e.into_inner());
+                magpie_core::parse_search_tokens(&u.text)
+                    .text
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|t| t.chars().count() >= 2)
+                    .map(|t| t.to_lowercase())
+                    .collect()
+            };
+            let (hl_lines, hl_first) = match entry {
+                Some(e) if (!masked || revealed) && !hl_terms.is_empty() => {
+                    highlight_preview_lines(&e.full_text, &hl_terms, 4000)
+                }
+                _ => (Vec::new(), -1),
+            };
             // Image entries have no text at all, so without this the preview pane
             // was blank. A masked entry stays hidden until Reveal.
             let (preview_image, has_preview_image) = match entry {
@@ -8819,6 +8897,8 @@ pub fn start() {
                 ui.set_preview_domain(SharedString::from(link_domain));
                 ui.set_preview_link_image(link_image);
                 ui.set_preview_has_link_image(has_link_image);
+                ui.set_preview_hl_lines(ModelRc::new(VecModel::from(hl_lines)));
+                ui.set_preview_hl_first(hl_first);
             }
         });
     }
