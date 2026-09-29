@@ -8699,7 +8699,7 @@ pub fn start() {
                 let (r, g, b) = c.rgb_u8();
                 slint::Color::from_rgb_u8(r, g, b)
             };
-            let (is_color, cscale, charmony, cformats) = match entry {
+            let (is_color, cscale, charmony, cformats, cinverted) = match entry {
                 Some(e) if !masked || revealed => match magpie_core::color::parse(&e.full_text) {
                     Some(c) => {
                         let scale: Vec<slint::Color> = magpie_core::color::scale(c)
@@ -8715,14 +8715,28 @@ pub fn start() {
                         let formats: Vec<SharedString> = vec![
                             SharedString::from(c.to_hex()),
                             SharedString::from(c.to_rgb_string()),
+                            SharedString::from(c.to_rgba_string()),
                             SharedString::from(c.to_hsl_string()),
                             SharedString::from(c.to_oklch_string()),
+                            SharedString::from(c.to_oklab_string()),
                         ];
-                        (true, scale, harmony, formats)
+                        (true, scale, harmony, formats, to_slint(c.invert()))
                     }
-                    None => (false, Vec::new(), Vec::new(), Vec::new()),
+                    None => (
+                        false,
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        slint::Color::default(),
+                    ),
                 },
-                _ => (false, Vec::new(), Vec::new(), Vec::new()),
+                _ => (
+                    false,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    slint::Color::default(),
+                ),
             };
             if let Some(ui) = w.upgrade() {
                 ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
@@ -8734,6 +8748,7 @@ pub fn start() {
                 ui.set_color_scale(ModelRc::new(VecModel::from(cscale)));
                 ui.set_color_harmony(ModelRc::new(VecModel::from(charmony)));
                 ui.set_color_formats(ModelRc::new(VecModel::from(cformats)));
+                ui.set_color_inverted(cinverted);
                 ui.set_preview_is_link(is_link);
                 ui.set_preview_domain(SharedString::from(link_domain));
                 ui.set_preview_link_image(link_image);

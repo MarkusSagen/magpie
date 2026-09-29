@@ -35,6 +35,7 @@ export component ClipboardView inherits VerticalLayout {
     in property <[color]> color-scale;
     in property <[color]> color-harmony;
     in property <[string]> color-formats;
+    in property <color> color-inverted;
     in property <bool> preview-is-link;
     in property <string> preview-domain;
     in property <image> preview-link-image;
@@ -561,14 +562,33 @@ export component ClipboardView inherits VerticalLayout {
                                 if !root.preview-has-image && root.selected < entries.length && entries[root.selected].has-swatch: VerticalLayout {
                                     spacing: 10px;
                                     alignment: start;
-                                    Rectangle {
-                                        height: 96px;
-                                        border-radius: Theme.r-md;
-                                        background: entries[root.selected].swatch;
-                                        border-width: 1px;
-                                        border-color: Theme.line-strong;
+                                    // Original + inverted swatches, side by side.
+                                    HorizontalLayout {
+                                        spacing: 8px; height: 96px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1; spacing: 4px;
+                                            Rectangle {
+                                                vertical-stretch: 1;
+                                                border-radius: Theme.r-md;
+                                                background: entries[root.selected].swatch;
+                                                border-width: 1px; border-color: Theme.line-strong;
+                                            }
+                                            Text { text: "Original"; color: Theme.text-faint; font-size: Theme.fs-xs;
+                                                horizontal-alignment: center; }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1; spacing: 4px;
+                                            Rectangle {
+                                                vertical-stretch: 1;
+                                                border-radius: Theme.r-md;
+                                                background: root.color-inverted;
+                                                border-width: 1px; border-color: Theme.line-strong;
+                                            }
+                                            Text { text: "Inverted"; color: Theme.text-faint; font-size: Theme.fs-xs;
+                                                horizontal-alignment: center; }
+                                        }
                                     }
-                                    // Format strings (hex / rgb / hsl / oklch).
+                                    // Format strings (hex / rgb / rgba / hsl / oklch / oklab) — click to copy.
                                     for f in root.color-formats: Text {
                                         text: f; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
                                     }

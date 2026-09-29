@@ -53,6 +53,32 @@ impl Color {
         format!("oklch({:.3} {:.3} {:.1})", l, c, h)
     }
 
+    /// `rgba(...)` with an explicit alpha channel, always (unlike `to_rgb_string`, which
+    /// drops the alpha when fully opaque).
+    pub fn to_rgba_string(self) -> String {
+        let c = self.clamp();
+        let q = |x: f64| (x * 255.0).round() as u8;
+        format!("rgba({}, {}, {}, {:.2})", q(c.r), q(c.g), q(c.b), c.a)
+    }
+
+    /// OKLab (cartesian a/b) string, derived from OKLCH: `a = C·cos(h)`, `b = C·sin(h)`.
+    pub fn to_oklab_string(self) -> String {
+        let (l, c, h) = self.to_oklch();
+        let hr = h.to_radians();
+        format!("oklab({:.3} {:.3} {:.3})", l, c * hr.cos(), c * hr.sin())
+    }
+
+    /// The photographic negative: invert each RGB channel (alpha preserved).
+    pub fn invert(self) -> Color {
+        let c = self.clamp();
+        Color {
+            r: 1.0 - c.r,
+            g: 1.0 - c.g,
+            b: 1.0 - c.b,
+            a: c.a,
+        }
+    }
+
     /// 8-bit RGB tuple for the UI swatch.
     pub fn rgb_u8(self) -> (u8, u8, u8) {
         let c = self.clamp();
@@ -350,5 +376,24 @@ mod tests {
         let (a1, a2) = analogous(base);
         assert_ne!(a1.to_hex(), a2.to_hex());
         let _ = triad(base);
+    }
+
+    #[test]
+    fn invert_is_the_negative() {
+        assert_eq!(parse("#000000").unwrap().invert().to_hex(), "#ffffff");
+        assert_eq!(parse("#ffffff").unwrap().invert().to_hex(), "#000000");
+        assert_eq!(parse("#ff0000").unwrap().invert().to_hex(), "#00ffff");
+        // Alpha is preserved.
+        assert_eq!(
+            parse("#00000080").unwrap().invert().a,
+            parse("#00000080").unwrap().a
+        );
+    }
+
+    #[test]
+    fn rgba_and_oklab_strings() {
+        let c = parse("#ff0000").unwrap();
+        assert_eq!(c.to_rgba_string(), "rgba(255, 0, 0, 1.00)");
+        assert!(c.to_oklab_string().starts_with("oklab("));
     }
 }
