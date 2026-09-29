@@ -130,9 +130,12 @@ export component Sidebar inherits Rectangle {
         Rectangle { height: 8px; }
 
         // Grouped, collapsible nav (Phase 19). The list scrolls; the wordmark above
-        // and the timer/Settings/status below stay pinned.
+        // and the timer/Settings/status below stay pinned. The default overlay scrollbar
+        // sat inside the padded content (offset from the edge, covering the G-x hints,
+        // and ballooning on hover) — hide it; trackpad/wheel still scroll the rail.
         ScrollView {
             vertical-stretch: 1;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
             VerticalLayout {
                 spacing: 2px;
 

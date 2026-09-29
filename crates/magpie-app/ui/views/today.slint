@@ -38,14 +38,14 @@ export component TodayView inherits Rectangle {
                     // button; the sidebar's Clipboard icon is the back button now.
                     HorizontalLayout {
                         spacing: 4px;
-                        for tv in ["today", "list", "board"]: Rectangle {
+                        for tv in ["today", "list", "board", "time", "schedule"]: Rectangle {
                             height: 30px;
-                            width: 56px;
+                            width: tv == "schedule" ? 72px : 56px;
                             border-radius: 6px;
                             background: root.tasks-view == tv ? Pal.accent : (tvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
                             tvsw1 := TouchArea { clicked => { root.set-task-view(tv); } }
                             Text {
-                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : "Board");
+                                text: tv == "today" ? "Today" : (tv == "list" ? "List" : (tv == "board" ? "Board" : (tv == "time" ? "Time" : "Schedule")));
                                 color: root.tasks-view == tv ? Pal.on-accent : Theme.text;
                                 font-size: 12px;
                                 horizontal-alignment: center;
