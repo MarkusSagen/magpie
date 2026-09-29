@@ -10116,6 +10116,33 @@ pub fn start() {
             }
         });
     }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_rename_task(move |note_id, line_index, title| {
+            if let Some(ui) = w.upgrade() {
+                {
+                    let store = match s.store.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    let _ = magpie_app::tasks::rename_task(
+                        &store,
+                        note_id as i64,
+                        line_index as usize,
+                        title.as_str(),
+                        now_ms(),
+                    );
+                }
+                // Re-render whichever task tab is showing the edited row.
+                match ui.get_tasks_view().as_str() {
+                    "board" => refresh_board(&ui, &s),
+                    "today" => refresh_today(&ui, &s),
+                    _ => refresh_tasks(&ui, &s),
+                }
+            }
+        });
+    }
     // ---- Bookmarks mode ----
     {
         let s = state.clone();

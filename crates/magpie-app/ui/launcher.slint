@@ -340,6 +340,7 @@ export component LauncherWindow inherits Window {
     callback toggle-timer(int, string);
     callback open-task-note(int);
     callback refresh-tasks();
+    callback rename-task(int, int, string); // note_id, line_index, new title
 
     // ---- Bookmarks mode ----
     in-out property <bool> bookmarks-mode: false;
@@ -631,6 +632,7 @@ export component LauncherWindow inherits Window {
             nav-section(a0) => { root.nav-section(a0); }
             open-task-note(a0) => { root.open-task-note(a0); }
             refresh-tasks() => { root.refresh-tasks(); }
+            rename-task(a0, a1, a2) => { root.rename-task(a0, a1, a2); }
             set-mode-tasks(a0) => { root.set-mode-tasks(a0); }
             set-task-view(a0) => { root.set-task-view(a0); }
             show-done <=> root.show-done;

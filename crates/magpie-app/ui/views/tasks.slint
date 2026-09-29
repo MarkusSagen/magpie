@@ -37,6 +37,12 @@ export component TasksView inherits Rectangle {
     callback toggle-bookmark(int, int);
     callback toggle-task(int, int);
     callback toggle-timer(int, string);
+    callback rename-task(int, int, string);
+    // Inline title-edit state: the (note, line) currently editing (-1 = none) and
+    // the working draft bound to the row's TextInput.
+    in-out property <int> task-edit-note: -1;
+    in-out property <int> task-edit-line: -1;
+    in-out property <string> task-edit-draft;
     // ---- Today tab (embedded TodayView body) ----
     callback edit-today-journal(string);
     in property <[ClipRow]> today-clips;
@@ -363,16 +369,38 @@ export component TasksView inherits Rectangle {
                                     }
                                 }
                             }
-                            VerticalLayout {
+                            titlecol := VerticalLayout {
                                 horizontal-stretch: 1;
                                 padding-top: 6px;
                                 padding-bottom: 6px;
-                                Text {
+                                property <bool> editing: t.note_id == root.task-edit-note && t.line_index == root.task-edit-line;
+                                if !titlecol.editing: Text {
                                     text: t.title;
                                     // Done tasks are dimmed (Slint Text has no strike).
                                     color: t.done ? Theme.text-faint : Theme.text;
                                     font-size: 14px;
                                     overflow: elide;
+                                }
+                                // Inline title editor: Enter commits, Esc cancels.
+                                if titlecol.editing: TextInput {
+                                    text <=> root.task-edit-draft;
+                                    color: Theme.text;
+                                    font-size: 14px;
+                                    single-line: true;
+                                    init => { self.focus(); self.select-all(); }
+                                    accepted => {
+                                        root.rename-task(t.note_id, t.line_index, self.text);
+                                        root.task-edit-note = -1;
+                                        root.task-edit-line = -1;
+                                    }
+                                    key-pressed(e) => {
+                                        if e.text == Key.Escape {
+                                            root.task-edit-note = -1;
+                                            root.task-edit-line = -1;
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -383,6 +411,25 @@ export component TasksView inherits Rectangle {
                                     if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
                                     // (bookmark shown by the trailing ★ toggle, not a badge)
                                     if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                            // Inline edit (pencil): enters title-edit mode for this row.
+                            Rectangle {
+                                width: 30px;
+                                edt := TouchArea {
+                                    clicked => {
+                                        root.task-edit-draft = t.title;
+                                        root.task-edit-note = t.note_id;
+                                        root.task-edit-line = t.line_index;
+                                    }
+                                }
+                                if trow.has-hover || edt.has-hover: Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    source: Icons.act-edit;
+                                    width: 15px;
+                                    height: 15px;
+                                    colorize: edt.has-hover ? Theme.text : Theme.text-faint;
                                 }
                             }
                             Rectangle {
