@@ -1957,6 +1957,9 @@ fn nav_apply(ui: &LauncherWindow, state: &Arc<AppState>, section: &str, view: &s
     // screen's filter doesn't leak into the next.
     ui.set_search_placeholder(SharedString::from(section_search_placeholder(section)));
     ui.set_query(SharedString::from(""));
+    // The task tabs share one free-text filter — reset it on every nav so one
+    // tab's search doesn't silently filter the next.
+    ui.set_task_search(SharedString::from(""));
     if let Ok(mut u) = state.ui.lock() {
         u.text = String::new();
     }
@@ -4843,7 +4846,7 @@ fn refresh_board(ui: &LauncherWindow, state: &AppState) {
         } else {
             Some(project_raw)
         },
-        query: ui.get_board_query().to_string(),
+        query: ui.get_task_search().to_string(),
         hide_done: ui.get_board_hide_done(),
     };
     let to_row = |t: magpie_app::tasks::Task| TaskRow {
@@ -4921,15 +4924,6 @@ fn refresh_board(ui: &LauncherWindow, state: &AppState) {
     ui.set_board_caption(SharedString::from(format!(
         "{task_total} {ttxt} across {project_count} {ptxt}"
     )));
-}
-
-/// Delete the last character of the Tasks board search query and re-filter
-/// (Slint has no string slicing, so the backspace is done here).
-fn board_search_backspace(ui: &LauncherWindow, state: &AppState) {
-    let mut q = ui.get_board_query().to_string();
-    q.pop();
-    ui.set_board_query(SharedString::from(q));
-    refresh_board(ui, state);
 }
 
 /// Rebuild Graph mode: every note, laid out by `magpie_app::graph::build_graph`
@@ -5093,6 +5087,8 @@ fn refresh_popover(popover: &Popover, state: &AppState) {
 fn refresh_today(ui: &LauncherWindow, state: &AppState) {
     let now = now_ms();
     let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
+    // Shared task search box (same free-text filter the List and Board tabs use).
+    let query = ui.get_task_search().to_string().trim().to_lowercase();
     let active;
     {
         let store = match state.store.lock() {
@@ -5106,6 +5102,7 @@ fn refresh_today(ui: &LauncherWindow, state: &AppState) {
             .overdue
             .into_iter()
             .chain(buckets.today)
+            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .map(|t| task_row_with_tracking(t, today_ms, &active, &store, now))
             .collect();
         ui.set_today_due(ModelRc::new(VecModel::from(due)));
@@ -8651,12 +8648,12 @@ pub fn start() {
                     refresh_notes(&ui, &s);
                 }
                 "tasks" => {
-                    if ui.get_tasks_view() == "board" {
-                        ui.set_board_query(text.clone());
-                        refresh_board(&ui, &s);
-                    } else {
-                        // refresh_tasks reads ui.get_query() for its free-text filter.
-                        refresh_tasks(&ui, &s);
+                    // All task tabs share one free-text filter (`task_search`).
+                    ui.set_task_search(text.clone());
+                    match ui.get_tasks_view().as_str() {
+                        "board" => refresh_board(&ui, &s),
+                        "today" => refresh_today(&ui, &s),
+                        _ => refresh_tasks(&ui, &s),
                     }
                 }
                 "bookmarks" => {
@@ -10108,7 +10105,14 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_refresh_tasks(move || {
             if let Some(ui) = w.upgrade() {
-                refresh_tasks(&ui, &s);
+                // The task views share one skeleton + one search box, so route the
+                // shared "search edited" signal to whichever tab is active. All
+                // three read the same `task_search` free-text filter.
+                match ui.get_tasks_view().as_str() {
+                    "board" => refresh_board(&ui, &s),
+                    "today" => refresh_today(&ui, &s),
+                    _ => refresh_tasks(&ui, &s),
+                }
             }
         });
     }
@@ -10483,15 +10487,6 @@ pub fn start() {
         ui.on_board_controls_changed(move || {
             if let Some(ui) = w.upgrade() {
                 refresh_board(&ui, &s);
-            }
-        });
-    }
-    {
-        let s = state.clone();
-        let w = ui.as_weak();
-        ui.on_board_search_backspace(move || {
-            if let Some(ui) = w.upgrade() {
-                board_search_backspace(&ui, &s);
             }
         });
     }

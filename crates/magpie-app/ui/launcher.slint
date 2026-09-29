@@ -31,10 +31,8 @@ export { ProjectsStore }
 export { SecretsStore }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
-import { BoardView } from "views/board.slint";
 import { GraphView } from "views/graph.slint";
 import { BookmarksView } from "views/bookmarks.slint";
-import { TodayView } from "views/today.slint";
 import { JournalView } from "views/journal.slint";
 import { FindView } from "views/find.slint";
 import { HelpView } from "views/help.slint";
@@ -393,11 +391,9 @@ export component LauncherWindow inherits Window {
     in-out property <int> board-sort: 0; // 0=Due, 1=Priority, 2=Title, 3=Status
     in-out property <bool> board-hide-done: false;
     in-out property <string> board-project-filter; // "" = All
-    in-out property <string> board-query;
     in property <[BoardColumn]> board;
     in property <[string]> board-projects;
     in property <string> board-caption;
-    callback board-search-backspace();
     callback board-controls-changed();
     callback board-open-task(int);
     callback board-set-status(int, int, int); // note_id, line_index, status (0/1/2)
@@ -619,8 +615,11 @@ export component LauncherWindow inherits Window {
             unlinked: root.unlinked;
         }
 
-        // ---- Tasks mode (opaque overlay: flat, grouped/sorted task list) ----
-        if root.tasks-mode: TasksView {
+        // ---- Tasks mode (opaque overlay: the single task skeleton — search bar,
+        // tab row, and a content area that swaps between the flat list, Today,
+        // Board, Time, and Schedule by `tasks-view`). Today/Board are embedded
+        // bodies now, so this one overlay serves all three former modes. ----
+        if root.tasks-mode || root.today-mode || root.board-mode: TasksView {
             focus-search() => { main.focus-input(); }
             active-elapsed-sec <=> root.active-elapsed-sec;
             active-title: root.active-title;
@@ -645,14 +644,15 @@ export component LauncherWindow inherits Window {
             toggle-bookmark(a0, a1) => { root.toggle-bookmark(a0, a1); }
             toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
             toggle-timer(a0, a1) => { root.toggle-timer(a0, a1); }
-        }
-
-        // ---- Board mode (opaque overlay: cross-project task board) ----
-        if root.board-mode: BoardView {
-            focus-search() => { main.focus-input(); }
+            // Today tab (embedded body).
+            edit-today-journal(a0) => { root.edit-today-journal(a0); }
+            today-clips: root.today-clips;
+            today-due: root.today-due;
+            today-journal <=> root.today-journal;
+            today-paste-clip(a0) => { root.today-paste-clip(a0); }
+            // Board tab (embedded body).
             board: root.board;
             board-caption: root.board-caption;
-            board-search-backspace() => { root.board-search-backspace(); }
             board-controls-changed() => { root.board-controls-changed(); }
             board-drag-active <=> root.board-drag-active;
             board-drag-line <=> root.board-drag-line;
@@ -663,23 +663,11 @@ export component LauncherWindow inherits Window {
             board-group <=> root.board-group;
             board-hide-done <=> root.board-hide-done;
             board-layout <=> root.board-layout;
-            board-mode <=> root.board-mode;
             board-open-task(a0) => { root.board-open-task(a0); }
             board-project-filter <=> root.board-project-filter;
             board-projects: root.board-projects;
-            board-query <=> root.board-query;
             board-set-status(a0, a1, a2) => { root.board-set-status(a0, a1, a2); }
             board-sort <=> root.board-sort;
-            nav-back() => { root.nav-back(); }
-            nav-cycle-view(a0) => { root.nav-cycle-view(a0); }
-            nav-forward() => { root.nav-forward(); }
-            nav-leader <=> root.nav-leader;
-            nav-previous() => { root.nav-previous(); }
-            nav-section(a0) => { root.nav-section(a0); }
-            set-mode-board(a0) => { root.set-mode-board(a0); }
-            set-task-view(a0) => { root.set-task-view(a0); }
-            sidebar-w <=> root.sidebar-w;
-            tasks-view <=> root.tasks-view;
         }
 
         // ---- Graph mode (opaque overlay: note-link graph) ----
@@ -712,23 +700,6 @@ export component LauncherWindow inherits Window {
             delete-bookmark(a0) => { root.delete-bookmark(a0); }
             open-bookmark(a0) => { root.open-bookmark(a0); }
             sidebar-w <=> root.sidebar-w;
-        }
-
-        // ---- Today dashboard (full-window merge of the popover's Today +
-        if root.today-mode: TodayView {
-            active-elapsed-sec <=> root.active-elapsed-sec;
-            active-title: root.active-title;
-            edit-today-journal(a0) => { root.edit-today-journal(a0); }
-            open-task-note(a0) => { root.open-task-note(a0); }
-            set-task-view(a0) => { root.set-task-view(a0); }
-            sidebar-w <=> root.sidebar-w;
-            tasks-view <=> root.tasks-view;
-            today-clips: root.today-clips;
-            today-due: root.today-due;
-            today-journal <=> root.today-journal;
-            today-mode <=> root.today-mode;
-            today-paste-clip(a0) => { root.today-paste-clip(a0); }
-            toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
         }
 
         // ---- Journal (chronological timeline over the daily notes) ----

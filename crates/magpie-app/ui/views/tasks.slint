@@ -8,6 +8,8 @@ import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { TimeView } from "time.slint";
 import { ScheduleView } from "schedule.slint";
+import { TodayView } from "today.slint";
+import { BoardView } from "board.slint";
 import { SearchBar } from "../components/search_bar.slint";
 
 export component TasksView inherits Rectangle {
@@ -35,6 +37,30 @@ export component TasksView inherits Rectangle {
     callback toggle-bookmark(int, int);
     callback toggle-task(int, int);
     callback toggle-timer(int, string);
+    // ---- Today tab (embedded TodayView body) ----
+    callback edit-today-journal(string);
+    in property <[ClipRow]> today-clips;
+    in property <[TaskRow]> today-due;
+    in-out property <string> today-journal;
+    callback today-paste-clip(int);
+    // ---- Board tab (embedded BoardView body) ----
+    in property <[BoardColumn]> board;
+    callback board-controls-changed();
+    in-out property <bool> board-drag-active;
+    in-out property <int> board-drag-line;
+    in-out property <int> board-drag-note;
+    in-out property <string> board-drag-title;
+    in-out property <length> board-drag-x;
+    in-out property <length> board-drag-y;
+    in-out property <int> board-group;
+    in-out property <bool> board-hide-done;
+    in-out property <int> board-layout;
+    callback board-open-task(int);
+    in-out property <string> board-project-filter;
+    in property <[string]> board-projects;
+    callback board-set-status(int, int, int);
+    in-out property <int> board-sort;
+    in property <string> board-caption;
             background: Theme.bg-app;
             // Keyboard nav: ↑/↓ select, Space toggles, ⏎ opens the note, Esc exits.
             // An empty FocusScope holds focus without affecting layout or mouse.
@@ -169,7 +195,9 @@ export component TasksView inherits Rectangle {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    Rectangle {
+                    // "Show done" applies to the flat list only; Board has its own
+                    // Hide-done in its Display menu, Today/Time/Schedule don't use it.
+                    if root.tasks-view == "list": Rectangle {
                         width: 100px;
                         height: 30px;
                         border-radius: 6px;
@@ -195,8 +223,40 @@ export component TasksView inherits Rectangle {
                 if root.tasks-view == "time": TimeView { }
                 // Schedule tab (screen 29, Phase 21): cron jobs.
                 if root.tasks-view == "schedule": ScheduleView { }
+                // Today tab: due/overdue + journal + recent clips (embedded body).
+                if root.tasks-view == "today": TodayView {
+                    vertical-stretch: 1;
+                    today-clips: root.today-clips;
+                    today-due: root.today-due;
+                    today-journal <=> root.today-journal;
+                    edit-today-journal(a0) => { root.edit-today-journal(a0); }
+                    open-task-note(a0) => { root.open-task-note(a0); }
+                    today-paste-clip(a0) => { root.today-paste-clip(a0); }
+                    toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
+                }
+                // Board tab: cross-project kanban/list/grid/table (embedded body).
+                if root.tasks-view == "board": BoardView {
+                    vertical-stretch: 1;
+                    board: root.board;
+                    board-caption: root.board-caption;
+                    board-controls-changed() => { root.board-controls-changed(); }
+                    board-drag-active <=> root.board-drag-active;
+                    board-drag-line <=> root.board-drag-line;
+                    board-drag-note <=> root.board-drag-note;
+                    board-drag-title <=> root.board-drag-title;
+                    board-drag-x <=> root.board-drag-x;
+                    board-drag-y <=> root.board-drag-y;
+                    board-group <=> root.board-group;
+                    board-hide-done <=> root.board-hide-done;
+                    board-layout <=> root.board-layout;
+                    board-open-task(a0) => { root.board-open-task(a0); }
+                    board-project-filter <=> root.board-project-filter;
+                    board-projects: root.board-projects;
+                    board-set-status(a0, a1, a2) => { root.board-set-status(a0, a1, a2); }
+                    board-sort <=> root.board-sort;
+                }
 
-                if root.tasks-view != "time" && root.tasks-view != "schedule": HorizontalLayout {
+                if root.tasks-view == "list": HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
                     for f in [
@@ -215,7 +275,7 @@ export component TasksView inherits Rectangle {
                 }
                 // The list. `group_sort` already clusters by project + orders within,
                 // so a flat list reads correctly top-to-bottom.
-                if root.tasks-view != "time" && root.tasks-view != "schedule": ListView {
+                if root.tasks-view == "list": ListView {
                     for t[i] in root.tasks: VerticalLayout {
                         spacing: 0px;
                         // Project group header — shown once per project cluster so the
@@ -351,8 +411,8 @@ export component TasksView inherits Rectangle {
                         }
                     }
                 }
-                // Empty state.
-                if root.tasks.length == 0: HorizontalLayout {
+                // Empty state (flat list only).
+                if root.tasks-view == "list" && root.tasks.length == 0: HorizontalLayout {
                     alignment: center;
                     Text {
                         text: root.show-done ? "No tasks yet." : "No open tasks. Add “- [ ] …” to a note.";
