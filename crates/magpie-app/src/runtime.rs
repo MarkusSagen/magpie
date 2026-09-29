@@ -3236,39 +3236,11 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
         let open = h.open_tasks();
         ps.set_detail_week(format!("{open} open").into());
 
-        // Tasks grouped by source file. `idx` indexes the project's flat task vec.
+        // The project's actual tasks now render in the task hub (List/Board,
+        // `refresh_project_tasks` below), merged from note #tags + project files.
+        // `detail-tasks` keeps only the read-only EXTRAS shown beneath the hub:
+        // project notes + code-comment TODO/FIXME.
         let mut rows: Vec<ProjTaskRow> = Vec::new();
-        let mut cur_file = String::new();
-        for (idx, t) in h.tasks.iter().enumerate() {
-            if t.file_rel != cur_file {
-                cur_file = t.file_rel.clone();
-                let open_in_file = h
-                    .tasks
-                    .iter()
-                    .filter(|x| x.file_rel == cur_file && !x.done)
-                    .count();
-                rows.push(ProjTaskRow {
-                    is_file_header: true,
-                    file_label: format!("{}  {} open", t.file_rel, open_in_file).into(),
-                    sync_label: "two-way".into(),
-                    title: SharedString::new(),
-                    done: false,
-                    source: SharedString::new(),
-                    idx: -1,
-                    read_only: false,
-                });
-            }
-            rows.push(ProjTaskRow {
-                is_file_header: false,
-                file_label: SharedString::new(),
-                sync_label: SharedString::new(),
-                title: t.title.clone().into(),
-                done: t.done,
-                source: format!("{}:{}", t.file_rel, t.line + 1).into(),
-                idx: idx as i32,
-                read_only: false,
-            });
-        }
         let _ = Marker::badge;
 
         // Project notes (.magpie/notes/*.md) — read-only listing for now; the full
@@ -3343,6 +3315,8 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
             }
         }
         ps.set_detail_tasks(ModelRc::new(VecModel::from(rows)));
+        // The per-project task hub (merged note #tag tasks + on-disk file tasks).
+        refresh_project_tasks(ui, state);
     } else {
         ps.set_has_selection(false);
     }
@@ -3356,6 +3330,197 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
         )
         .into(),
     );
+}
+
+/// The lowercased set of `#tag` strings a note task may use to belong to a
+/// project `name`/`tags`: the slug, the `proj/<slug>` form, the raw name, and
+/// each configured tag (raw + slug).
+fn project_accept_tags(name: &str, tags: &[String]) -> std::collections::HashSet<String> {
+    use magpie_core::projects::{project_tag, slugify};
+    let mut set = std::collections::HashSet::new();
+    set.insert(slugify(name));
+    set.insert(project_tag(name));
+    set.insert(name.to_lowercase());
+    for t in tags {
+        set.insert(t.to_lowercase());
+        set.insert(slugify(t));
+    }
+    set.retain(|s| !s.is_empty());
+    set
+}
+
+/// Rebuild the selected project's task hub: merge note tasks tagged with the
+/// project + its on-disk file tasks, then render the List rows and Board columns
+/// scoped to that project (respecting the hub's Show-done + Board controls).
+fn refresh_project_tasks(ui: &LauncherWindow, state: &Arc<AppState>) {
+    let ps = ui.global::<ProjectsStore>();
+    let now = now_ms();
+    let today_ms = magpie_app::format_time::parse_due("today", now).unwrap_or(0);
+
+    // Selected project identity (root path + accepted #tags).
+    let (root, accept) = {
+        let g = state.project_scan.lock().unwrap_or_else(|e| e.into_inner());
+        let syncable: Vec<_> = g.hits.iter().filter(|h| h.syncable()).collect();
+        let mut sel = ps.get_selected();
+        if sel < 0 || sel as usize >= syncable.len() {
+            sel = 0;
+        }
+        match syncable.get(sel as usize) {
+            Some(h) => (h.path.clone(), project_accept_tags(&h.name, &h.tags)),
+            None => {
+                ps.set_detail_task_rows(ModelRc::new(VecModel::from(Vec::<TaskRow>::new())));
+                ps.set_detail_board(ModelRc::new(VecModel::from(Vec::<BoardColumn>::new())));
+                return;
+            }
+        }
+    };
+
+    // Merge sources (fills project_task_refs), then scope to this project:
+    // file tasks by their ref root, note tasks by their #tag.
+    let proj_tasks = project_file_tasks(state, now);
+    let refs = state
+        .project_task_refs
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+    let show_done = ps.get_detail_show_done();
+    let store = match state.store.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let active = store.active_timer().ok().flatten();
+    let mut merged = magpie_app::tasks::all_tasks(&store, now);
+    merged.extend(proj_tasks);
+    let scoped: Vec<magpie_app::tasks::Task> = merged
+        .into_iter()
+        .filter(|t| {
+            if t.note_id < 0 {
+                refs.get(&(t.note_id as i32))
+                    .map(|r| r.root == root)
+                    .unwrap_or(false)
+            } else {
+                t.project
+                    .as_deref()
+                    .map(|p| accept.contains(&p.to_lowercase()))
+                    .unwrap_or(false)
+            }
+        })
+        .collect();
+
+    // List rows (respect the hub's Show-done).
+    let list_rows: Vec<TaskRow> = magpie_app::tasks::group_sort(scoped.clone())
+        .into_iter()
+        .flat_map(|g| g.tasks)
+        .filter(|t| show_done || !t.done)
+        .map(|t| task_row_with_tracking(t, today_ms, &active, &store, now))
+        .collect();
+    ps.set_detail_task_rows(ModelRc::new(VecModel::from(list_rows)));
+
+    // Board columns (respect the hub's own Board controls).
+    let group_by = match ps.get_board_group() {
+        1 => magpie_app::tasks::GroupBy::Priority,
+        2 => magpie_app::tasks::GroupBy::Project,
+        _ => magpie_app::tasks::GroupBy::Status,
+    };
+    let sort_by = match ps.get_board_sort() {
+        1 => magpie_app::tasks::SortBy::Priority,
+        2 => magpie_app::tasks::SortBy::Title,
+        3 => magpie_app::tasks::SortBy::Status,
+        _ => magpie_app::tasks::SortBy::Due,
+    };
+    let filter = magpie_app::tasks::BoardFilter {
+        project: None,
+        query: String::new(),
+        hide_done: ps.get_board_hide_done(),
+    };
+    let to_row = |t: magpie_app::tasks::Task| TaskRow {
+        note_id: t.note_id as i32,
+        line_index: t.line_index as i32,
+        title: SharedString::from(t.title),
+        done: t.done,
+        doing: t.status == magpie_app::tasks::Status::Doing,
+        priority: match t.priority {
+            magpie_app::tasks::Priority::High => 0,
+            magpie_app::tasks::Priority::Medium => 1,
+            magpie_app::tasks::Priority::Low => 2,
+            magpie_app::tasks::Priority::None => 3,
+        },
+        due: SharedString::from(t.due_ms.map(abs_date).unwrap_or_default()),
+        project: SharedString::from(t.project.unwrap_or_default()),
+        source: SharedString::from(t.note_name),
+        recur: SharedString::from(recur_badge(t.recur)),
+        overdue: t.due_ms.map(|d| d < today_ms).unwrap_or(false) && !t.done,
+        bookmarked: t.bookmarked,
+        tracking: false,
+        time_total: SharedString::from(""),
+    };
+    let columns: Vec<BoardColumn> =
+        magpie_app::tasks::board_columns(scoped, group_by, sort_by, &filter)
+            .into_iter()
+            .map(|c| BoardColumn {
+                title: SharedString::from(c.title),
+                count: c.tasks.len() as i32,
+                tasks: ModelRc::new(VecModel::from(
+                    c.tasks.into_iter().map(to_row).collect::<Vec<_>>(),
+                )),
+            })
+            .collect();
+    ps.set_detail_board(ModelRc::new(VecModel::from(columns)));
+}
+
+/// Toggle a task's done state, routing by `note_id` sign (project file vs note).
+fn proj_toggle_task(state: &AppState, note_id: i32, line: usize) {
+    if note_id < 0 {
+        toggle_project_task_by_id(state, note_id, line);
+    } else {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        magpie_app::tasks::toggle_task(&store, note_id as i64, line, now_ms());
+    }
+}
+
+/// Set a task's status from a board column, routing by `note_id` sign. On a
+/// project file a "Doing" drop is ignored (files only carry done⇄open).
+fn proj_set_status(state: &AppState, note_id: i32, line: usize, status_col: i32) {
+    let target = magpie_app::tasks::status_from_column(status_col);
+    if note_id < 0 {
+        if !matches!(target, magpie_app::tasks::Status::Doing) {
+            let want_done = matches!(target, magpie_app::tasks::Status::Done);
+            if project_task_is_done(state, note_id, line) != Some(want_done) {
+                toggle_project_task_by_id(state, note_id, line);
+            }
+        }
+    } else {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        magpie_app::tasks::set_task_status(&store, note_id as i64, line, target, now_ms());
+    }
+}
+
+/// Bookmark a note task (project file-tasks have no DB row — skipped).
+fn proj_toggle_bookmark(state: &AppState, note_id: i32, line: usize) {
+    if note_id >= 0 {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        magpie_app::tasks::set_bookmark(&store, note_id as i64, line, now_ms());
+    }
+}
+
+/// Rename a note task's title (project file-tasks are not renamed here).
+fn proj_rename_task(state: &AppState, note_id: i32, line: usize, title: &str) {
+    if note_id >= 0 {
+        let store = match state.store.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        magpie_app::tasks::rename_task(&store, note_id as i64, line, title, now_ms());
+    }
 }
 
 /// Local `HH:MM` for an epoch-ms instant.
@@ -7991,6 +8156,106 @@ pub fn start() {
                 populate_projects(&ui, &s);
             }
         });
+    }
+    // ---- Per-project task hub (List/Board scoped to the selected project) ----
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>().on_set_detail_view(move |v| {
+            if let Some(ui) = w.upgrade() {
+                ui.global::<ProjectsStore>().set_detail_view(v);
+                refresh_project_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>().on_toggle_show_done(move || {
+            if let Some(ui) = w.upgrade() {
+                let ps = ui.global::<ProjectsStore>();
+                ps.set_detail_show_done(!ps.get_detail_show_done());
+                refresh_project_tasks(&ui, &s);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_board_controls_changed(move || {
+                if let Some(ui) = w.upgrade() {
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_task_toggle(move |note_id, line| {
+                if let Some(ui) = w.upgrade() {
+                    proj_toggle_task(&s, note_id, line as usize);
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>().on_task_open(move |note_id| {
+            if note_id < 0 {
+                open_project_task_by_id(&s, note_id);
+            } else if let Some(ui) = w.upgrade() {
+                open_note_into_notes_mode(&ui, &s, note_id);
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_task_bookmark(move |note_id, line| {
+                if let Some(ui) = w.upgrade() {
+                    proj_toggle_bookmark(&s, note_id, line as usize);
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_task_timer(move |note_id, title| {
+                if let Some(ui) = w.upgrade() {
+                    // Reuse the full timer logic (incl. org CLOCK logging), then
+                    // re-render the project hub.
+                    ui.invoke_toggle_timer(note_id, title);
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_task_rename(move |note_id, line, title| {
+                if let Some(ui) = w.upgrade() {
+                    proj_rename_task(&s, note_id, line as usize, title.as_str());
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
+    }
+    {
+        let w = ui.as_weak();
+        let s = state.clone();
+        ui.global::<ProjectsStore>()
+            .on_task_set_status(move |note_id, line, status| {
+                if let Some(ui) = w.upgrade() {
+                    proj_set_status(&s, note_id, line as usize, status);
+                    refresh_project_tasks(&ui, &s);
+                }
+            });
     }
     {
         let s = state.clone();

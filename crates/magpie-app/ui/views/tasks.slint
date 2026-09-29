@@ -11,6 +11,7 @@ import { ScheduleView } from "schedule.slint";
 import { TodayView } from "today.slint";
 import { BoardView } from "board.slint";
 import { SearchBar } from "../components/search_bar.slint";
+import { TaskListBody } from "../components/task_list.slint";
 
 export component TasksView inherits Rectangle {
     callback focus-search();
@@ -280,183 +281,19 @@ export component TasksView inherits Rectangle {
                     }
                 }
                 // The list. `group_sort` already clusters by project + orders within,
-                // so a flat list reads correctly top-to-bottom.
-                if root.tasks-view == "list": ListView {
-                    for t[i] in root.tasks: VerticalLayout {
-                        spacing: 0px;
-                        // Project group header — shown once per project cluster so the
-                        // grouping is legible.
-                        if i == 0 || root.tasks[i - 1].project != t.project: Text {
-                            text: t.project == "" ? "No project" : "#" + t.project;
-                            color: Theme.text-dim;
-                            font-size: 11px;
-                            font-weight: 700;
-                            height: 26px;
-                            vertical-alignment: bottom;
-                        }
-                        Rectangle {
-                        height: 48px;
-                        background: i == root.task-selected ? Theme.bg-elevated : (trow.has-hover ? Theme.bg-elevated : transparent);
-                        border-radius: 6px;
-                        // Accent bar marks the keyboard-selected row.
-                        if i == root.task-selected: Rectangle {
-                            x: 0;
-                            y: 8px;
-                            width: 3px;
-                            height: 32px;
-                            border-radius: 1.5px;
-                            background: Pal.accent;
-                        }
-                        // Row click jumps to the note that owns this task. The checkbox
-                        // has its own TouchArea (declared later → higher z-order) so it
-                        // toggles instead of opening the note.
-                        trow := TouchArea { clicked => { root.open-task-note(t.note_id); } }
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 10px;
-                            spacing: 8px;
-                            // Checkbox column.
-                            Rectangle {
-                                width: 24px;
-                                Rectangle {
-                                    y: 13px;
-                                    width: 22px;
-                                    height: 22px;
-                                    border-radius: 5px;
-                                    border-width: 1px;
-                                    border-color: t.doing && !t.done ? Theme.text-dim : Theme.text-faint;
-                                    background: t.done ? Pal.accent : (t.doing ? Theme.text-dim.with-alpha(0.2) : transparent);
-                                    if t.done: Text {
-                                        text: "✓";
-                                        color: Pal.on-accent;
-                                        font-size: 13px;
-                                        width: 22px;
-                                        height: 22px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    if !t.done && t.doing: Text {
-                                        text: "◐";
-                                        color: Theme.text-dim;
-                                        font-size: 13px;
-                                        width: 22px;
-                                        height: 22px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                cbta := TouchArea { clicked => { root.toggle-task(t.note_id, t.line_index); } }
-                            }
-                            // Priority pill in the gutter: labeled H/M/L (0 red /
-                            // 1 amber / 2 blue) so the colour isn't a mystery; blank
-                            // for None.
-                            Rectangle {
-                                width: 20px;
-                                if t.priority <= 2: Rectangle {
-                                    y: 15px;
-                                    width: 18px;
-                                    height: 18px;
-                                    border-radius: 5px;
-                                    background: t.priority == 0 ? Theme.text
-                                        : (t.priority == 1 ? Theme.text-faint : Theme.text-faint);
-                                    Text {
-                                        text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
-                                        color: Theme.on-accent;
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                            titlecol := VerticalLayout {
-                                horizontal-stretch: 1;
-                                padding-top: 6px;
-                                padding-bottom: 6px;
-                                property <bool> editing: t.note_id == root.task-edit-note && t.line_index == root.task-edit-line;
-                                if !titlecol.editing: Text {
-                                    text: t.title;
-                                    // Done tasks are dimmed (Slint Text has no strike).
-                                    color: t.done ? Theme.text-faint : Theme.text;
-                                    font-size: 14px;
-                                    overflow: elide;
-                                }
-                                // Inline title editor: Enter commits, Esc cancels.
-                                if titlecol.editing: TextInput {
-                                    text <=> root.task-edit-draft;
-                                    color: Theme.text;
-                                    font-size: 14px;
-                                    single-line: true;
-                                    init => { self.focus(); self.select-all(); }
-                                    accepted => {
-                                        root.rename-task(t.note_id, t.line_index, self.text);
-                                        root.task-edit-note = -1;
-                                        root.task-edit-line = -1;
-                                    }
-                                    key-pressed(e) => {
-                                        if e.text == Key.Escape {
-                                            root.task-edit-note = -1;
-                                            root.task-edit-line = -1;
-                                            return accept;
-                                        }
-                                        return reject;
-                                    }
-                                }
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    alignment: start;
-                                    if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                                    if t.project != "": Text { text: "#" + t.project; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                                    if t.recur != "": Text { text: t.recur; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
-                                    if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
-                                    // (bookmark shown by the trailing ★ toggle, not a badge)
-                                    if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                }
-                            }
-                            // Inline edit (pencil): enters title-edit mode for this row.
-                            Rectangle {
-                                width: 30px;
-                                edt := TouchArea {
-                                    clicked => {
-                                        root.task-edit-draft = t.title;
-                                        root.task-edit-note = t.note_id;
-                                        root.task-edit-line = t.line_index;
-                                    }
-                                }
-                                if trow.has-hover || edt.has-hover: Image {
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    source: Icons.act-edit;
-                                    width: 15px;
-                                    height: 15px;
-                                    colorize: edt.has-hover ? Theme.text : Theme.text-faint;
-                                }
-                            }
-                            Rectangle {
-                                width: 30px;
-                                bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
-                                Text {
-                                    text: t.bookmarked ? "★" : "☆";
-                                    color: t.bookmarked ? Theme.text-dim : (bmk.has-hover ? Theme.text : Theme.text-faint);
-                                    font-size: 16px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            Rectangle {
-                                width: 30px;
-                                tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
-                                Text {
-                                    text: t.tracking ? "⏹" : "▶";
-                                    color: t.tracking ? Theme.text-faint : (tmr.has-hover ? Theme.text : Theme.text-faint);
-                                    font-size: 14px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                        }
-                    }
+                // so a flat list reads correctly top-to-bottom. Rendered by the shared
+                // TaskListBody so the Projects tab shows identical rows.
+                if root.tasks-view == "list": TaskListBody {
+                    tasks: root.tasks;
+                    task-selected <=> root.task-selected;
+                    task-edit-note <=> root.task-edit-note;
+                    task-edit-line <=> root.task-edit-line;
+                    task-edit-draft <=> root.task-edit-draft;
+                    toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
+                    open-task-note(a0) => { root.open-task-note(a0); }
+                    toggle-bookmark(a0, a1) => { root.toggle-bookmark(a0, a1); }
+                    toggle-timer(a0, a1) => { root.toggle-timer(a0, a1); }
+                    rename-task(a0, a1, a2) => { root.rename-task(a0, a1, a2); }
                 }
                 // Empty state (flat list only).
                 if root.tasks-view == "list" && root.tasks.length == 0: HorizontalLayout {
