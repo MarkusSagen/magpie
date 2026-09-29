@@ -88,6 +88,7 @@ export component MainView inherits VerticalLayout {
     in property <[color]> color-harmony;
     in property <[string]> color-formats;
     in property <color> color-inverted;
+    callback copy-text(string);
     in property <bool> preview-is-link;
     in property <string> preview-domain;
     in property <image> preview-link-image;
@@ -583,6 +584,7 @@ export component MainView inherits VerticalLayout {
                 color-harmony: root.color-harmony;
                 color-formats: root.color-formats;
                 color-inverted: root.color-inverted;
+                copy-text(a0) => { root.copy-text(a0); }
                 preview-is-link: root.preview-is-link;
                 preview-domain: root.preview-domain;
                 preview-link-image: root.preview-link-image;

@@ -173,6 +173,7 @@ export component LauncherWindow inherits Window {
     in property <[color]> color-harmony;
     in property <[string]> color-formats;
     in property <color> color-inverted;
+    callback copy-text(string);
     // Web-link preview (screen 04): domain, and a cached OG thumbnail if bookmarked.
     in property <bool> preview-is-link: false;
     in property <string> preview-domain;
@@ -522,6 +523,7 @@ export component LauncherWindow inherits Window {
             color-harmony: root.color-harmony;
             color-formats: root.color-formats;
             color-inverted: root.color-inverted;
+            copy-text(a0) => { root.copy-text(a0); }
             preview-is-link: root.preview-is-link;
             preview-domain: root.preview-domain;
             preview-link-image: root.preview-link-image;

@@ -8591,6 +8591,14 @@ pub fn start() {
         });
     }
     {
+        // Copy an arbitrary string (a color format chip) to the system clipboard.
+        ui.on_copy_text(move |t| {
+            if let Ok(mut clip) = magpie_platform::platform_clipboard() {
+                let _ = clip.set_text(t.as_str());
+            }
+        });
+    }
+    {
         // A search-suggestion chip was chosen: complete the query and re-run.
         let s = state.clone();
         let w = ui.as_weak();

@@ -36,6 +36,8 @@ export component ClipboardView inherits VerticalLayout {
     in property <[color]> color-harmony;
     in property <[string]> color-formats;
     in property <color> color-inverted;
+    // Copy an arbitrary string (a color format) to the clipboard.
+    callback copy-text(string);
     in property <bool> preview-is-link;
     in property <string> preview-domain;
     in property <image> preview-link-image;
@@ -589,8 +591,18 @@ export component ClipboardView inherits VerticalLayout {
                                         }
                                     }
                                     // Format strings (hex / rgb / rgba / hsl / oklch / oklab) — click to copy.
-                                    for f in root.color-formats: Text {
-                                        text: f; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                    for f in root.color-formats: Rectangle {
+                                        height: 24px;
+                                        border-radius: Theme.r-xs;
+                                        background: cfmt.has-hover ? Theme.bg-elevated : transparent;
+                                        cfmt := TouchArea { clicked => { root.copy-text(f); } }
+                                        HorizontalLayout {
+                                            padding-left: 6px; padding-right: 6px;
+                                            Text { text: f; color: Theme.text-dim; font-family: "Geist Mono";
+                                                font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                                            Text { text: cfmt.has-hover ? "Copy" : ""; color: Theme.text-faint;
+                                                font-size: Theme.fs-xs; vertical-alignment: center; }
+                                        }
                                     }
                                     if root.color-scale.length > 0: Text { text: "Scale"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
                                     if root.color-scale.length > 0: HorizontalLayout {
