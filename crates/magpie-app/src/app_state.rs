@@ -110,6 +110,9 @@ pub struct AppState {
     /// secret's value on the clipboard (copy/paste from the vault), so the plaintext
     /// doesn't re-enter clipboard history. Consumed on match in [`ingest_event`].
     pub suppress_capture: Mutex<std::collections::HashSet<String>>,
+    /// The entries shown by the last `refresh()`, cached so the preview/selection hot
+    /// path (arrow keys) doesn't re-run the whole DB search on every keystroke.
+    pub last_results: Mutex<Vec<Entry>>,
 }
 
 /// The last local-projects scan (screens 25/26).
@@ -351,6 +354,7 @@ mod tests {
             calc_graph_f: std::sync::Mutex::new(String::new()),
             calc_graph_g: std::sync::Mutex::new(String::new()),
             suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
+            last_results: std::sync::Mutex::new(Vec::new()),
         }
     }
 

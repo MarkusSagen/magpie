@@ -132,6 +132,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         calc_graph_f: std::sync::Mutex::new(String::new()),
         calc_graph_g: std::sync::Mutex::new(String::new()),
         suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
+        last_results: std::sync::Mutex::new(Vec::new()),
     })
 }
 
@@ -377,6 +378,11 @@ fn refresh(ui: &LauncherWindow, state: &AppState) {
         }
     }
     let results = current_results(state, now_ms());
+    // Cache the displayed entries so the preview/selection hot path (arrow keys) reads
+    // from memory instead of re-running the whole DB search on every keystroke.
+    if let Ok(mut c) = state.last_results.lock() {
+        *c = results.clone();
+    }
 
     let screenshare = state.screenshare.lock().map(|g| *g).unwrap_or(false);
     let rules = MaskRules::build(&state.mask_apps, &state.mask_patterns, screenshare);
@@ -8638,12 +8644,19 @@ pub fn start() {
         let w = ui.as_weak();
         ui.on_preview_select(move |idx, masked, revealed| {
             const PREVIEW_LINE_CAP: usize = 20_000;
-            let results = current_results(&s, now_ms());
-            let entry = if idx >= 0 {
-                results.get(idx as usize)
+            // Read the selected entry from the cached results (populated by refresh) so
+            // arrow-key navigation never re-runs the DB search — the old per-keystroke
+            // `current_results` call was the preview lag.
+            let entry: Option<Entry> = if idx >= 0 {
+                s.last_results
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(idx as usize)
+                    .cloned()
             } else {
                 None
             };
+            let entry = entry.as_ref();
             let (lines, truncated) = match entry {
                 Some(e) if masked && !revealed => {
                     let visible = s.mask_visible_chars.max(0) as usize;
@@ -8697,13 +8710,31 @@ pub fn start() {
                         }
                     } else if let Some(path) = file_path_of(e) {
                         // Any other file (PDF/video/audio/epub/doc…) → a QuickLook
-                        // thumbnail, cached under thumbnails/ (first view generates it).
+                        // thumbnail. Use the cache if present (instant); otherwise generate
+                        // it on a background thread and refresh the preview when ready, so
+                        // selection never blocks on qlmanage.
                         let dir = data_dir().join("thumbnails");
-                        match magpie_platform::thumbnails::ensure_file_thumbnail(&dir, &path, 512)
+                        match magpie_platform::thumbnails::cached_thumbnail(&dir, &path, 512)
                             .and_then(|tp| slint::Image::load_from_path(&tp).ok())
                         {
                             Some(i) => (i, true),
-                            None => (img, has),
+                            None => {
+                                let weak = w.clone();
+                                std::thread::spawn(move || {
+                                    if magpie_platform::thumbnails::ensure_file_thumbnail(
+                                        &dir, &path, 512,
+                                    )
+                                    .is_some()
+                                    {
+                                        let _ = slint::invoke_from_event_loop(move || {
+                                            if let Some(ui) = weak.upgrade() {
+                                                ui.invoke_rebuild_preview();
+                                            }
+                                        });
+                                    }
+                                });
+                                (img, has)
+                            }
                         }
                     } else {
                         (img, has)

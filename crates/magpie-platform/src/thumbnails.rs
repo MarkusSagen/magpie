@@ -23,6 +23,17 @@ fn cache_name(file: &Path, size: u32) -> String {
     format!("{:016x}.png", h.finish())
 }
 
+/// Return the ALREADY-cached thumbnail path for `file` at `size`, or `None` if it hasn't
+/// been generated yet. Cheap (a stat) — the UI hot path uses this and kicks generation to
+/// a background thread on a miss, so selection never blocks on `qlmanage`.
+pub fn cached_thumbnail(cache_dir: &Path, file: &Path, size: u32) -> Option<PathBuf> {
+    if !file.exists() || file.is_dir() {
+        return None;
+    }
+    let out = cache_dir.join(cache_name(file, size));
+    out.exists().then_some(out)
+}
+
 /// Return a cached thumbnail PNG for `file` (generating it if needed), or `None` if one
 /// can't be produced. `size` is the max edge in points. Best-effort; never panics.
 pub fn ensure_file_thumbnail(cache_dir: &Path, file: &Path, size: u32) -> Option<PathBuf> {
