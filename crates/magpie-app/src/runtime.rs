@@ -7179,6 +7179,11 @@ pub fn start() {
         for bytes in [
             include_bytes!("../fonts/Geist.ttf").as_slice(),
             include_bytes!("../fonts/GeistMono.ttf").as_slice(),
+            // JetBrainsMono Nerd Font Mono (OFL) — the app's monospace face. Its
+            // Private-Use-Area glyphs let copied Nerd Font icons render instead of
+            // tofu; ligatures + full coverage make it the code/preview font too.
+            include_bytes!("../fonts/JetBrainsMonoNFM-Regular.ttf").as_slice(),
+            include_bytes!("../fonts/JetBrainsMonoNFM-Bold.ttf").as_slice(),
         ] {
             let blob = fontique::Blob::new(std::sync::Arc::new(bytes.to_vec()));
             let _ = fonts.register_fonts(blob, None);

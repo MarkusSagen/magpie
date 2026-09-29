@@ -33,7 +33,7 @@ export component TimeView inherits VerticalLayout {
                 background: Theme.bg-elevated; border-radius: Theme.r-sm; height: 26px; y: (parent.height - 26px) / 2;
                 HorizontalLayout { padding-left: 8px; padding-right: 8px;
                     Text { text: TimeStore.running-project; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } } }
-            Text { text: TimeStore.running-elapsed; color: Theme.text; font-family: "Geist Mono"; font-size: 20px;
+            Text { text: TimeStore.running-elapsed; color: Theme.text; font-family: Theme.mono; font-size: 20px;
                 font-weight: 700; vertical-alignment: center; }
             Rectangle {
                 width: 84px; height: 30px; y: (parent.height - 30px) / 2; border-radius: Theme.r-sm;
@@ -65,7 +65,7 @@ export component TimeView inherits VerticalLayout {
                         padding-left: 4px; padding-right: 8px;
                         Text { text: row.day-label; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600;
                             vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { text: row.day-total; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                        Text { text: row.day-total; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm;
                             vertical-alignment: center; }
                     }
                     if !row.is-day-header: HorizontalLayout {
@@ -74,8 +74,8 @@ export component TimeView inherits VerticalLayout {
                             overflow: elide; horizontal-stretch: 1; }
                         if row.project != "": Text { text: row.project; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
                         if row.tag != "": Text { text: row.tag; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
-                        Text { text: row.span; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
-                        Text { text: row.duration; color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-body;
+                        Text { text: row.span; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Text { text: row.duration; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-body;
                             vertical-alignment: center; width: 84px; horizontal-alignment: right; }
                         Rectangle { width: 24px; height: 24px; y: (parent.height - 24px)/2; border-radius: Theme.r-xs;
                             background: cbt.has-hover ? Theme.bg-elevated : transparent;
@@ -176,14 +176,14 @@ export component TimeView inherits VerticalLayout {
                     HorizontalLayout {
                         Text { text: "This week"; color: Theme.text; font-size: Theme.fs-body; font-weight: 600;
                             vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { text: TimeStore.week-total; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Text { text: TimeStore.week-total; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; }
                     }
                     for p[i] in TimeStore.week-projects: VerticalLayout {
                         spacing: 4px;
                         HorizontalLayout {
                             Text { text: p.name; color: p.accent ? Theme.text : Theme.text-dim; font-size: Theme.fs-body;
                                 vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
-                            Text { text: p.total; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                            Text { text: p.total; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; }
                         }
                         Rectangle {
                             height: 4px; background: Theme.bg-elevated; border-radius: 2px;

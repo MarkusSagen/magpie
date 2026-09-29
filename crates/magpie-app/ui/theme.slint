@@ -44,6 +44,12 @@ export global Theme {
     out property <length> fs-md: 14px;
     out property <length> fs-lg: 15px;     // search input
     out property <length> fs-title: 20px;  // page title
+    // Type families (bundled + registered in runtime.rs). `mono` is JetBrainsMono
+    // Nerd Font Mono — its Private-Use-Area glyphs render copied Nerd Font icons,
+    // and it's the code / clipboard-content / preview face. `ui` (Geist) stays the
+    // sans face for chrome (sidebar, titles). Emoji fall back to the OS colour font.
+    out property <string> mono: "JetBrainsMono Nerd Font Mono";
+    out property <string> ui: "Geist";
 
     // The theme catalogue. ORDER IS THE CONTRACT with `themes.rs` (index-based).
     out property <[Palette]> palettes: [

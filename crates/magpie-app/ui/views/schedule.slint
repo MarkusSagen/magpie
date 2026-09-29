@@ -48,7 +48,7 @@ export component ScheduleView inherits VerticalLayout {
                     if ScheduleStore.form-command == "": Text {
                         text: ScheduleStore.form-kind == 0 ? "Message" : (ScheduleStore.form-kind == 3 ? "URL" : (ScheduleStore.form-kind == 2 ? "Path / app / note" : "Shell command"));
                         color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
-                    TextInput { text <=> ScheduleStore.form-command; color: Theme.text; font-family: "Geist Mono";
+                    TextInput { text <=> ScheduleStore.form-command; color: Theme.text; font-family: Theme.mono;
                         font-size: 13px; vertical-alignment: center; single-line: true; } }
             }
 
@@ -65,7 +65,7 @@ export component ScheduleView inherits VerticalLayout {
             HorizontalLayout {
                 spacing: 8px;
                 Text { text: ScheduleStore.form-cron == "" ? "" : "cron: " + ScheduleStore.form-cron;
-                    color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm; }
+                    color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm; }
                 Rectangle { horizontal-stretch: 1; }
             }
             Text { text: ScheduleStore.next-runs == "" ? "" : "next: " + ScheduleStore.next-runs;
@@ -139,7 +139,7 @@ export component ScheduleView inherits VerticalLayout {
                 vertical-stretch: 1;
                 viewport-width: self.width;
                 Text { text: ScheduleStore.logs == "" ? "No runs yet." : ScheduleStore.logs; color: Theme.text-dim;
-                    font-family: "Geist Mono"; font-size: Theme.fs-sm; wrap: word-wrap; width: parent.width; }
+                    font-family: Theme.mono; font-size: Theme.fs-sm; wrap: word-wrap; width: parent.width; }
             }
         }
     }
@@ -176,7 +176,7 @@ export component ScheduleView inherits VerticalLayout {
                         if j.os-managed: Text { text: "OS"; color: Pal.accent; font-size: Theme.fs-xs; vertical-alignment: center; }
                         if !j.enabled: Text { text: "paused"; color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; }
                     }
-                    Text { text: j.cron + "   " + j.next-run; color: Theme.text-faint; font-family: "Geist Mono";
+                    Text { text: j.cron + "   " + j.next-run; color: Theme.text-faint; font-family: Theme.mono;
                         font-size: Theme.fs-xs; overflow: elide; }
                     Text { text: j.last-run; color: j.failed ? Theme.danger : Theme.text-ghost; font-size: Theme.fs-xs; }
                 }
@@ -215,7 +215,7 @@ export component ScheduleView inherits VerticalLayout {
             cbox := VerticalLayout {
                 padding: 16px; spacing: 12px;
                 Text { text: "Confirm this job"; color: Theme.text; font-size: 16px; font-weight: 700; }
-                Text { text: ScheduleStore.confirm-text; color: Theme.text-dim; font-family: "Geist Mono";
+                Text { text: ScheduleStore.confirm-text; color: Theme.text-dim; font-family: Theme.mono;
                     font-size: Theme.fs-sm; wrap: word-wrap; }
                 HorizontalLayout {
                     spacing: 8px;

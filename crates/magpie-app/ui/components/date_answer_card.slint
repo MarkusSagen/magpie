@@ -120,7 +120,7 @@ export component DateAnswerCard inherits Flickable {
                         Text {
                             text: DateStore.readline;
                             color: Theme.text-faint;
-                            font-family: "Geist Mono";
+                            font-family: Theme.mono;
                             font-size: Theme.fs-sm;
                         }
                     }
@@ -143,7 +143,7 @@ export component DateAnswerCard inherits Flickable {
                                 Text {
                                     text: chip;
                                     color: root.format-index == i ? Theme.text : Theme.text-dim;
-                                    font-family: "Geist Mono";
+                                    font-family: Theme.mono;
                                     font-size: Theme.fs-sm;
                                     overflow: elide;
                                     vertical-alignment: center;

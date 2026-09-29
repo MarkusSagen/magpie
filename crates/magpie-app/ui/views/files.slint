@@ -50,7 +50,7 @@ export component FilesView inherits VerticalLayout {
                     background: i == SearchStore.mode ? Theme.bg-elevated : (mta.has-hover ? Theme.bg-elevated : transparent);
                     mta := TouchArea { clicked => { SearchStore.set-mode(i); } }
                     Text { text: m; color: i == SearchStore.mode ? Theme.text : Theme.text-dim;
-                        font-family: "Geist Mono"; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        font-family: Theme.mono; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                 }
             }
         }
@@ -182,21 +182,21 @@ export component FilesView inherits VerticalLayout {
                     height: 26px;
                     HorizontalLayout {
                         padding-left: 12px; spacing: 12px;
-                        Text { text: line.line-no; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                        Text { text: line.line-no; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm;
                             vertical-alignment: center; width: 48px; horizontal-alignment: right; }
                         HorizontalLayout {
                             spacing: 0px; horizontal-stretch: 1;
-                            Text { text: line.pre; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            Text { text: line.pre; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
                                 vertical-alignment: center; overflow: elide; }
                             Rectangle {
                                 background: Theme.accent.with-alpha(0.22); border-radius: 3px;
-                                Text { text: line.mid; color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                                Text { text: line.mid; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
                                     vertical-alignment: center; } }
-                            Text { text: line.post; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            Text { text: line.post; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
                                 vertical-alignment: center; overflow: elide; }
                             // sed replacement preview
                             if line.replaced != "": Text { text: "  →  " + line.replaced; color: Theme.accent;
-                                font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; }
+                                font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; }
                             Rectangle { horizontal-stretch: 1; }
                         }
                     }

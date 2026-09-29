@@ -82,7 +82,7 @@ export component SnippetsView inherits VerticalLayout {
                         if row.keyword != "": Rectangle {
                             background: Theme.bg-panel; border-radius: Theme.r-xs; border-width: 1px; border-color: Theme.line;
                             HorizontalLayout { padding-left: 8px; padding-right: 8px;
-                                Text { text: row.keyword; color: Theme.text-dim; font-family: "Geist Mono";
+                                Text { text: row.keyword; color: Theme.text-dim; font-family: Theme.mono;
                                     font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; } }
                         }
                     }
@@ -109,7 +109,7 @@ export component SnippetsView inherits VerticalLayout {
                         width: 150px; height: 34px; border-radius: Theme.r-sm;
                         background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line;
                         HorizontalLayout { padding-left: 10px;
-                            Text { text: SnippetsStore.detail-keyword; color: Theme.text; font-family: "Geist Mono";
+                            Text { text: SnippetsStore.detail-keyword; color: Theme.text; font-family: Theme.mono;
                                 font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; } }
                     }
                 }
@@ -122,7 +122,7 @@ export component SnippetsView inherits VerticalLayout {
                         bodytext := Text {
                             x: 16px; y: 16px; width: parent.width - 32px;
                             text: SnippetsStore.detail-body;
-                            color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-body; wrap: word-wrap;
+                            color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-body; wrap: word-wrap;
                         }
                     }
                 }
@@ -133,7 +133,7 @@ export component SnippetsView inherits VerticalLayout {
                     for ph in ["{date}", "{time}", "{clipboard}", "{cursor}", "{input:…}"]: Rectangle {
                         height: 26px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
                         HorizontalLayout { padding-left: 8px; padding-right: 8px;
-                            Text { text: ph; color: Theme.text-dim; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                            Text { text: ph; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
                                 vertical-alignment: center; } }
                     }
                     Rectangle { horizontal-stretch: 1; }

@@ -18,7 +18,7 @@ export component Keycap inherits Rectangle {
         Text {
             text: root.text;
             color: root.strong ? Theme.text : Theme.text-dim;
-            font-family: "Geist Mono";
+            font-family: Theme.mono;
             font-size: 11px;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -31,7 +31,7 @@ export component Keycap inherits Rectangle {
 export component HintText inherits Text {
     in property <bool> bright;
     color: root.bright ? Theme.text-dim : Theme.text-ghost;
-    font-family: "Geist Mono";
+    font-family: Theme.mono;
     font-size: 11px;
     letter-spacing: 0.4px;
 }

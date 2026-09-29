@@ -87,7 +87,7 @@ export component AnswerCard inherits Rectangle {
         if root.explanation != "": Text {
             text: root.explanation;
             color: Theme.text-faint;
-            font-family: "Geist Mono";
+            font-family: Theme.mono;
             font-size: Theme.fs-sm;
             wrap: word-wrap;
         }
@@ -107,7 +107,7 @@ export component AnswerCard inherits Rectangle {
                     Text {
                         text: chip;
                         color: root.format-index == i ? Theme.text : Theme.text-dim;
-                        font-family: "Geist Mono";
+                        font-family: Theme.mono;
                         font-size: Theme.fs-sm;
                         vertical-alignment: center;
                     }

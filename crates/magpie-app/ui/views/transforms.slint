@@ -68,7 +68,7 @@ export component TransformsView inherits Rectangle {
                         Text {
                             text: root.transform-input-summary(root.transform-input);
                             color: Theme.text-dim;
-                            font-family: "Geist Mono";
+                            font-family: Theme.mono;
                             font-size: Theme.fs-sm;
                             vertical-alignment: center;
                             overflow: elide;
@@ -109,7 +109,7 @@ export component TransformsView inherits Rectangle {
                                     Text { text: row.name; color: root.transform-selected == i ? Theme.text : Theme.text-dim;
                                         font-size: Theme.fs-body; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                                     if row.hint != "": Text { text: row.hint; color: Theme.text-faint;
-                                        font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+                                        font-family: Theme.mono; font-size: Theme.fs-xs; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -132,7 +132,7 @@ export component TransformsView inherits Rectangle {
                             Text {
                                 text: root.result;
                                 color: Theme.text;
-                                font-family: "Geist Mono";
+                                font-family: Theme.mono;
                                 font-size: Theme.fs-sm;
                                 wrap: word-wrap;
                                 vertical-stretch: 1;

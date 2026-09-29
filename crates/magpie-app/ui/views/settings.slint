@@ -33,7 +33,7 @@ export component SettingsView inherits Rectangle {
             spacing: 16px;
             HorizontalLayout {
                 Text { text: "Settings"; color: Theme.text; font-size: Theme.fs-title; font-weight: 600; horizontal-stretch: 1; }
-                Text { text: "Esc"; color: Theme.text-faint; font-family: "Geist Mono"; font-size: Theme.fs-xs; vertical-alignment: center; }
+                Text { text: "Esc"; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-xs; vertical-alignment: center; }
             }
             // Scrollable body so the Appearance + Features sections both fit.
             ScrollView {
@@ -127,7 +127,7 @@ export component SettingsView inherits Rectangle {
                 Rectangle {
                     width: 130px; height: 28px; border-radius: Theme.r-sm; background: sh.has-hover ? Theme.bg-panel : Theme.bg-elevated;
                     sh := TouchArea { clicked => { root.cycle-scratch-hotkey(); } }
-                    Text { text: root.scratch-hotkey; color: Theme.text; font-family: "Geist Mono"; font-size: Theme.fs-sm;
+                    Text { text: root.scratch-hotkey; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
                         horizontal-alignment: center; vertical-alignment: center; }
                 }
             }

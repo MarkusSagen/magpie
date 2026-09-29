@@ -232,7 +232,7 @@ export component MainView inherits VerticalLayout {
                                 Text { text: "↗"; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 Text { text: root.quicklink-hint; color: Theme.text; font-size: Theme.fs-sm;
                                     vertical-alignment: center; overflow: elide; }
-                                Text { text: "↵"; color: Theme.text-faint; font-family: "Geist Mono"; font-size: 11px; vertical-alignment: center; }
+                                Text { text: "↵"; color: Theme.text-faint; font-family: Theme.mono; font-size: 11px; vertical-alignment: center; }
                             }
                         }
                     }
@@ -543,7 +543,7 @@ export component MainView inherits VerticalLayout {
                     sgta := TouchArea { clicked => { root.apply-suggestion(sug.insert); } }
                     HorizontalLayout {
                         padding-left: 8px; padding-right: 8px; spacing: 6px;
-                        Text { text: sug.label; color: Theme.text; font-family: "Geist Mono";
+                        Text { text: sug.label; color: Theme.text; font-family: Theme.mono;
                             font-size: Theme.fs-sm; vertical-alignment: center; }
                         if sug.hint != "": Text { text: sug.hint; color: Theme.text-faint;
                             font-size: Theme.fs-xs; vertical-alignment: center; }

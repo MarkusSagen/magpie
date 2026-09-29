@@ -134,7 +134,7 @@ export component DataView inherits HorizontalLayout {
                                 padding-left: 12px; padding-right: 12px; spacing: 6px;
                                 alignment: col.numeric ? end : start;
                                 Text { text: col.numeric ? "#" : "Aa"; color: Theme.text-faint;
-                                    font-family: "Geist Mono"; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 Text { text: col.name; color: Theme.text-dim; font-size: Theme.fs-body;
                                     font-weight: 500; vertical-alignment: center; overflow: elide; }
                             }
@@ -145,7 +145,7 @@ export component DataView inherits HorizontalLayout {
                             HorizontalLayout {
                                 padding-left: 12px; padding-right: 12px;
                                 Text { text: cell; color: Theme.text;
-                                    font-family: col.numeric ? "Geist Mono" : "Geist";
+                                    font-family: col.numeric ? Theme.mono : Theme.ui;
                                     font-size: Theme.fs-body;
                                     horizontal-alignment: col.numeric ? right : left;
                                     vertical-alignment: center; overflow: elide;
@@ -192,7 +192,7 @@ export component DataView inherits HorizontalLayout {
                             background: cxa.has-hover ? Theme.bg-elevated : transparent;
                             cxa := TouchArea { clicked => { DataStore.chart-cycle-x(); } }
                             HorizontalLayout { padding-left: 8px; padding-right: 8px;
-                                Text { text: DataStore.chart-x-name; color: Theme.text; font-family: "Geist Mono";
+                                Text { text: DataStore.chart-x-name; color: Theme.text; font-family: Theme.mono;
                                     font-size: Theme.fs-sm; vertical-alignment: center; } }
                         }
                     }
@@ -204,14 +204,14 @@ export component DataView inherits HorizontalLayout {
                             background: cya.has-hover ? Theme.bg-elevated : transparent;
                             cya := TouchArea { clicked => { DataStore.chart-cycle-y(); } }
                             HorizontalLayout { padding-left: 8px; padding-right: 8px;
-                                Text { text: DataStore.chart-y-name; color: Theme.text; font-family: "Geist Mono";
+                                Text { text: DataStore.chart-y-name; color: Theme.text; font-family: Theme.mono;
                                     font-size: Theme.fs-sm; vertical-alignment: center; } }
                         }
                     }
                     HorizontalLayout {
                         Text { text: "Labels"; color: Theme.text-dim; font-size: Theme.fs-body; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: DataStore.chart-label-name; color: Theme.text-dim; font-family: "Geist Mono";
+                        Text { text: DataStore.chart-label-name; color: Theme.text-dim; font-family: Theme.mono;
                             font-size: Theme.fs-sm; vertical-alignment: center; }
                     }
                     HorizontalLayout {

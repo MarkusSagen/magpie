@@ -307,7 +307,7 @@ export component ClipboardView inherits VerticalLayout {
                                     if i < 9 && i == root.selected: Rectangle {
                                         y: 7px; width: 28px; height: 18px; border-radius: 4px;
                                         background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
-                                        Text { text: "⌘" + (i + 1); color: Theme.text; font-family: "Geist Mono";
+                                        Text { text: "⌘" + (i + 1); color: Theme.text; font-family: Theme.mono;
                                             font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                     }
                                     if i < 9 && i != root.selected: Text {
@@ -362,6 +362,8 @@ export component ClipboardView inherits VerticalLayout {
                                         Text { text: row.title;
                                             // Links light up in the accent colour on hover.
                                             color: (row.kind == "link" && rowta.has-hover) ? Theme.accent : Theme.text;
+                                            // Mono (Nerd Font) so copied Nerd-Font icons render in the row.
+                                            font-family: Theme.mono;
                                             font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
                                         // Web links: an accent "domain ↗" so links stand out.
                                         if row.domain != "": Text { text: row.domain + " ↗"; color: Theme.accent;
@@ -544,7 +546,7 @@ export component ClipboardView inherits VerticalLayout {
                                 Text { text: root.preview-domain; color: Theme.accent;
                                     font-size: Theme.fs-md; font-weight: 600; overflow: elide; }
                                 Text { text: root.preview-text; color: Theme.text-dim;
-                                    font-family: "Geist Mono"; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                    font-family: Theme.mono; font-size: Theme.fs-sm; wrap: word-wrap; }
                                 Rectangle { vertical-stretch: 1; }
                             }
 
@@ -601,7 +603,7 @@ export component ClipboardView inherits VerticalLayout {
                                         cfmt := TouchArea { clicked => { root.copy-text(f); } }
                                         HorizontalLayout {
                                             padding-left: 6px; padding-right: 6px;
-                                            Text { text: f; color: Theme.text-dim; font-family: "Geist Mono";
+                                            Text { text: f; color: Theme.text-dim; font-family: Theme.mono;
                                                 font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
                                             Text { text: cfmt.has-hover ? "Copy" : ""; color: Theme.text-faint;
                                                 font-size: Theme.fs-xs; vertical-alignment: center; }
@@ -629,16 +631,16 @@ export component ClipboardView inherits VerticalLayout {
                                             height: root.preview-font-size * 1.6;
                                             HorizontalLayout {
                                                 alignment: start;
-                                                Text { text: hl.pre; color: Theme.text-dim;
+                                                Text { text: hl.pre; color: Theme.text-dim; font-family: Theme.mono;
                                                     font-size: root.preview-font-size; vertical-alignment: center; overflow: elide; }
                                                 if hl.mid != "": Rectangle {
                                                     background: Theme.accent;
                                                     border-radius: 2px;
                                                     HorizontalLayout { padding-left: 1px; padding-right: 1px;
-                                                        Text { text: hl.mid; color: Theme.on-accent;
+                                                        Text { text: hl.mid; color: Theme.on-accent; font-family: Theme.mono;
                                                             font-size: root.preview-font-size; vertical-alignment: center; } }
                                                 }
-                                                Text { text: hl.post; color: Theme.text-dim;
+                                                Text { text: hl.post; color: Theme.text-dim; font-family: Theme.mono;
                                                     font-size: root.preview-font-size; vertical-alignment: center;
                                                     overflow: elide; horizontal-stretch: 1; }
                                             }
@@ -658,6 +660,7 @@ export component ClipboardView inherits VerticalLayout {
                                         width: parent.width;
                                         text: root.preview-text;
                                         color: Theme.text;
+                                        font-family: Theme.mono;
                                         font-size: root.preview-font-size;
                                         read-only: true;
                                         single-line: false;
@@ -679,6 +682,7 @@ export component ClipboardView inherits VerticalLayout {
                                             Text {
                                                 text: ln;
                                                 color: Theme.text;
+                                                font-family: Theme.mono;
                                                 font-size: root.preview-font-size;
                                                 wrap: word-wrap;
                                             }
