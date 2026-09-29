@@ -6,6 +6,7 @@ pub mod defaults;
 pub mod hotkey;
 pub mod os;
 pub mod policy;
+pub mod thumbnails;
 pub mod traits;
 pub mod watcher;
 

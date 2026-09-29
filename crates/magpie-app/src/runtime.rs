@@ -184,6 +184,23 @@ fn image_file_of(e: &Entry) -> Option<std::path::PathBuf> {
     path.exists().then_some(path)
 }
 
+/// The first file path a clip refers to (a copied File, or a text clip that is a path),
+/// for QuickLook thumbnailing. Any type — the caller decides what to render.
+fn file_path_of(e: &Entry) -> Option<std::path::PathBuf> {
+    let candidate = if matches!(e.kind, Kind::File) {
+        e.full_text.lines().next().unwrap_or("").trim()
+    } else if magpie_core::openwith::looks_like_path(&e.full_text) {
+        e.full_text.trim()
+    } else {
+        return None;
+    };
+    if candidate.is_empty() {
+        return None;
+    }
+    let path = magpie_app::file_search::expand_tilde(candidate);
+    (path.exists() && !path.is_dir()).then_some(path)
+}
+
 fn load_entry_image(images: &FsImageStore, e: &Entry) -> (slint::Image, bool) {
     let none = (slint::Image::default(), false);
     let Some(bin) = e.image_path.as_deref() else {
@@ -8677,6 +8694,16 @@ pub fn start() {
                         match slint::Image::load_from_path(&p) {
                             Ok(i) => (i, true),
                             Err(_) => (img, has),
+                        }
+                    } else if let Some(path) = file_path_of(e) {
+                        // Any other file (PDF/video/audio/epub/doc…) → a QuickLook
+                        // thumbnail, cached under thumbnails/ (first view generates it).
+                        let dir = data_dir().join("thumbnails");
+                        match magpie_platform::thumbnails::ensure_file_thumbnail(&dir, &path, 512)
+                            .and_then(|tp| slint::Image::load_from_path(&tp).ok())
+                        {
+                            Some(i) => (i, true),
+                            None => (img, has),
                         }
                     } else {
                         (img, has)
