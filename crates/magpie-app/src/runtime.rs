@@ -133,6 +133,7 @@ pub fn build_state(cfg: &Config) -> Arc<AppState> {
         calc_graph_g: std::sync::Mutex::new(String::new()),
         suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
         last_results: std::sync::Mutex::new(Vec::new()),
+        preview_gen: std::sync::atomic::AtomicU64::new(0),
     })
 }
 
@@ -8722,214 +8723,233 @@ pub fn start() {
         let s = state.clone();
         let w = ui.as_weak();
         ui.on_preview_select(move |idx, masked, revealed| {
-            const PREVIEW_LINE_CAP: usize = 20_000;
-            // Read the selected entry from the cached results (populated by refresh) so
-            // arrow-key navigation never re-runs the DB search — the old per-keystroke
-            // `current_results` call was the preview lag.
-            let entry: Option<Entry> = if idx >= 0 {
-                s.last_results
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(idx as usize)
-                    .cloned()
-            } else {
-                None
-            };
-            let entry = entry.as_ref();
-            let (lines, truncated) = match entry {
-                Some(e) if masked && !revealed => {
-                    let visible = s.mask_visible_chars.max(0) as usize;
-                    (
-                        vec![SharedString::from(mask_render(&e.full_text, visible))],
-                        false,
-                    )
+            // Coalesce rapid selection changes: bump the generation, defer the expensive
+            // rebuild to the event loop, and only render if no newer selection arrived
+            // meanwhile. Holding an arrow key then flies through the list, rebuilding the
+            // preview once when it settles instead of on every keystroke.
+            let g = s
+                .preview_gen
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
+            let s = s.clone();
+            let w = w.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if s.preview_gen.load(std::sync::atomic::Ordering::Relaxed) != g {
+                    return; // superseded by a newer selection
                 }
-                Some(e) => {
-                    // Cap each line's length so a single pathological very-long line
-                    // (e.g. minified JSON) can't reintroduce whole-string shaping in the
-                    // wrapped preview rows. The full entry is still copyable / openable.
-                    const LINE_CHAR_CAP: usize = 1200;
-                    let mut lines: Vec<SharedString> = Vec::new();
-                    let mut truncated = false;
-                    for (n, line) in e.full_text.split('\n').enumerate() {
-                        if n >= PREVIEW_LINE_CAP {
-                            truncated = true;
-                            break;
-                        }
-                        if line.chars().count() > LINE_CHAR_CAP {
-                            let head: String = line.chars().take(LINE_CHAR_CAP).collect();
-                            lines.push(SharedString::from(format!("{head}…")));
-                        } else {
-                            lines.push(SharedString::from(line));
-                        }
+                // Bounded per-rebuild work: cap the lines built each time (the list is
+                // virtualized anyway; huge entries show a truncated marker + Open-in-editor).
+                const PREVIEW_LINE_CAP: usize = 4_000;
+                // Read the selected entry from the cached results (populated by refresh) so
+                // arrow-key navigation never re-runs the DB search — the old per-keystroke
+                // `current_results` call was the preview lag.
+                let entry: Option<Entry> = if idx >= 0 {
+                    s.last_results
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(idx as usize)
+                        .cloned()
+                } else {
+                    None
+                };
+                let entry = entry.as_ref();
+                let (lines, truncated) = match entry {
+                    Some(e) if masked && !revealed => {
+                        let visible = s.mask_visible_chars.max(0) as usize;
+                        (
+                            vec![SharedString::from(mask_render(&e.full_text, visible))],
+                            false,
+                        )
                     }
-                    (lines, truncated)
-                }
-                None => (Vec::new(), false),
-            };
-            // Only SMALL entries get the selectable single-TextInput preview — that
-            // control shapes its whole string every frame (Slint has no intra-Text
-            // virtualization), so it's the scroll bottleneck. Everything larger uses the
-            // virtualized line ListView (only visible rows shaped), which scrolls
-            // instantly; whole-entry copy still works via ⌘C / the copy action.
-            const SELECTABLE_MAX_LINES: usize = 40;
-            const SELECTABLE_MAX_CHARS: usize = 2_000;
-            let selectable = match entry {
-                Some(e)
-                    if (!masked || revealed)
-                        && !truncated
-                        && lines.len() <= SELECTABLE_MAX_LINES
-                        && e.full_text.len() <= SELECTABLE_MAX_CHARS =>
-                {
-                    e.full_text.clone()
-                }
-                _ => String::new(),
-            };
-            // Search match highlighting: split the preview into lines with the matched
-            // query terms marked, and note the first matching line so the preview can
-            // scroll to it. Only when there's a text query and the entry is visible.
-            let hl_terms: Vec<String> = {
-                let u = s.ui.lock().unwrap_or_else(|e| e.into_inner());
-                magpie_core::parse_search_tokens(&u.text)
-                    .text
-                    .split(|c: char| !c.is_alphanumeric())
-                    .filter(|t| t.chars().count() >= 2)
-                    .map(|t| t.to_lowercase())
-                    .collect()
-            };
-            let (hl_lines, hl_first) = match entry {
-                Some(e) if (!masked || revealed) && !hl_terms.is_empty() => {
-                    highlight_preview_lines(&e.full_text, &hl_terms, 4000)
-                }
-                _ => (Vec::new(), -1),
-            };
-            // Image entries have no text at all, so without this the preview pane
-            // was blank. A masked entry stays hidden until Reveal.
-            let (preview_image, has_preview_image) = match entry {
-                Some(e) if !masked || revealed => {
-                    let (img, has) = load_entry_image(&s.images, e);
-                    if has {
-                        (img, has)
-                    } else if let Some(p) = image_file_of(e) {
-                        // A copied *path* to an image file → show the image itself.
-                        match slint::Image::load_from_path(&p) {
-                            Ok(i) => (i, true),
-                            Err(_) => (img, has),
-                        }
-                    } else if let Some(path) = file_path_of(e) {
-                        // Any other file (PDF/video/audio/epub/doc…) → a QuickLook
-                        // thumbnail. Use the cache if present (instant); otherwise generate
-                        // it on a background thread and refresh the preview when ready, so
-                        // selection never blocks on qlmanage.
-                        let dir = data_dir().join("thumbnails");
-                        match magpie_platform::thumbnails::cached_thumbnail(&dir, &path, 512)
-                            .and_then(|tp| slint::Image::load_from_path(&tp).ok())
-                        {
-                            Some(i) => (i, true),
-                            None => {
-                                let weak = w.clone();
-                                std::thread::spawn(move || {
-                                    if magpie_platform::thumbnails::ensure_file_thumbnail(
-                                        &dir, &path, 512,
-                                    )
-                                    .is_some()
-                                    {
-                                        let _ = slint::invoke_from_event_loop(move || {
-                                            if let Some(ui) = weak.upgrade() {
-                                                ui.invoke_rebuild_preview();
-                                            }
-                                        });
-                                    }
-                                });
-                                (img, has)
+                    Some(e) => {
+                        // Cap each line's length so a single pathological very-long line
+                        // (e.g. minified JSON) can't reintroduce whole-string shaping in the
+                        // wrapped preview rows. The full entry is still copyable / openable.
+                        const LINE_CHAR_CAP: usize = 1200;
+                        let mut lines: Vec<SharedString> = Vec::new();
+                        let mut truncated = false;
+                        for (n, line) in e.full_text.split('\n').enumerate() {
+                            if n >= PREVIEW_LINE_CAP {
+                                truncated = true;
+                                break;
+                            }
+                            if line.chars().count() > LINE_CHAR_CAP {
+                                let head: String = line.chars().take(LINE_CHAR_CAP).collect();
+                                lines.push(SharedString::from(format!("{head}…")));
+                            } else {
+                                lines.push(SharedString::from(line));
                             }
                         }
-                    } else {
-                        (img, has)
+                        (lines, truncated)
                     }
-                }
-                _ => (slint::Image::default(), false),
-            };
-            // Web-link preview extras (screen 04): the domain, plus a cached OG
-            // thumbnail IF this URL was previously bookmarked. Never fetched here —
-            // page previews are fetched exclusively on explicit bookmark save.
-            let (is_link, link_domain, link_image, has_link_image) = match entry {
-                Some(e) if matches!(e.kind, Kind::Link) => {
-                    let domain = favicon::domain_of(&e.full_text).unwrap_or_default();
-                    let p = magpie_app::link_meta::preview_cache_path(
-                        &data_dir().join("previews"),
-                        e.full_text.trim(),
-                    );
-                    let (img, has) = match p.exists().then(|| slint::Image::load_from_path(&p)) {
-                        Some(Ok(img)) => (img, true),
-                        _ => (slint::Image::default(), false),
-                    };
-                    (true, domain, img, has)
-                }
-                _ => (false, String::new(), slint::Image::default(), false),
-            };
-            // Colour card (screen 17): scale + harmonies + format strings.
-            let to_slint = |c: magpie_core::color::Color| {
-                let (r, g, b) = c.rgb_u8();
-                slint::Color::from_rgb_u8(r, g, b)
-            };
-            let (is_color, cscale, charmony, cformats, cinverted) = match entry {
-                Some(e) if !masked || revealed => match magpie_core::color::parse(&e.full_text) {
-                    Some(c) => {
-                        let scale: Vec<slint::Color> = magpie_core::color::scale(c)
-                            .into_iter()
-                            .map(to_slint)
-                            .collect();
-                        let (t1, t2) = magpie_core::color::triad(c);
-                        let harmony: Vec<slint::Color> =
-                            [magpie_core::color::complement(c), t1, t2]
+                    None => (Vec::new(), false),
+                };
+                // Only SMALL entries get the selectable single-TextInput preview — that
+                // control shapes its whole string every frame (Slint has no intra-Text
+                // virtualization), so it's the scroll bottleneck. Everything larger uses the
+                // virtualized line ListView (only visible rows shaped), which scrolls
+                // instantly; whole-entry copy still works via ⌘C / the copy action.
+                const SELECTABLE_MAX_LINES: usize = 40;
+                const SELECTABLE_MAX_CHARS: usize = 2_000;
+                let selectable = match entry {
+                    Some(e)
+                        if (!masked || revealed)
+                            && !truncated
+                            && lines.len() <= SELECTABLE_MAX_LINES
+                            && e.full_text.len() <= SELECTABLE_MAX_CHARS =>
+                    {
+                        e.full_text.clone()
+                    }
+                    _ => String::new(),
+                };
+                // Search match highlighting: split the preview into lines with the matched
+                // query terms marked, and note the first matching line so the preview can
+                // scroll to it. Only when there's a text query and the entry is visible.
+                let hl_terms: Vec<String> = {
+                    let u = s.ui.lock().unwrap_or_else(|e| e.into_inner());
+                    magpie_core::parse_search_tokens(&u.text)
+                        .text
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|t| t.chars().count() >= 2)
+                        .map(|t| t.to_lowercase())
+                        .collect()
+                };
+                let (hl_lines, hl_first) = match entry {
+                    Some(e) if (!masked || revealed) && !hl_terms.is_empty() => {
+                        highlight_preview_lines(&e.full_text, &hl_terms, 4000)
+                    }
+                    _ => (Vec::new(), -1),
+                };
+                // Image entries have no text at all, so without this the preview pane
+                // was blank. A masked entry stays hidden until Reveal.
+                let (preview_image, has_preview_image) = match entry {
+                    Some(e) if !masked || revealed => {
+                        let (img, has) = load_entry_image(&s.images, e);
+                        if has {
+                            (img, has)
+                        } else if let Some(p) = image_file_of(e) {
+                            // A copied *path* to an image file → show the image itself.
+                            match slint::Image::load_from_path(&p) {
+                                Ok(i) => (i, true),
+                                Err(_) => (img, has),
+                            }
+                        } else if let Some(path) = file_path_of(e) {
+                            // Any other file (PDF/video/audio/epub/doc…) → a QuickLook
+                            // thumbnail. Use the cache if present (instant); otherwise generate
+                            // it on a background thread and refresh the preview when ready, so
+                            // selection never blocks on qlmanage.
+                            let dir = data_dir().join("thumbnails");
+                            match magpie_platform::thumbnails::cached_thumbnail(&dir, &path, 512)
+                                .and_then(|tp| slint::Image::load_from_path(&tp).ok())
+                            {
+                                Some(i) => (i, true),
+                                None => {
+                                    let weak = w.clone();
+                                    std::thread::spawn(move || {
+                                        if magpie_platform::thumbnails::ensure_file_thumbnail(
+                                            &dir, &path, 512,
+                                        )
+                                        .is_some()
+                                        {
+                                            let _ = slint::invoke_from_event_loop(move || {
+                                                if let Some(ui) = weak.upgrade() {
+                                                    ui.invoke_rebuild_preview();
+                                                }
+                                            });
+                                        }
+                                    });
+                                    (img, has)
+                                }
+                            }
+                        } else {
+                            (img, has)
+                        }
+                    }
+                    _ => (slint::Image::default(), false),
+                };
+                // Web-link preview extras (screen 04): the domain, plus a cached OG
+                // thumbnail IF this URL was previously bookmarked. Never fetched here —
+                // page previews are fetched exclusively on explicit bookmark save.
+                let (is_link, link_domain, link_image, has_link_image) = match entry {
+                    Some(e) if matches!(e.kind, Kind::Link) => {
+                        let domain = favicon::domain_of(&e.full_text).unwrap_or_default();
+                        let p = magpie_app::link_meta::preview_cache_path(
+                            &data_dir().join("previews"),
+                            e.full_text.trim(),
+                        );
+                        let (img, has) = match p.exists().then(|| slint::Image::load_from_path(&p))
+                        {
+                            Some(Ok(img)) => (img, true),
+                            _ => (slint::Image::default(), false),
+                        };
+                        (true, domain, img, has)
+                    }
+                    _ => (false, String::new(), slint::Image::default(), false),
+                };
+                // Colour card (screen 17): scale + harmonies + format strings.
+                let to_slint = |c: magpie_core::color::Color| {
+                    let (r, g, b) = c.rgb_u8();
+                    slint::Color::from_rgb_u8(r, g, b)
+                };
+                let (is_color, cscale, charmony, cformats, cinverted) = match entry {
+                    Some(e) if !masked || revealed => match magpie_core::color::parse(&e.full_text)
+                    {
+                        Some(c) => {
+                            let scale: Vec<slint::Color> = magpie_core::color::scale(c)
                                 .into_iter()
                                 .map(to_slint)
                                 .collect();
-                        let formats: Vec<SharedString> = vec![
-                            SharedString::from(c.to_hex()),
-                            SharedString::from(c.to_rgb_string()),
-                            SharedString::from(c.to_rgba_string()),
-                            SharedString::from(c.to_hsl_string()),
-                            SharedString::from(c.to_oklch_string()),
-                            SharedString::from(c.to_oklab_string()),
-                        ];
-                        (true, scale, harmony, formats, to_slint(c.invert()))
-                    }
-                    None => (
+                            let (t1, t2) = magpie_core::color::triad(c);
+                            let harmony: Vec<slint::Color> =
+                                [magpie_core::color::complement(c), t1, t2]
+                                    .into_iter()
+                                    .map(to_slint)
+                                    .collect();
+                            let formats: Vec<SharedString> = vec![
+                                SharedString::from(c.to_hex()),
+                                SharedString::from(c.to_rgb_string()),
+                                SharedString::from(c.to_rgba_string()),
+                                SharedString::from(c.to_hsl_string()),
+                                SharedString::from(c.to_oklch_string()),
+                                SharedString::from(c.to_oklab_string()),
+                            ];
+                            (true, scale, harmony, formats, to_slint(c.invert()))
+                        }
+                        None => (
+                            false,
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            slint::Color::default(),
+                        ),
+                    },
+                    _ => (
                         false,
                         Vec::new(),
                         Vec::new(),
                         Vec::new(),
                         slint::Color::default(),
                     ),
-                },
-                _ => (
-                    false,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    slint::Color::default(),
-                ),
-            };
-            if let Some(ui) = w.upgrade() {
-                ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
-                ui.set_preview_truncated(truncated);
-                ui.set_preview_text(SharedString::from(selectable));
-                ui.set_preview_image(preview_image);
-                ui.set_preview_has_image(has_preview_image);
-                ui.set_preview_is_color(is_color);
-                ui.set_color_scale(ModelRc::new(VecModel::from(cscale)));
-                ui.set_color_harmony(ModelRc::new(VecModel::from(charmony)));
-                ui.set_color_formats(ModelRc::new(VecModel::from(cformats)));
-                ui.set_color_inverted(cinverted);
-                ui.set_preview_is_link(is_link);
-                ui.set_preview_domain(SharedString::from(link_domain));
-                ui.set_preview_link_image(link_image);
-                ui.set_preview_has_link_image(has_link_image);
-                ui.set_preview_hl_lines(ModelRc::new(VecModel::from(hl_lines)));
-                ui.set_preview_hl_first(hl_first);
-            }
+                };
+                if let Some(ui) = w.upgrade() {
+                    ui.set_preview_lines(ModelRc::new(VecModel::from(lines)));
+                    ui.set_preview_truncated(truncated);
+                    ui.set_preview_text(SharedString::from(selectable));
+                    ui.set_preview_image(preview_image);
+                    ui.set_preview_has_image(has_preview_image);
+                    ui.set_preview_is_color(is_color);
+                    ui.set_color_scale(ModelRc::new(VecModel::from(cscale)));
+                    ui.set_color_harmony(ModelRc::new(VecModel::from(charmony)));
+                    ui.set_color_formats(ModelRc::new(VecModel::from(cformats)));
+                    ui.set_color_inverted(cinverted);
+                    ui.set_preview_is_link(is_link);
+                    ui.set_preview_domain(SharedString::from(link_domain));
+                    ui.set_preview_link_image(link_image);
+                    ui.set_preview_has_link_image(has_link_image);
+                    ui.set_preview_hl_lines(ModelRc::new(VecModel::from(hl_lines)));
+                    ui.set_preview_hl_first(hl_first);
+                }
+            });
         });
     }
     {

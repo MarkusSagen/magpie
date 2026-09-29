@@ -113,6 +113,10 @@ pub struct AppState {
     /// The entries shown by the last `refresh()`, cached so the preview/selection hot
     /// path (arrow keys) doesn't re-run the whole DB search on every keystroke.
     pub last_results: Mutex<Vec<Entry>>,
+    /// Coalesces rapid preview rebuilds: each `preview-select` bumps this and defers the
+    /// (expensive) rebuild; only the newest generation actually renders, so holding an
+    /// arrow key flies through the list instead of rebuilding the preview per keystroke.
+    pub preview_gen: std::sync::atomic::AtomicU64,
 }
 
 /// The last local-projects scan (screens 25/26).
@@ -355,6 +359,7 @@ mod tests {
             calc_graph_g: std::sync::Mutex::new(String::new()),
             suppress_capture: std::sync::Mutex::new(std::collections::HashSet::new()),
             last_results: std::sync::Mutex::new(Vec::new()),
+            preview_gen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 

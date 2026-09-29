@@ -97,6 +97,7 @@ fn state() -> AppState {
         calc_graph_g: Mutex::new(String::new()),
         suppress_capture: Mutex::new(std::collections::HashSet::new()),
         last_results: Mutex::new(Vec::new()),
+        preview_gen: std::sync::atomic::AtomicU64::new(0),
     }
 }
 
