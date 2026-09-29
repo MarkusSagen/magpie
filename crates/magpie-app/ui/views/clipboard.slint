@@ -670,16 +670,17 @@ export component ClipboardView inherits VerticalLayout {
                                 if !root.preview-has-image && root.preview-hl-lines.length == 0 && root.preview-text == "": Rectangle {
                                     plist := ListView {
                                         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                        for ln in root.preview-lines: Rectangle {
-                                            height: root.preview-font-size * 1.5;
+                                        // Wrapping rows with dynamic height: readable long
+                                        // lines, still virtualized (only visible rows shaped)
+                                        // so scroll stays fast. Line length is capped in Rust.
+                                        for ln in root.preview-lines: VerticalLayout {
+                                            padding-top: 1px;
+                                            padding-bottom: 1px;
                                             Text {
-                                                x: 0;
-                                                width: parent.width;
                                                 text: ln;
                                                 color: Theme.text;
                                                 font-size: root.preview-font-size;
-                                                overflow: elide;
-                                                vertical-alignment: center;
+                                                wrap: word-wrap;
                                             }
                                         }
                                     }

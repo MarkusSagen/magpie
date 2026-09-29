@@ -1,7 +1,7 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
@@ -30,6 +30,9 @@ export component NotesView inherits Rectangle {
     in property <string> note-body;
     in-out property <int> note-caret;
     in-out property <string> note-filter;
+    // Search-match highlight lines for the open note + first-match index (scroll target).
+    in property <[SearchLine]> note-hl-lines;
+    in property <int> note-hl-first;
     in-out property <int> note-id;
     in property <[string]> note-links;
     in property <string> note-provenance;
@@ -288,13 +291,36 @@ export component NotesView inherits Rectangle {
                                 }
                             }
                         }
+                        // Search active: show the note body as highlighted lines scrolled
+                        // to the first match (like the clipboard preview). Replaces the
+                        // preview/editor while searching so you see WHERE it matches.
+                        if root.note-hl-lines.length > 0 && !NoteRender.history: ListView {
+                            vertical-stretch: 1;
+                            viewport-y: root.note-hl-first > 0 ? -(root.note-hl-first * 22px) : 0px;
+                            for hl in root.note-hl-lines: VerticalLayout {
+                                padding-top: 1px; padding-bottom: 1px;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Text { text: hl.pre; color: Theme.text-dim; font-size: Theme.fs-body;
+                                        vertical-alignment: center; overflow: elide; }
+                                    if hl.mid != "": Rectangle {
+                                        background: Pal.accent; border-radius: 2px;
+                                        HorizontalLayout { padding-left: 1px; padding-right: 1px;
+                                            Text { text: hl.mid; color: Pal.on-accent; font-size: Theme.fs-body;
+                                                vertical-alignment: center; } }
+                                    }
+                                    Text { text: hl.post; color: Theme.text-dim; font-size: Theme.fs-body;
+                                        vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                }
+                            }
+                        }
                         // Rendered preview (screen 18) — the rich line model.
-                        if NoteRender.preview && !NoteRender.history: NotePreview {
+                        if root.note-hl-lines.length == 0 && NoteRender.preview && !NoteRender.history: NotePreview {
                             vertical-stretch: 1;
                         }
                         // Editor — a plain TextInput (not std TextEdit, which renders
                         // invisibly on the dark pane) with an explicit text colour.
-                        if !NoteRender.preview && !NoteRender.history: Flickable {
+                        if root.note-hl-lines.length == 0 && !NoteRender.preview && !NoteRender.history: Flickable {
                             vertical-stretch: 1;
                             viewport-width: self.width;
                             viewport-height: ned.preferred-height;

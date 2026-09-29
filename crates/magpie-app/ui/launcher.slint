@@ -297,6 +297,8 @@ export component LauncherWindow inherits Window {
     in property <[RefRow]> unlinked;
     callback link-mention(int, int);
     in-out property <string> note-filter;
+    in property <[SearchLine]> note-hl-lines;
+    in property <int> note-hl-first;
     // Distinct `#tag` tokens across all notes, for the tag-filter chip strip.
     in property <[string]> note-all-tags;
     // Active tag filter ("" = all notes).
@@ -598,6 +600,8 @@ export component LauncherWindow inherits Window {
             note-body: root.note-body;
             note-caret <=> root.note-caret;
             note-filter <=> root.note-filter;
+            note-hl-lines: root.note-hl-lines;
+            note-hl-first: root.note-hl-first;
             note-id <=> root.note-id;
             note-links: root.note-links;
             note-provenance: root.note-provenance;

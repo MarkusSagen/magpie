@@ -2224,6 +2224,25 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
     )));
     ui.set_note_id(open_id);
     ui.set_note_body(SharedString::from(body.clone()));
+    // Search-match highlighting for the open note: same as the clipboard preview — when
+    // the notes search box has terms, show the body as highlighted lines scrolled to the
+    // first match, so you see WHERE the note matches.
+    {
+        let nf = ui.get_note_filter();
+        let hl_terms: Vec<String> = nf
+            .as_str()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| t.chars().count() >= 2)
+            .map(|t| t.to_lowercase())
+            .collect();
+        let (nhl, nhl_first) = if hl_terms.is_empty() {
+            (Vec::new(), -1)
+        } else {
+            highlight_preview_lines(&body, &hl_terms, 4000)
+        };
+        ui.set_note_hl_lines(ModelRc::new(VecModel::from(nhl)));
+        ui.set_note_hl_first(nhl_first);
+    }
     ui.set_note_provenance(SharedString::from(prov));
     refresh_note_render(ui, &body);
     // A stale `[[…` popup from the previously-open note shouldn't linger.
@@ -8726,6 +8745,10 @@ pub fn start() {
                     )
                 }
                 Some(e) => {
+                    // Cap each line's length so a single pathological very-long line
+                    // (e.g. minified JSON) can't reintroduce whole-string shaping in the
+                    // wrapped preview rows. The full entry is still copyable / openable.
+                    const LINE_CHAR_CAP: usize = 1200;
                     let mut lines: Vec<SharedString> = Vec::new();
                     let mut truncated = false;
                     for (n, line) in e.full_text.split('\n').enumerate() {
@@ -8733,17 +8756,24 @@ pub fn start() {
                             truncated = true;
                             break;
                         }
-                        lines.push(SharedString::from(line));
+                        if line.chars().count() > LINE_CHAR_CAP {
+                            let head: String = line.chars().take(LINE_CHAR_CAP).collect();
+                            lines.push(SharedString::from(format!("{head}…")));
+                        } else {
+                            lines.push(SharedString::from(line));
+                        }
                     }
                     (lines, truncated)
                 }
                 None => (Vec::new(), false),
             };
-            // For normal-size, unmasked entries, also expose the joined text so the
-            // UI can show a selectable/copyable TextEdit. Huge entries keep
-            // preview-text empty and fall back to the fast virtualized line list.
-            const SELECTABLE_MAX_LINES: usize = 800;
-            const SELECTABLE_MAX_CHARS: usize = 40_000;
+            // Only SMALL entries get the selectable single-TextInput preview — that
+            // control shapes its whole string every frame (Slint has no intra-Text
+            // virtualization), so it's the scroll bottleneck. Everything larger uses the
+            // virtualized line ListView (only visible rows shaped), which scrolls
+            // instantly; whole-entry copy still works via ⌘C / the copy action.
+            const SELECTABLE_MAX_LINES: usize = 40;
+            const SELECTABLE_MAX_CHARS: usize = 2_000;
             let selectable = match entry {
                 Some(e)
                     if (!masked || revealed)
