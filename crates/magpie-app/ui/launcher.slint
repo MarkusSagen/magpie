@@ -19,6 +19,7 @@ import { SearchStore } from "search_store.slint";
 import { TimeStore } from "time_store.slint";
 import { ProjectsStore } from "projects_store.slint";
 import { SecretsStore } from "secrets_store.slint";
+import { TransformOpts } from "transform_store.slint";
 export { DataStore }
 export { CalcStore }
 export { DateStore }
@@ -29,6 +30,7 @@ export { SearchStore }
 export { TimeStore }
 export { ProjectsStore }
 export { SecretsStore }
+export { TransformOpts }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { GraphView } from "views/graph.slint";
@@ -88,8 +90,6 @@ export component LauncherWindow inherits Window {
     // Transforms (⌘T) palette state.
     in-out property <string> transform-input;
     in-out property <int> transform-selected;
-    pure callback transform-run(int, string) -> string;
-    pure callback transform-stats(int, string) -> string;
     pure callback transform-input-summary(string) -> string;
     callback transform-action(string, int);
     // Inline answer card (dates / math / units) shown above the clipboard results.
@@ -456,6 +456,8 @@ export component LauncherWindow inherits Window {
             set-app-filter(a0) => { root.set-app-filter(a0); }
             set-time-filter(a0) => { root.set-time-filter(a0); }
             transform-input <=> root.transform-input;
+            transform-selected <=> root.transform-selected;
+            transform-action(a0, a1) => { root.transform-action(a0, a1); }
             has-answer <=> root.has-answer;
             answer-kind <=> root.answer-kind;
             answer-display <=> root.answer-display;
@@ -781,8 +783,6 @@ export component LauncherWindow inherits Window {
             mode <=> root.mode;
             transform-selected <=> root.transform-selected;
             transform-input: root.transform-input;
-            transform-run(a0, a1) => { return root.transform-run(a0, a1); }
-            transform-stats(a0, a1) => { return root.transform-stats(a0, a1); }
             transform-input-summary(a0) => { return root.transform-input-summary(a0); }
             transform-action(a0, a1) => { root.transform-action(a0, a1); }
         }

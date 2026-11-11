@@ -6,7 +6,7 @@ use crate::{
     ProjectsStore, RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow,
     SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
     SearchTreeRow, SecretRow, SecretsStore, SlotItem, SnippetRow, SnippetsStore, SuggestRow,
-    TaskRow, TimeEntryRow, TimeStore, WorldClockRow, WorldClockStore,
+    TaskRow, TimeEntryRow, TimeStore, TransformOpts, WorldClockRow, WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -7342,23 +7342,38 @@ pub fn start() {
             let _ = magpie_app::config::save(&cfg, &cfg_path);
         });
     }
-    // Transforms (⌘T) palette. `transform_run` is a pure preview of the selected
-    // transform applied to the input; `transform_action` pastes / copies / saves it.
+    // Transforms (⌘T) palette. `TransformOpts.run`/`.stats` are pure previews of the
+    // selected transform applied to the input (join rows honour the Quote / Separator /
+    // Wrap fields); `transform_action` pastes / copies / saves the result.
     {
-        ui.on_transform_run(move |idx, input| {
-            SharedString::from(magpie_core::transforms::run_index_display(
-                idx as usize,
-                input.as_str(),
-            ))
+        use magpie_core::transforms::{
+            default_overrides, run_index_display_with, run_index_stats_with, JoinOverrides,
+        };
+        let opts = ui.global::<TransformOpts>();
+        let ov = |q: SharedString, s: SharedString, w: SharedString| JoinOverrides {
+            quote: q.into(),
+            separator: s.into(),
+            wrap: w.into(),
+        };
+        opts.on_run(move |idx, input, q, s, w| {
+            let o = ov(q, s, w);
+            run_index_display_with(idx as usize, input.as_str(), Some(&o)).into()
         });
-    }
-    {
-        ui.on_transform_stats(move |idx, input| {
-            SharedString::from(magpie_core::transforms::run_index_stats(
-                idx as usize,
-                input.as_str(),
-            ))
+        opts.on_stats(move |idx, input, q, s, w| {
+            let o = ov(q, s, w);
+            run_index_stats_with(idx as usize, input.as_str(), Some(&o)).into()
         });
+        opts.on_default_opt(|idx, field| {
+            default_overrides(idx as usize)
+                .map(|o| match field {
+                    0 => o.quote,
+                    1 => o.separator,
+                    _ => o.wrap,
+                })
+                .unwrap_or_default()
+                .into()
+        });
+        opts.on_has_opts(|idx| default_overrides(idx as usize).is_some());
     }
     {
         ui.on_transform_input_summary(move |input| {

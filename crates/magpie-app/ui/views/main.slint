@@ -7,6 +7,7 @@ import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { Keycap } from "../components/keycap.slint";
+import { TransformOpts } from "../transform_store.slint";
 import { ClipboardView } from "clipboard.slint";
 import { StatsView } from "stats.slint";
 import { DataView } from "data.slint";
@@ -143,7 +144,6 @@ export component MainView inherits VerticalLayout {
     // Transforms (⌘T) palette.
     in-out property <string> transform-input;
     in-out property <int> transform-selected;
-    pure callback transform-run(int, string) -> string;
     callback transform-action(string, int);
     // Inline answer card (dates / math / units).
     in-out property <bool> has-answer;
@@ -274,14 +274,14 @@ export component MainView inherits VerticalLayout {
                                 if root.mode == "transform" {
                                     if event.text == Key.Escape { root.mode = "list"; return accept; }
                                     if event.text == Key.UpArrow { if root.transform-selected > 0 { root.transform-selected -= 1; } return accept; }
-                                    if event.text == Key.DownArrow { if root.transform-selected < 8 { root.transform-selected += 1; } return accept; }
+                                    if event.text == Key.DownArrow { if root.transform-selected < 17 { root.transform-selected += 1; } return accept; }
                                     if event.text == Key.Return {
-                                        root.transform-action(root.transform-run(root.transform-selected, root.transform-input), event.modifiers.alt ? 2 : 0);
+                                        root.transform-action(TransformOpts.run(root.transform-selected, root.transform-input, TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap), event.modifiers.alt ? 2 : 0);
                                         if !event.modifiers.alt { root.mode = "list"; }
                                         return accept;
                                     }
                                     if event.modifiers.control && event.text == "c" {
-                                        root.transform-action(root.transform-run(root.transform-selected, root.transform-input), 1);
+                                        root.transform-action(TransformOpts.run(root.transform-selected, root.transform-input, TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap), 1);
                                         return accept;
                                     }
                                     return accept;

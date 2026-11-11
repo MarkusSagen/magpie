@@ -1006,14 +1006,122 @@ pub fn input_summary(input: &str) -> String {
 /// footer: e.g. `4 lines in · 1 line out · 32 chars`. Counts non-empty logical
 /// lines on the input side and characters on the output side.
 pub fn run_index_stats(i: usize, input: &str) -> String {
+    stats_for(input, &run_index_display(i, input))
+}
+
+fn stats_for(input: &str, out: &str) -> String {
     let lines_in = input.lines().filter(|l| !l.trim().is_empty()).count();
-    let out = run_index_display(i, input);
     let lines_out = out.lines().count().max(if out.is_empty() { 0 } else { 1 });
     let chars_out = out.chars().count();
     let li = if lines_in == 1 { "line" } else { "lines" };
     let lo = if lines_out == 1 { "line" } else { "lines" };
     let ch = if chars_out == 1 { "char" } else { "chars" };
     format!("{lines_in} {li} in · {lines_out} {lo} out · {chars_out} {ch}")
+}
+
+/// User-editable options for the join-style transforms (SQL IN clause, Wrap and join):
+/// the ⌘T palette's free-text Quote / Separator / Wrap fields (screen 05).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinOverrides {
+    /// Put on both sides of each item; empty = no quoting.
+    pub quote: String,
+    /// Join string; `\n` / `\t` escapes are interpreted.
+    pub separator: String,
+    /// Wrap spec: `"( )"`, `"[]"`, a single opener, or empty (see [`parse_wrap_spec`]).
+    pub wrap: String,
+}
+
+/// Default palette fields for transform row `i`, or `None` when the row has no
+/// join options. These reproduce the row's `run` output exactly.
+pub fn default_overrides(i: usize) -> Option<JoinOverrides> {
+    match KINDS.get(i)? {
+        TransformKind::SqlInClause => Some(JoinOverrides {
+            quote: "'".into(),
+            separator: ", ".into(),
+            wrap: "( )".into(),
+        }),
+        TransformKind::WrapJoin => Some(JoinOverrides {
+            quote: String::new(),
+            separator: ", ".into(),
+            wrap: String::new(),
+        }),
+        _ => None,
+    }
+}
+
+/// Split a wrap spec into (open, close): whitespace-separated pair `"( )"` /
+/// `"<< >>"`; a single 2-char token `"[]"` splits in half; any other single token is
+/// an opener only; empty → no wrap.
+pub fn parse_wrap_spec(spec: &str) -> (String, String) {
+    let parts: Vec<&str> = spec.split_whitespace().collect();
+    match parts.as_slice() {
+        [] => (String::new(), String::new()),
+        [one] => {
+            let chars: Vec<char> = one.chars().collect();
+            if chars.len() == 2 {
+                (chars[0].to_string(), chars[1].to_string())
+            } else {
+                (one.to_string(), String::new())
+            }
+        }
+        [open, rest @ ..] => (open.to_string(), rest.join(" ")),
+    }
+}
+
+/// Interpret `\n`, `\t` and `\\` in a separator field.
+pub fn unescape_sep(sep: &str) -> String {
+    let mut out = String::with_capacity(sep.len());
+    let mut it = sep.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// Join the non-empty trimmed lines of `input` using user overrides.
+pub fn join_lines_with(input: &str, o: &JoinOverrides) -> Result<String, TransformError> {
+    check_size(input)?;
+    let normalized = normalize_line_endings(input);
+    let items: Vec<String> = normalized
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| format!("{q}{line}{q}", q = o.quote))
+        .collect();
+    let (open, close) = parse_wrap_spec(&o.wrap);
+    Ok(format!(
+        "{open}{}{close}",
+        items.join(&unescape_sep(&o.separator))
+    ))
+}
+
+/// Like [`run_index_display`], but join-style rows use `opts` when given.
+pub fn run_index_display_with(i: usize, input: &str, opts: Option<&JoinOverrides>) -> String {
+    match (opts, default_overrides(i)) {
+        (Some(o), Some(_)) => match join_lines_with(input, o) {
+            Ok(s) => s,
+            Err(e) => format!("⚠ {e}"),
+        },
+        _ => run_index_display(i, input),
+    }
+}
+
+/// Like [`run_index_stats`], but computed over [`run_index_display_with`].
+pub fn run_index_stats_with(i: usize, input: &str, opts: Option<&JoinOverrides>) -> String {
+    stats_for(input, &run_index_display_with(i, input, opts))
 }
 
 // ---------------------------------------------------------------------------
@@ -1746,5 +1854,67 @@ mod tests {
         for err in errors {
             assert!(!err.to_string().is_empty());
         }
+    }
+
+    // -- Join overrides (palette Quote / Separator / Wrap) -------------------
+
+    #[test]
+    fn default_overrides_reproduce_default_outputs() {
+        let input = "1042\n1043\n\n 1057 \n1101\n";
+        for i in [0, 1] {
+            let o = default_overrides(i).unwrap();
+            assert_eq!(
+                run_index_display_with(i, input, Some(&o)),
+                run_index_display(i, input),
+                "row {i}"
+            );
+        }
+        assert_eq!(
+            run_index_display_with(0, input, None),
+            "('1042', '1043', '1057', '1101')"
+        );
+    }
+
+    #[test]
+    fn custom_join_overrides() {
+        let o = JoinOverrides {
+            quote: "\"".into(),
+            separator: "\\n".into(),
+            wrap: "[]".into(),
+        };
+        assert_eq!(join_lines_with("a\nb", &o).unwrap(), "[\"a\"\n\"b\"]");
+        let o = JoinOverrides {
+            quote: "`".into(),
+            separator: " | ".into(),
+            wrap: "<< >>".into(),
+        };
+        assert_eq!(join_lines_with("x\ny", &o).unwrap(), "<<`x` | `y`>>");
+    }
+
+    #[test]
+    fn wrap_spec_and_unescape_table() {
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(parse_wrap_spec(""), pair("", ""));
+        assert_eq!(parse_wrap_spec("( )"), pair("(", ")"));
+        assert_eq!(parse_wrap_spec("[]"), pair("[", "]"));
+        assert_eq!(parse_wrap_spec("{"), pair("{", ""));
+        assert_eq!(parse_wrap_spec("ARRAY[ ]"), pair("ARRAY[", "]"));
+        assert_eq!(unescape_sep(",\\t"), ",\t");
+        assert_eq!(unescape_sep("a\\\\b"), "a\\b");
+        assert_eq!(unescape_sep("\\x"), "\\x");
+    }
+
+    #[test]
+    fn non_join_rows_ignore_overrides() {
+        assert!(default_overrides(2).is_none());
+        let o = default_overrides(0).unwrap();
+        assert_eq!(
+            run_index_display_with(2, "b\na", Some(&o)),
+            run_index_display(2, "b\na")
+        );
+        assert_eq!(
+            run_index_stats_with(0, "a\nb", Some(&o)),
+            run_index_stats(0, "a\nb")
+        );
     }
 }

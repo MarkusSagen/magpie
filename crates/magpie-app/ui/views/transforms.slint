@@ -1,17 +1,44 @@
-import { Theme } from "../theme.slint";
+import { Theme, Pal } from "../theme.slint";
 import { Keycap } from "../components/keycap.slint";
+import { TransformOpts } from "../transform_store.slint";
 
 struct TxRow { group: string, name: string, hint: string }
 
+// One labelled 72×28 mono option input (Quote / Separator / Wrap).
+component OptField inherits VerticalLayout {
+    in property <string> label;
+    in-out property <string> value;
+    spacing: 5px;
+    Text { text: root.label; color: Theme.text-faint; font-size: Theme.fs-xs; }
+    Rectangle {
+        width: 72px; height: 28px;
+        background: Theme.bg-panel;
+        border-radius: Theme.r-sm;
+        border-width: 1px;
+        border-color: input.has-focus ? Pal.accent : Theme.line-strong;
+        clip: true;
+        HorizontalLayout {
+            padding-left: 8px; padding-right: 8px;
+            input := TextInput {
+                text <=> root.value;
+                color: Theme.text;
+                font-family: Theme.mono;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                single-line: true;
+            }
+        }
+    }
+}
+
 // ⌘T Transforms palette (screen 05): an input chip in the header, a grouped
 // transform list on the left, and a live result + stats on the right. The result
-// and stats are computed by the pure `transform-run` / `transform-stats` callbacks.
+// and stats are computed by the pure `TransformOpts.run` / `.stats` callbacks, which
+// also take the join options (Quote / Separator / Wrap) for SQL IN + Wrap and join.
 export component TransformsView inherits Rectangle {
     in-out property <string> mode;
     in-out property <int> transform-selected;
     in property <string> transform-input;
-    pure callback transform-run(int, string) -> string;
-    pure callback transform-stats(int, string) -> string;
     pure callback transform-input-summary(string) -> string;
     callback transform-action(string, int); // 0=paste, 1=copy, 2=save-as-entry
 
@@ -35,8 +62,15 @@ export component TransformsView inherits Rectangle {
         { group: "Case", name: "UPPERCASE", hint: "" },
         { group: "Case", name: "lowercase", hint: "" },
     ];
-    property <string> result: root.transform-run(root.transform-selected, root.transform-input);
-    property <string> stats: root.transform-stats(root.transform-selected, root.transform-input);
+    property <string> result: TransformOpts.run(root.transform-selected, root.transform-input,
+        TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap);
+    property <string> stats: TransformOpts.stats(root.transform-selected, root.transform-input,
+        TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap);
+    property <bool> show-opts: TransformOpts.has-opts(root.transform-selected);
+
+    // Fresh defaults whenever the palette opens or the selected transform changes.
+    init => { TransformOpts.reset(root.transform-selected); }
+    changed transform-selected => { TransformOpts.reset(root.transform-selected); }
 
     background: Theme.scrim;
     TouchArea { clicked => { root.mode = "list"; } }
@@ -137,6 +171,27 @@ export component TransformsView inherits Rectangle {
                                 wrap: word-wrap;
                                 vertical-stretch: 1;
                             }
+                        }
+                    }
+                    // Join options (SQL IN clause / Wrap and join only), per screen 05.
+                    if root.show-opts: FocusScope {
+                        // Keys typed into an option field don't reach the main handler:
+                        // ↵ pastes (⌥↵ saves), Esc goes back — same as the palette.
+                        key-pressed(event) => {
+                            if event.text == Key.Escape { root.mode = "list"; return accept; }
+                            if event.text == Key.Return {
+                                root.transform-action(root.result, event.modifiers.alt ? 2 : 0);
+                                if !event.modifiers.alt { root.mode = "list"; }
+                                return accept;
+                            }
+                            return reject;
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            OptField { label: "Quote"; value <=> TransformOpts.quote; }
+                            OptField { label: "Separator"; value <=> TransformOpts.sep; }
+                            OptField { label: "Wrap"; value <=> TransformOpts.wrap; }
                         }
                     }
                     Text { text: root.stats; color: Theme.text-faint; font-size: Theme.fs-xs; }
