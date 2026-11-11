@@ -48,6 +48,7 @@ export global Theme {
     // Nerd Font Mono — its Private-Use-Area glyphs render copied Nerd Font icons,
     // and it's the code / clipboard-content / preview face. `ui` (Geist) stays the
     // sans face for chrome (sidebar, titles). Emoji fall back to the OS colour font.
+    // NB: it has no U+21B5 `↵` (tofu) — key labels use `⏎` (U+23CE), present in both faces.
     out property <string> mono: "JetBrainsMono Nerd Font Mono";
     out property <string> ui: "Geist";
 
