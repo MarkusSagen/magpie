@@ -766,6 +766,8 @@ export component LauncherWindow inherits Window {
             search-notes: root.search-notes;
             search-query <=> root.search-query;
             search-tasks: root.search-tasks;
+            favorites: root.favorites;
+            activate-favorite(a0) => { root.activate-favorite(a0); }
         }
 
         // ---- Help modal (centered overlay) ----

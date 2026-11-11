@@ -6347,6 +6347,25 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // Find everywhere (⌘⇧F) with an empty query: favorites on top.
+                        "find" => {
+                            if let Ok(store) = st.store.lock() {
+                                let none =
+                                    store.list_favorites().map(|v| v.is_empty()).unwrap_or(true);
+                                if none {
+                                    let _ = store.add_favorite(
+                                        "quicklink",
+                                        "https://github.com/search?q={query}",
+                                        "GitHub search",
+                                        "gh",
+                                        now_ms(),
+                                    );
+                                }
+                            }
+                            refresh_favorites(&ui, &st);
+                            ui.set_search_query(SharedString::from(""));
+                            ui.set_search_mode(true);
+                        }
                         "actions" => ui.invoke_open_actions(),
                         "filters" => ui.invoke_open_search(),
                         // Filter popover with an active time filter (chip + badge visible).
