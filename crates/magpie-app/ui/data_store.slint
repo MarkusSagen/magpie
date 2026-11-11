@@ -1,4 +1,4 @@
-import { DataColumn, RecentData, ChartPoint } from "types.slint";
+import { DataColumn, RecentData, ChartPoint, AxisTick } from "types.slint";
 
 // Data view state (screens 13/14). A global so Rust can set it once
 // (`ui.global::<DataStore>()`) and the DataView reads it directly, instead of
@@ -24,6 +24,13 @@ export global DataStore {
     in-out property <string> chart-label-name;
     in-out property <bool> chart-log;
     in-out property <string> chart-fit;
+    // Axis ticks (frac 0..1 along the span) + the least-squares fit in normalized
+    // plot space (y at x=0 and x=1), drawn dashed on Line/Scatter (screen 14).
+    in-out property <[AxisTick]> chart-x-ticks;
+    in-out property <[AxisTick]> chart-y-ticks;
+    in-out property <bool> chart-has-fit;
+    in-out property <float> chart-fit-y0;
+    in-out property <float> chart-fit-y1;
     callback chart-toggle();
     callback chart-set-type(int);
     callback chart-cycle-x();

@@ -1,5 +1,5 @@
 use crate::{
-    ActionItem, AppItem, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
+    ActionItem, AppItem, AxisTick, Bar, BoardColumn, BookmarkRow, CalDay, CalMonth, CalMonthLabel,
     CalYearCell, CalcRow, CalcStore, ChartPoint, ClipRow, DataColumn, DataStore, DateStore,
     EntryRow, FavoriteRow, FileTarget, GraphEdge, GraphNode, JobRow, JournalRow, LauncherWindow,
     MdLineVM, MdSpan, NoteRender, NoteRow, NoteVersionRow, Popover, ProjTaskRow, ProjectListRow,
@@ -1400,11 +1400,33 @@ fn compute_chart(ui: &LauncherWindow, state: &AppState) {
         } else {
             1.0
         };
-        (Some(slope), format!("Fit: slope {slope:.2} · r² {r2:.2}"))
+        (
+            Some((slope, intercept)),
+            format!("Fit: slope {slope:.2} · r² {r2:.2}"),
+        )
     } else {
         (None, String::new())
     };
-    let _ = slope;
+    // Fit line in normalized plot space: y at the left (x=0) and right (x=1) edges.
+    ds.set_chart_has_fit(slope.is_some());
+    if let Some((m, b)) = slope {
+        let ny = |x: f64| ((m * x + b - ymin) / yspan) as f32;
+        ds.set_chart_fit_y0(ny(xmin));
+        ds.set_chart_fit_y1(ny(xmin + xspan));
+    }
+    // Axis ticks over the same span the points are normalized against.
+    let ticks = |lo: f64, hi: f64| -> ModelRc<AxisTick> {
+        let v: Vec<AxisTick> = magpie_core::axis::axis_ticks(lo, hi, chart.log, 5)
+            .into_iter()
+            .map(|t| AxisTick {
+                frac: t.frac as f32,
+                label: t.label.into(),
+            })
+            .collect();
+        ModelRc::new(VecModel::from(v))
+    };
+    ds.set_chart_x_ticks(ticks(xmin, xmin + xspan));
+    ds.set_chart_y_ticks(ticks(ymin, ymin + yspan));
     let chart_pts: Vec<ChartPoint> = pts
         .iter()
         .map(|p| ChartPoint {

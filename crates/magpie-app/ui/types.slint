@@ -248,6 +248,12 @@ export struct ChartPoint {
     label: string,
 }
 
+// One Data-chart axis tick: position along the plotted span (0..1) + label.
+export struct AxisTick {
+    frac: float,
+    label: string,
+}
+
 // Accent + the text colour that is legible ON the accent. White-on-accent only
 // reaches ~2.9:1, so filled controls use `on-accent` for their label.
 // Theme tokens (light + dark). `dark` is wired from the `LauncherWindow` root

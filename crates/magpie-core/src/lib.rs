@@ -14,6 +14,7 @@
 //! ```
 
 pub mod appcat;
+pub mod axis;
 pub mod bookmarks;
 pub mod calc_history;
 pub mod calendar;

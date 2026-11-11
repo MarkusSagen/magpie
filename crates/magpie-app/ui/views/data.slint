@@ -234,25 +234,63 @@ export component DataView inherits HorizontalLayout {
                     horizontal-stretch: 1;
                     clip: true;
                     canvas := Rectangle {
-                        // Gridlines + axes (screen 14). Numeric tick labels need the
-                        // real data range (not carried into Slint) — deferred.
-                        for gy in [0.0, 0.25, 0.5, 0.75, 1.0]: Rectangle {
-                            x: 20px;
-                            width: canvas.width - 40px;
-                            height: 1px;
-                            y: (1 - gy) * (canvas.height - 40px) + 10px;
+                        // Plot area inside the canvas: room on the left for y tick labels
+                        // and below for x tick labels (screen 14).
+                        property <length> pl: 56px;
+                        property <length> pr: 16px;
+                        property <length> pt: 10px;
+                        property <length> pb: 30px;
+                        property <length> pw: self.width - pl - pr;
+                        property <length> ph: self.height - pt - pb;
+                        property <bool> dots: DataStore.chart-type == 0 || DataStore.chart-type == 2;
+                        // Gridlines + y labels at the "nice" y ticks.
+                        for t in DataStore.chart-y-ticks: Rectangle {
+                            x: canvas.pl; width: canvas.pw; height: 1px;
+                            y: (1 - t.frac) * canvas.ph + canvas.pt;
                             background: Theme.line;
                         }
-                        Rectangle { x: 20px; y: 10px; width: 1px; height: canvas.height - 40px; background: Theme.line-strong; }
-                        Rectangle { x: 20px; y: canvas.height - 30px; width: canvas.width - 40px; height: 1px; background: Theme.line-strong; }
+                        for t in DataStore.chart-y-ticks: Text {
+                            text: t.label;
+                            x: 0; width: canvas.pl - 8px;
+                            y: (1 - t.frac) * canvas.ph + canvas.pt - 7px;
+                            horizontal-alignment: right;
+                            color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-xs;
+                        }
+                        // Vertical gridlines + x labels at the x ticks.
+                        for t in DataStore.chart-x-ticks: Rectangle {
+                            x: t.frac * canvas.pw + canvas.pl; width: 1px;
+                            y: canvas.pt; height: canvas.ph;
+                            background: Theme.line;
+                        }
+                        for t in DataStore.chart-x-ticks: Text {
+                            text: t.label;
+                            x: t.frac * canvas.pw + canvas.pl - 40px; width: 80px;
+                            y: canvas.pt + canvas.ph + 8px;
+                            horizontal-alignment: center;
+                            color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-xs;
+                        }
+                        // Axes.
+                        Rectangle { x: canvas.pl; y: canvas.pt; width: 1px; height: canvas.ph; background: Theme.line-strong; }
+                        Rectangle { x: canvas.pl; y: canvas.pt + canvas.ph; width: canvas.pw; height: 1px; background: Theme.line-strong; }
+                        // Dashed least-squares fit (Line/Scatter), clipped to the plot.
+                        for k in 48: Rectangle {
+                            property <float> fx: (k + 0.5) / 48;
+                            property <float> fy: DataStore.chart-fit-y0 + (DataStore.chart-fit-y1 - DataStore.chart-fit-y0) * fx;
+                            visible: canvas.dots && DataStore.chart-has-fit && fy >= 0 && fy <= 1;
+                            x: fx * canvas.pw + canvas.pl - 2px;
+                            y: (1 - fy) * canvas.ph + canvas.pt;
+                            width: 4px; height: 1px;
+                            background: Theme.text-faint;
+                        }
                         for p[i] in DataStore.chart-points: Rectangle {
-                            property <length> px: p.x * (canvas.width - 40px) + 20px;
-                            property <length> py: (1 - p.y) * (canvas.height - 40px) + 10px;
+                            property <length> px: p.x * canvas.pw + canvas.pl;
+                            property <length> py: (1 - p.y) * canvas.ph + canvas.pt;
                             property <bool> bars: DataStore.chart-type == 1 || DataStore.chart-type == 3;
                             x: bars ? px - 6px : px - 4px;
-                            y: bars ? py : canvas.height - 30px;
+                            // Bars grow up from the x axis; dots sit ON their value.
+                            y: bars ? py : py - 4px;
                             width: bars ? 12px : 8px;
-                            height: bars ? (canvas.height - 30px - py) : 8px;
+                            height: bars ? (canvas.pt + canvas.ph - py) : 8px;
                             border-radius: bars ? 2px : 4px;
                             background: Theme.accent;
                         }
@@ -260,9 +298,9 @@ export component DataView inherits HorizontalLayout {
                             text: p.label;
                             color: Theme.text-dim;
                             font-size: Theme.fs-xs;
-                            x: p.x * (canvas.width - 40px) + 20px + 8px;
-                            y: (1 - p.y) * (canvas.height - 40px) + 10px - 6px;
-                            visible: (DataStore.chart-type == 0 || DataStore.chart-type == 2) && p.label != "";
+                            x: p.x * canvas.pw + canvas.pl + 8px;
+                            y: (1 - p.y) * canvas.ph + canvas.pt - 8px;
+                            visible: canvas.dots && p.label != "";
                         }
                     }
                 }
