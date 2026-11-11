@@ -120,6 +120,20 @@ export component CalcView inherits VerticalLayout {
             }
         }
         Rectangle { vertical-stretch: 1; }
+        // Footer (screen 16).
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout { alignment: center;
+                Text { text: "Click an hour or [ ] to step · try \"3pm pst to cet\" in search";
+                    color: Theme.text-faint; font-size: 12px; overflow: elide; } }
+            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout { alignment: center; Text { text: "Copy summary"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+            VerticalLayout { alignment: center; Keycap { text: "⌘C"; strong: true; } }
+            VerticalLayout { alignment: center; Text { text: "Shift hour"; color: Theme.text-dim; font-size: 12.5px; } }
+            VerticalLayout { alignment: center; HorizontalLayout { spacing: 3px; Keycap { text: "["; } Keycap { text: "]"; } } }
+            VerticalLayout { alignment: center; Text { text: "Add city"; color: Theme.text-dim; font-size: 12.5px; } }
+            VerticalLayout { alignment: center; Keycap { text: "⌘N"; } }
+        }
     }
 
     // ============================ HISTORY (11) ============================

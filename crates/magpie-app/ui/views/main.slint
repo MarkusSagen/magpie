@@ -9,6 +9,7 @@ import { BoardCard } from "../components/board_card.slint";
 import { Keycap } from "../components/keycap.slint";
 import { TransformOpts } from "../transform_store.slint";
 import { SearchStore } from "../search_store.slint";
+import { WorldClockStore } from "../worldclock_store.slint";
 import { ClipboardView } from "clipboard.slint";
 import { StatsView } from "stats.slint";
 import { DataView } from "data.slint";
@@ -405,6 +406,16 @@ export component MainView inherits VerticalLayout {
                                 }
                                 // ---- calculator view: ↵ commit/copy, Tab reuse, ⌘⌫ delete ----
                                 if root.view == "calculator" {
+                                    // World clock tab (screen 16): ⌘C copy summary, ⌘N add
+                                    // city, [ ] (or ←/→ with an empty query) shift the hour.
+                                    if CalcStore.worldclock-open {
+                                        if event.modifiers.control && event.text == "c" { WorldClockStore.copy-summary(); return accept; }
+                                        if event.modifiers.control && event.text == "n" { WorldClockStore.add-city(); return accept; }
+                                        if !event.modifiers.control && root.query == "" {
+                                            if event.text == "[" || event.text == Key.LeftArrow { WorldClockStore.shift-hour(-1); return accept; }
+                                            if event.text == "]" || event.text == Key.RightArrow { WorldClockStore.shift-hour(1); return accept; }
+                                        }
+                                    }
                                     if CalcStore.graphs-open {
                                         if event.text == Key.Escape { CalcStore.close-graphs(); return accept; }
                                     }
