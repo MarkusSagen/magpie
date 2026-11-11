@@ -994,9 +994,10 @@ fn unit_from_word(w: &str) -> Option<UnitDef> {
         // ---- Speed (base: m/s). ----
         "m/s" | "mps" => speed(Rat::int(1), "m/s"),
         "km/h" | "kmh" | "kph" => speed(Rat::new(5, 18).unwrap(), "km/h"),
-        "mph" => speed(Rat::new(1397, 3125).unwrap(), "mph"), // 0.44704 m/s exactly
+        "mph" | "mi/h" => speed(Rat::new(1397, 3125).unwrap(), "mph"), // 0.44704 m/s exactly
+        "km/s" => speed(Rat::int(1000), "km/s"),
         "knot" | "knots" | "kn" => speed(Rat::new(463, 900).unwrap(), "kn"), // 1852/3600
-        "ft/s" | "fps" => speed(Rat::new(381, 1250).unwrap(), "ft/s"), // 0.3048 m/s
+        "ft/s" | "fps" => speed(Rat::new(381, 1250).unwrap(), "ft/s"),       // 0.3048 m/s
 
         // ---- Area (base: m²). ----
         "m2" | "m²" | "sqm" => area(Rat::int(1), "m²"),
@@ -1113,6 +1114,55 @@ fn convert_units(value: Num, from: UnitDef, to: UnitDef) -> Result<Num, String> 
     }
     let base = Num::mul(value, Num::R(from.to_base))?;
     Num::div(base, Num::R(to.to_base))
+}
+
+/// Approximate densities (g/ml) for volume↔mass cooking conversions
+/// (`1 cup flour in g`). Kitchen-grade values, not lab constants.
+fn density_of(word: &str) -> Option<(&'static str, Rat)> {
+    let r = |n, d| Rat::new(n, d).unwrap();
+    Some(match word {
+        "water" => ("water", Rat::int(1)),
+        "milk" => ("milk", r(103, 100)),
+        "flour" => ("flour", r(53, 100)),
+        "sugar" => ("sugar", r(85, 100)),
+        "butter" => ("butter", r(911, 1000)),
+        "oil" => ("oil", r(92, 100)),
+        "honey" => ("honey", r(142, 100)),
+        "rice" => ("rice", r(85, 100)),
+        "salt" => ("salt", r(6, 5)),
+        "oats" => ("oats", r(41, 100)),
+        _ => return None,
+    })
+}
+
+/// Convert between Volume (base litre) and Mass (base gram) through a density in g/ml.
+fn convert_with_density(
+    value: Num,
+    from: UnitDef,
+    to: UnitDef,
+    g_per_ml: Rat,
+) -> Result<Num, String> {
+    let ml_per_l = Num::R(Rat::int(1000));
+    let base = Num::mul(value, Num::R(from.to_base))?;
+    let out_base = match (from.domain, to.domain) {
+        // litres → ml → grams
+        (UnitDomain::Volume, UnitDomain::Mass) => {
+            Num::mul(Num::mul(base, ml_per_l)?, Num::R(g_per_ml))?
+        }
+        // grams → ml → litres
+        (UnitDomain::Mass, UnitDomain::Volume) => {
+            Num::div(Num::div(base, Num::R(g_per_ml))?, ml_per_l)?
+        }
+        _ => return convert_units(value, from, to),
+    };
+    Num::div(out_base, Num::R(to.to_base))
+}
+
+fn is_volume_mass(a: UnitDomain, b: UnitDomain) -> bool {
+    matches!(
+        (a, b),
+        (UnitDomain::Volume, UnitDomain::Mass) | (UnitDomain::Mass, UnitDomain::Volume)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1274,17 +1324,20 @@ fn poisson_pmf(k: i64, lambda: f64) -> f64 {
 /// detection rule in spec §4) or if it is a single bare numeric literal with
 /// no operator/unit/keyword (also a detection guard).
 fn parse_math_expr(toks: &[Token]) -> Option<Result<Num, String>> {
-    parse_math_expr_full(toks).map(|(r, _)| r)
+    parse_math_expr_full(toks).map(|(r, _, _)| r)
 }
 
 /// As `parse_math_expr`, but also reports the target unit abbreviation when
 /// the *whole* expression was exactly one unit conversion (`N unit "in" unit`)
 /// — lets `evaluate` render e.g. `72 h` / `30.48 cm` with the unit suffix.
-fn parse_math_expr_full(toks: &[Token]) -> Option<(Result<Num, String>, Option<&'static str>)> {
+/// `(result, unit tag, note)` — see `MParser2::unit_tag` / `note`.
+type MathParse = (Result<Num, String>, Option<&'static str>, Option<String>);
+
+fn parse_math_expr_full(toks: &[Token]) -> Option<MathParse> {
     let mut p = MParser2::new(toks);
     if let Some(r) = p.parse_is_what_percent() {
         if p.pos == toks.len() {
-            return Some((r, None));
+            return Some((r, None, None));
         }
     }
     p = MParser2::new(toks);
@@ -1292,7 +1345,7 @@ fn parse_math_expr_full(toks: &[Token]) -> Option<(Result<Num, String>, Option<&
     if p.pos != toks.len() {
         return None;
     }
-    Some((r, p.unit_tag))
+    Some((r, p.unit_tag, p.note))
 }
 
 // ---------------------------------------------------------------------------
@@ -1312,6 +1365,8 @@ struct MParser2<'a> {
     /// it only survives to the top level when the *whole* expression was one
     /// conversion, letting `evaluate` render the target unit's abbreviation.
     unit_tag: Option<&'static str>,
+    /// Extra explanation for the answer (e.g. the density a volume↔mass used).
+    note: Option<String>,
 }
 
 impl<'a> MParser2<'a> {
@@ -1322,7 +1377,35 @@ impl<'a> MParser2<'a> {
             pending_unit: None,
             percent_flag: false,
             unit_tag: None,
+            note: None,
         }
+    }
+    fn kind_at(&self, i: usize) -> Option<&TokKind> {
+        self.t.get(i).map(|tok| &tok.kind)
+    }
+    fn space_at(&self, i: usize) -> bool {
+        self.t.get(i).is_some_and(|tok| tok.space_before)
+    }
+    /// Consume a unit at the cursor: a slash form written without spaces
+    /// (`km/h`, `m/s`) when that compound is a known unit, else a single word.
+    /// `10 km / 2` (spaced) stays a division.
+    fn eat_unit(&mut self) -> Option<UnitDef> {
+        let Some(TokKind::Word(a)) = self.peek().cloned() else {
+            return None;
+        };
+        if let (Some(TokKind::Slash), Some(TokKind::Word(b))) =
+            (self.kind_at(self.pos + 1), self.kind_at(self.pos + 2))
+        {
+            if !self.space_at(self.pos + 1) && !self.space_at(self.pos + 2) {
+                if let Some(u) = unit_from_word(&format!("{a}/{b}")) {
+                    self.pos += 3;
+                    return Some(u);
+                }
+            }
+        }
+        let u = unit_from_word(&a)?;
+        self.pos += 1;
+        Some(u)
     }
     fn peek(&self) -> Option<&TokKind> {
         self.t.get(self.pos).map(|tok| &tok.kind)
@@ -1450,15 +1533,35 @@ impl<'a> MParser2<'a> {
         self.unit_tag = None;
         let val = self.parse_percent_of()?;
         if let Some(fu) = self.pending_unit.take() {
-            if self.eat_word("in") {
-                if let Some(TokKind::Word(w)) = self.peek().cloned() {
-                    if let Some(tu) = unit_from_word(&w) {
-                        self.pos += 1;
-                        self.unit_tag = Some(tu.name);
-                        return Some(val.and_then(|v| convert_units(v, fu, tu)));
-                    }
+            // Optional substance for volume↔mass: `1 cup [of] flour in g`.
+            let save = self.pos;
+            let of = self.eat_word("of");
+            let substance = match self.peek() {
+                Some(TokKind::Word(w)) => density_of(w),
+                _ => None,
+            };
+            match substance {
+                Some(_) => self.pos += 1,
+                None if of => self.pos = save,
+                None => {}
+            }
+            if self.eat_word("in") || self.eat_word("to") {
+                let tu = self.eat_unit()?;
+                self.unit_tag = Some(tu.name);
+                if is_volume_mass(fu.domain, tu.domain) {
+                    let Some((name, d)) = substance else {
+                        return Some(Err(
+                            "volume ↔ mass needs a substance, e.g. \"1 cup flour in g\""
+                                .to_string(),
+                        ));
+                    };
+                    self.note = Some(format!("{name} ≈ {} g/ml", d.to_f64()));
+                    return Some(val.and_then(|v| convert_with_density(v, fu, tu, d)));
                 }
-                return None;
+                return Some(val.and_then(|v| convert_units(v, fu, tu)));
+            }
+            if substance.is_some() {
+                return None; // a substance without a target isn't math
             }
         }
         Some(val)
@@ -1542,8 +1645,7 @@ impl<'a> MParser2<'a> {
                 }
                 if let Some(TokKind::Word(w)) = self.peek().cloned() {
                     if !is_func_name(&w) && !matches!(w.as_str(), "pi" | "e" | "tau" | "phi") {
-                        if let Some(u) = unit_from_word(&w) {
-                            self.pos += 1;
+                        if let Some(u) = self.eat_unit() {
                             self.pending_unit = Some(u);
                             return Some(Ok(Num::R(r)));
                         }
@@ -2930,9 +3032,13 @@ pub fn evaluate(input: &str, now: ReferenceNow) -> Option<Answer> {
         }
     }
 
-    if let Some((result, unit_tag)) = parse_math_expr_full(&toks) {
+    if let Some((result, unit_tag, note)) = parse_math_expr_full(&toks) {
+        let explanation = match note {
+            Some(n) => format!("parsed as {trimmed} · {n}"),
+            None => format!("parsed as {trimmed}"),
+        };
         return Some(match result {
-            Ok(n) => math_answer(n, format!("parsed as {trimmed}"), unit_tag),
+            Ok(n) => math_answer(n, explanation, unit_tag),
             Err(msg) => error_answer(AnswerKind::Error, msg, format!("parsed as {trimmed}")),
         });
     }
@@ -3575,5 +3681,57 @@ mod tests {
         ] {
             assert!(is_answer_like(text), "should be answer-like: {text:?}");
         }
+    }
+
+    // ---- Slash-form units + volume↔mass via density (2026-11-11) ----
+
+    fn num_of(a: &Answer) -> f64 {
+        let t: String = a
+            .display
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        t.parse()
+            .unwrap_or_else(|_| panic!("no number in {:?}", a.display))
+    }
+
+    #[test]
+    fn slash_units_convert() {
+        let a = ans("100 km/h in mph");
+        assert_eq!(a.kind, AnswerKind::Unit);
+        assert!((num_of(&a) - 62.137).abs() < 0.01, "{}", a.display);
+        assert!(a.display.ends_with("mph"), "{}", a.display);
+        let b = ans("10 m/s in km/h");
+        assert_eq!(b.display, "36 km/h");
+        let c = ans("60 mi/h to km/h");
+        assert!((num_of(&c) - 96.56).abs() < 0.01, "{}", c.display);
+    }
+
+    #[test]
+    fn spaced_slash_is_still_division_and_to_converts() {
+        assert_eq!(ans("10 km / 2").display, "5");
+        let a = ans("5 km to mi");
+        assert!((num_of(&a) - 3.107).abs() < 0.001, "{}", a.display);
+    }
+
+    #[test]
+    fn volume_mass_through_density() {
+        let a = ans("1 cup flour in g");
+        assert_eq!(a.kind, AnswerKind::Unit);
+        assert!((num_of(&a) - 125.39).abs() < 0.1, "{}", a.display);
+        assert!(a.explanation.contains("flour"), "{}", a.explanation);
+        assert_eq!(ans("500 ml of water in g").display, "500 g");
+        let s = ans("100 g sugar in ml");
+        assert!((num_of(&s) - 117.65).abs() < 0.05, "{}", s.display);
+        assert_eq!(ans("1 l water in kg").display, "1 kg");
+        // Same domain: the substance is ignored.
+        assert_eq!(ans("2 l milk in ml").display, "2000 ml");
+    }
+
+    #[test]
+    fn volume_mass_without_substance_is_an_error() {
+        let a = ans("1 cup in g");
+        assert_eq!(a.kind, AnswerKind::Error, "{}", a.display);
+        assert!(a.display.contains("substance"), "{}", a.display);
     }
 }
