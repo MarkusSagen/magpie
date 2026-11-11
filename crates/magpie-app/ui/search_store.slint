@@ -18,6 +18,9 @@ export global SearchStore {
     in-out property <bool> hide-viewed;
     in-out property <bool> is-sed;          // query parsed as a sed command
     in-out property <int> selected;         // selected file index
+    // sed preview totals over non-Viewed files: what ⌘↵ would write.
+    in-out property <int> replace-lines;
+    in-out property <int> replace-files;
 
     callback set-tab(int);
     callback set-mode(int);

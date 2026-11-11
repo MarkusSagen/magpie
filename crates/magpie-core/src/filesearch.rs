@@ -119,6 +119,62 @@ pub fn parse_locations_prefix(raw: &str) -> (Vec<String>, String) {
     }
 }
 
+/// Convert a sed replacement into a `regex` crate template: `\\N` → `${N}`,
+/// `&` → `${0}` (whole match), `\\&` → literal `&`, `\\\\` → `\\`. `$1` / `${name}`
+/// pass through unchanged, so both sed and regex-crate styles work.
+pub fn sed_template(rep: &str) -> String {
+    let mut out = String::with_capacity(rep.len() + 8);
+    let mut it = rep.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '\\' => match it.next() {
+                Some(d) if d.is_ascii_digit() => {
+                    out.push_str("${");
+                    out.push(d);
+                    out.push('}');
+                }
+                Some('&') => out.push('&'),
+                Some('\\') => out.push('\\'),
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some(o) => {
+                    out.push('\\');
+                    out.push(o);
+                }
+                None => out.push('\\'),
+            },
+            '&' => out.push_str("${0}"),
+            o => out.push(o),
+        }
+    }
+    out
+}
+
+/// Apply a sed substitution **line by line** (sed semantics: `^`/`$` anchor to each
+/// line; without `g` only the first match per line). Line terminators (`\n` /
+/// `\r\n`) and a missing final newline are preserved byte-for-byte. `template` is
+/// the output of [`sed_template`]. This is the single source of truth for both the
+/// replace preview and the write, so what you see is what gets written.
+pub fn sed_apply(content: &str, re: &regex::Regex, template: &str, global: bool) -> String {
+    let mut out = String::with_capacity(content.len());
+    for chunk in content.split_inclusive('\n') {
+        let (body, end) = if let Some(b) = chunk.strip_suffix("\r\n") {
+            (b, "\r\n")
+        } else if let Some(b) = chunk.strip_suffix('\n') {
+            (b, "\n")
+        } else {
+            (chunk, "")
+        };
+        if global {
+            out.push_str(&re.replace_all(body, template));
+        } else {
+            out.push_str(&re.replace(body, template));
+        }
+        out.push_str(end);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +226,40 @@ mod tests {
         let (locs2, q2) = parse_locations_prefix("just a query");
         assert!(locs2.is_empty());
         assert_eq!(q2, "just a query");
+    }
+
+    #[test]
+    fn sed_template_table() {
+        assert_eq!(sed_template(r"\1-\2"), "${1}-${2}");
+        assert_eq!(sed_template("$1"), "$1");
+        assert_eq!(sed_template("[&]"), "[${0}]");
+        assert_eq!(sed_template(r"a\&b"), "a&b");
+        assert_eq!(sed_template(r"a\\b"), r"a\b");
+        assert_eq!(sed_template("plain"), "plain");
+    }
+
+    #[test]
+    fn sed_apply_is_per_line_and_preserves_endings() {
+        let re = regex::Regex::new("^foo").unwrap();
+        let t = sed_template("bar");
+        // `^` anchors per line (whole-file replace would only touch line 1).
+        assert_eq!(
+            sed_apply("foo\nfoo x\nxfoo\n", &re, &t, false),
+            "bar\nbar x\nxfoo\n"
+        );
+        // CRLF + no trailing newline preserved.
+        assert_eq!(sed_apply("foo\r\nfoo", &re, &t, false), "bar\r\nbar");
+        // Without g: first match per LINE, not per file.
+        let re = regex::Regex::new("a").unwrap();
+        assert_eq!(sed_apply("aa\naa\n", &re, "b", false), "ba\nba\n");
+        assert_eq!(sed_apply("aa\naa\n", &re, "b", true), "bb\nbb\n");
+        // Capture groups via sed-style refs.
+        let re = regex::Regex::new(r"(\w+)@(\w+)").unwrap();
+        assert_eq!(
+            sed_apply("me@host\n", &re, &sed_template(r"\2:\1"), true),
+            "host:me\n"
+        );
+        // Empty input stays empty.
+        assert_eq!(sed_apply("", &re, "x", true), "");
     }
 }

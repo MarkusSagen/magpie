@@ -3943,6 +3943,8 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
     let effective_query = query.trim().to_string();
     if locations.is_empty() || (effective_query.is_empty() && mode_i != 2) {
         ss.set_files(ModelRc::new(VecModel::from(Vec::<SearchFile>::new())));
+        ss.set_replace_lines(0);
+        ss.set_replace_files(0);
         ss.set_tree(ModelRc::new(VecModel::from(Vec::<SearchTreeRow>::new())));
         ss.set_summary(SharedString::from("Type to search these locations"));
         ss.set_count_all(0);
@@ -3985,12 +3987,16 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
     });
 }
 
-/// Apply the current `s/pat/rep/flags` substitution to every matched file, writing
-/// a `<path>.magpie-bak` backup first (undo). Only runs when the query parses as a
-/// sed command. Reachable via the `apply-replace` callback (⌘↵).
+/// Apply the current sed command to every shown result file (⌘↵ — the explicit
+/// confirm; the list above is the preview). Uses the same per-line
+/// `filesearch::sed_apply` as the preview, so what was shown is what gets written.
+/// Files marked Viewed ("Skip file", ⌘⇧V) are left alone. Each changed file gets a
+/// `<file>.magpie-bak` copy first; if that backup can't be written the file is
+/// skipped rather than modified without a way back.
 fn apply_sed_replace(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>) {
+    use magpie_core::filesearch::{parse_sed, sed_apply, sed_template};
     let query = state.ui.lock().map(|u| u.text.clone()).unwrap_or_default();
-    let Some(cmd) = magpie_core::filesearch::parse_sed(&query) else {
+    let Some(cmd) = parse_sed(&query) else {
         return;
     };
     let Ok(re) = regex::RegexBuilder::new(&cmd.pattern)
@@ -3999,26 +4005,23 @@ fn apply_sed_replace(w: &slint::Weak<LauncherWindow>, state: &Arc<AppState>) {
     else {
         return;
     };
-    let paths = state
-        .search
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .result_paths
-        .clone();
-    for p in paths {
-        let Ok(content) = std::fs::read_to_string(&p) else {
+    let template = sed_template(&cmd.replacement);
+    let (paths, viewed) = {
+        let s = state.search.lock().unwrap_or_else(|e| e.into_inner());
+        (s.result_paths.clone(), s.viewed.clone())
+    };
+    for p in paths.iter().filter(|p| !viewed.contains(*p)) {
+        let Ok(content) = std::fs::read_to_string(p) else {
             continue;
         };
-        let replaced = if cmd.global {
-            re.replace_all(&content, cmd.replacement.as_str())
-                .to_string()
-        } else {
-            re.replace(&content, cmd.replacement.as_str()).to_string()
-        };
-        if replaced != content {
-            let _ = std::fs::write(format!("{p}.magpie-bak"), &content);
-            let _ = std::fs::write(&p, replaced);
+        let replaced = sed_apply(&content, &re, &template, cmd.global);
+        if replaced == content {
+            continue;
         }
+        if std::fs::write(format!("{p}.magpie-bak"), &content).is_err() {
+            continue;
+        }
+        let _ = std::fs::write(p, replaced);
     }
     if let Some(ui) = w.upgrade() {
         refresh_files(&ui, state);
@@ -4138,7 +4141,10 @@ fn populate_search_results(
             .case_insensitive(c.case_insensitive)
             .build()
             .ok()
-            .map(|re| (re, c.replacement.clone(), c.global))
+            .map(|re| {
+                let t = magpie_core::filesearch::sed_template(&c.replacement);
+                (re, t, c.global)
+            })
     });
 
     let ss = ui.global::<SearchStore>();
@@ -4166,12 +4172,8 @@ fn populate_search_results(
                     let (pre, mid, post) = split3(&m.text, m.match_start, m.match_end);
                     let replaced = sed_re
                         .as_ref()
-                        .map(|(re, rep, global)| {
-                            if *global {
-                                re.replace_all(&m.text, rep.as_str()).to_string()
-                            } else {
-                                re.replace(&m.text, rep.as_str()).to_string()
-                            }
+                        .map(|(re, tpl, global)| {
+                            magpie_core::filesearch::sed_apply(&m.text, re, tpl, *global)
                         })
                         .filter(|r| *r != m.text)
                         .unwrap_or_default();
@@ -4257,6 +4259,20 @@ fn populate_search_results(
         )
         .into(),
     );
+    // What ⌘↵ would write: previewed line changes in files not marked Viewed.
+    let (mut rep_lines, mut rep_files) = (0, 0);
+    for f in &files {
+        if f.viewed {
+            continue;
+        }
+        let n = f.lines.iter().filter(|l| !l.replaced.is_empty()).count();
+        if n > 0 {
+            rep_lines += n;
+            rep_files += 1;
+        }
+    }
+    ss.set_replace_lines(rep_lines as i32);
+    ss.set_replace_files(rep_files);
     ss.set_count_all(n_matches as i32);
     ss.set_count_contents(shown.iter().map(|f| f.matches.len()).sum::<usize>() as i32);
     ss.set_count_names(shown.iter().filter(|f| f.name_only).count() as i32);
@@ -6602,12 +6618,24 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                                 let mut g = st.search.lock().unwrap_or_else(|e| e.into_inner());
                                 g.locations = vec!["~/code/hobby/magpie/crates".to_string()];
                             }
+                            // Section first (it resets the query), then search.
+                            ui.invoke_set_section(SharedString::from("files"));
                             let q = SharedString::from("user_version");
                             ui.set_query(q.clone());
-                            if let Ok(mut u) = st.ui.lock() {
-                                u.text = "user_version".to_string();
+                            ui.invoke_search_changed(q);
+                        }
+                        // File search, sed mode (PNG 22): replacement PREVIEW only — the
+                        // tour never sends ⌘↵, so nothing is written.
+                        "files-sed" => {
+                            let q = "s/user_version/schema_version/g";
+                            {
+                                let mut g = st.search.lock().unwrap_or_else(|e| e.into_inner());
+                                g.locations = vec!["~/code/hobby/magpie/crates".to_string()];
                             }
                             ui.invoke_set_section(SharedString::from("files"));
+                            ui.global::<SearchStore>().invoke_set_mode(2);
+                            ui.set_query(SharedString::from(q));
+                            ui.invoke_search_changed(SharedString::from(q));
                         }
                         // Snippets (Phase 16a): seed a starter set, open the view.
                         "snippets" => {

@@ -8,6 +8,7 @@ import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { Keycap } from "../components/keycap.slint";
 import { TransformOpts } from "../transform_store.slint";
+import { SearchStore } from "../search_store.slint";
 import { ClipboardView } from "clipboard.slint";
 import { StatsView } from "stats.slint";
 import { DataView } from "data.slint";
@@ -370,6 +371,38 @@ export component MainView inherits VerticalLayout {
                                     root.apply-suggestion(root.search-suggestions[0].insert);
                                     return accept;
                                 }
+                                // ---- files view (screens 19/22): ↑↓ file, ↵ open, ⌘E edit,
+                                // ⌘⇧R reveal, ⌘⇧V viewed / skip, ⌘L add location, ⌘↵ apply
+                                // the sed replacement (the explicit confirm), Esc back. ----
+                                if root.view == "files" {
+                                    if event.text == Key.UpArrow {
+                                        if SearchStore.selected > 0 { SearchStore.selected -= 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.DownArrow {
+                                        if SearchStore.selected < SearchStore.files.length - 1 { SearchStore.selected += 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        if event.modifiers.control {
+                                            if SearchStore.is-sed && SearchStore.replace-lines > 0 { SearchStore.apply-replace(); }
+                                        } else if SearchStore.files.length > 0 {
+                                            SearchStore.open-file(SearchStore.selected);
+                                        }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && SearchStore.files.length > 0 {
+                                        if event.text == "e" { SearchStore.edit-file(SearchStore.selected); return accept; }
+                                        if event.modifiers.shift && (event.text == "r" || event.text == "R") { SearchStore.reveal-file(SearchStore.selected); return accept; }
+                                        if event.modifiers.shift && (event.text == "v" || event.text == "V") { SearchStore.toggle-viewed(SearchStore.selected); return accept; }
+                                    }
+                                    if event.modifiers.control && event.text == "l" { SearchStore.add-location(); return accept; }
+                                    if event.text == Key.Escape {
+                                        if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
+                                        root.nav-section("clipboard");
+                                        return accept;
+                                    }
+                                }
                                 // ---- calculator view: ↵ commit/copy, Tab reuse, ⌘⌫ delete ----
                                 if root.view == "calculator" {
                                     if CalcStore.graphs-open {
@@ -683,7 +716,50 @@ export component MainView inherits VerticalLayout {
                     VerticalLayout { alignment: center; Text { text: "Copy"; color: Theme.text-dim; font-size: 12.5px; } }
                     VerticalLayout { alignment: center; Keycap { text: "⌘C"; } }
                 }
-                if !(root.has-answer && root.answer-formats.length > 0): HorizontalLayout {
+                // Files: sed preview → confirm bar (screen 22); otherwise file actions (19).
+                if root.view == "files" && SearchStore.is-sed: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Preview only — nothing is written until you confirm · a .magpie-bak backup is kept";
+                            color: Theme.text-faint; font-size: 12px; overflow: elide; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: SearchStore.replace-lines == 0 ? "Nothing to replace"
+                                : "Replace " + SearchStore.replace-lines + " in " + SearchStore.replace-files + (SearchStore.replace-files == 1 ? " file" : " files");
+                            color: SearchStore.replace-lines == 0 ? Theme.text-faint : Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Skip file"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧V"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Back"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "esc"; } }
+                }
+                if root.view == "files" && !SearchStore.is-sed: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: SearchStore.summary; color: Theme.text-faint; font-size: 12px; overflow: elide; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; Text { text: "Open"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Edit"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘E"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Reveal"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧R"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Viewed"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧V"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Add folder"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘L"; } }
+                }
+                if root.view != "files" && !(root.has-answer && root.answer-formats.length > 0): HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 8px;
                     spacing: 14px;
