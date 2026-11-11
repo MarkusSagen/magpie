@@ -39,6 +39,10 @@ export component NotesView inherits Rectangle {
     in property <[string]> note-suggestions;
     in-out property <string> note-tag-filter;
     in property <[NoteRow]> notes;
+    // All / Vault / Projects source filter (session-scoped; Rust filters the rows).
+    in property <int> note-source;
+    in property <bool> has-project-notes;
+    callback set-note-source(int);
     in-out property <bool> notes-mode;
     in-out property <string> notes-view;
     callback open-note(int);
@@ -140,7 +144,23 @@ export component NotesView inherits Rectangle {
                     }
                     HorizontalLayout {
                         spacing: 6px;
-                        // Search moved to the shared top bar; this row just holds New.
+                        // All · Vault · Projects (PNG 18). Project notes are the read-only
+                        // "⇄ project/note" rows (synthetic ids ≤ -2,000,000).
+                        Rectangle {
+                            height: 30px; width: 200px;
+                            background: Theme.bg-sidebar; border-radius: Theme.r-sm;
+                            HorizontalLayout {
+                                padding: 3px; spacing: 2px;
+                                for src[si] in ["All", "Vault", "Projects"]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: Theme.r-xs;
+                                    background: root.note-source == si || nsrc.has-hover ? Theme.bg-elevated : transparent;
+                                    nsrc := TouchArea { clicked => { root.set-note-source(si); } }
+                                    Text { text: src; color: root.note-source == si ? Theme.text : Theme.text-dim;
+                                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
                         Rectangle { horizontal-stretch: 1; }
                         Rectangle {
                             width: 60px;
@@ -195,6 +215,9 @@ export component NotesView inherits Rectangle {
                             }
                         }
                     }
+                    if root.note-source == 2 && !root.has-project-notes: Text {
+                        text: "No project notes — add .magpie/notes/*.md in a project";
+                        color: Theme.text-faint; font-size: Theme.fs-sm; wrap: word-wrap; }
                     ListView {
                         for n in root.notes: Rectangle {
                             height: 44px;

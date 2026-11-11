@@ -289,6 +289,9 @@ export component LauncherWindow inherits Window {
 
     // ---- Notes mode ----
     in property <[NoteRow]> notes;
+    in property <bool> has-project-notes;   // any "From projects" rows (Notes source filter)
+    in-out property <int> note-source;      // Notes list: 0 All, 1 Vault, 2 Projects
+    callback set-note-source(int);
     in-out property <int> note-id: -1;
     in property <string> note-body;
     in property <string> note-provenance;
@@ -609,6 +612,9 @@ export component LauncherWindow inherits Window {
             note-suggestions: root.note-suggestions;
             note-tag-filter <=> root.note-tag-filter;
             notes: root.notes;
+            has-project-notes: root.has-project-notes;
+            note-source: root.note-source;
+            set-note-source(a0) => { root.set-note-source(a0); }
             notes-mode <=> root.notes-mode;
             notes-view <=> root.notes-view;
             open-note(a0) => { root.open-note(a0); }

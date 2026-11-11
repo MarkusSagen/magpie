@@ -2162,6 +2162,7 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         }
         (rows, refs)
     };
+    ui.set_has_project_notes(!proj_note_rows.is_empty());
     if let Ok(mut m) = state.project_note_refs.lock() {
         *m = proj_note_refs;
     }
@@ -2237,9 +2238,14 @@ fn refresh_notes(ui: &LauncherWindow, state: &AppState) {
         let refs = magpie_app::backlinks::find_references(&open_name, &all);
         (rows, all_tags, open, body, prov, links, refs)
     };
-    // Append the read-only "From projects" rows (only when no tag filter is active, so
-    // they don't masquerade as tagged notes).
-    if ui.get_note_tag_filter().is_empty() {
+    // Source filter (All / Vault / Projects, PNG 18). Vault = notes in the store;
+    // Projects = the read-only "From projects" rows, appended only when no tag filter
+    // is active so they don't masquerade as tagged notes.
+    let source = ui.get_note_source();
+    if source == 2 {
+        rows.clear();
+    }
+    if source != 1 && ui.get_note_tag_filter().is_empty() {
         rows.extend(proj_note_rows);
     }
     ui.set_notes(ModelRc::new(VecModel::from(rows)));
@@ -10048,6 +10054,16 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_note_id(id);
+                refresh_notes(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_set_note_source(move |src| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_note_source(src);
                 refresh_notes(&ui, &s);
             }
         });
