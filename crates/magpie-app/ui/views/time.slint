@@ -95,6 +95,9 @@ export component TimeView inherits VerticalLayout {
                 Rectangle { height: 28px; width: 92px; border-radius: Theme.r-sm; background: aea.has-hover ? Theme.bg-elevated : transparent;
                     aea := TouchArea { clicked => { TimeStore.add-entry(); } }
                     Text { text: "Add entry"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { height: 28px; width: 96px; border-radius: Theme.r-sm; background: eca.has-hover ? Theme.bg-elevated : transparent;
+                    eca := TouchArea { clicked => { TimeStore.export-csv(); } }
+                    Text { text: "Export CSV"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
                 Rectangle { height: 28px; width: 80px; border-radius: Theme.r-sm; background: rea.has-hover ? Theme.bg-elevated : transparent;
                     rea := TouchArea { clicked => { TimeStore.report(); } }
                     Text { text: "Report"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }

@@ -3262,8 +3262,25 @@ fn populate_projects(ui: &LauncherWindow, state: &Arc<AppState>) {
                 .join(" ")
                 .into(),
         );
+        // "N open · 11h 20m this week" (PNG 25): entries tagged #proj/<slug> or #<slug>.
         let open = h.open_tasks();
-        ps.set_detail_week(format!("{open} open").into());
+        let week_ms = {
+            let now = now_ms();
+            let entries = match state.store.lock() {
+                Ok(g) => g.recent_time_entries(2000).unwrap_or_default(),
+                Err(e) => e.into_inner().recent_time_entries(2000).unwrap_or_default(),
+            };
+            magpie_core::timeexport::project_ms(&entries, &h.name, now - 7 * 86_400_000, now)
+        };
+        ps.set_detail_week(if week_ms > 0 {
+            format!(
+                "{open} open · {} this week",
+                magpie_core::timeexport::fmt_hm(week_ms)
+            )
+            .into()
+        } else {
+            format!("{open} open").into()
+        });
 
         // The project's actual tasks now render in the task hub (List/Board,
         // `refresh_project_tasks` below), merged from note #tags + project files.
@@ -8191,6 +8208,28 @@ pub fn start() {
     {
         ui.global::<TimeStore>().on_add_entry(move || {
             // Manual-entry form is deferred; entries come from the task timer.
+        });
+    }
+    {
+        // Time tab "Export CSV": every entry to ~/Downloads/magpie-time-<date>.csv,
+        // then reveal it (same destination as the ⌘K data export).
+        let s = state.clone();
+        ui.global::<TimeStore>().on_export_csv(move || {
+            let now = now_ms();
+            let entries = match s.store.lock() {
+                Ok(g) => g.recent_time_entries(i64::MAX).unwrap_or_default(),
+                Err(e) => e
+                    .into_inner()
+                    .recent_time_entries(i64::MAX)
+                    .unwrap_or_default(),
+            };
+            let out = dirs::home_dir()
+                .map(|h| h.join("Downloads"))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(format!("magpie-time-{}.csv", abs_date(now)));
+            if std::fs::write(&out, magpie_core::timeexport::to_csv(&entries, now)).is_ok() {
+                magpie_app::diagnostics::reveal(&out);
+            }
         });
     }
     {

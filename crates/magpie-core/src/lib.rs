@@ -52,6 +52,7 @@ pub mod stats;
 pub mod store;
 pub mod table;
 pub mod tags;
+pub mod timeexport;
 pub mod transforms;
 pub mod vault;
 pub mod worldclock;

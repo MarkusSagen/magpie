@@ -27,6 +27,7 @@ export global TimeStore {
     callback continue-last();
     callback add-entry();
     callback report();
+    callback export-csv();      // all entries → ~/Downloads/magpie-time-<date>.csv
     callback continue-row(int);
     callback pomo-toggle();     // start/pause
     callback pomo-skip();       // skip to next phase
