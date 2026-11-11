@@ -20,6 +20,7 @@ import { TimeStore } from "time_store.slint";
 import { ProjectsStore } from "projects_store.slint";
 import { SecretsStore } from "secrets_store.slint";
 import { TransformOpts } from "transform_store.slint";
+import { SidebarPrefs, SidebarToggle } from "sidebar_prefs.slint";
 export { DataStore }
 export { CalcStore }
 export { DateStore }
@@ -31,6 +32,7 @@ export { TimeStore }
 export { ProjectsStore }
 export { SecretsStore }
 export { TransformOpts }
+export { SidebarPrefs, SidebarToggle }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
 import { GraphView } from "views/graph.slint";
@@ -727,12 +729,16 @@ export component LauncherWindow inherits Window {
             paused: root.paused;
             favorites: root.favorites;
             activate-favorite(a0) => { root.activate-favorite(a0); }
-            show-calc-data: true;
-            show-data: true;
-            show-snippets: true;
-            show-files: true;
-            show-projects: true;
-            show-secrets: true;
+            show-calc-data: SidebarPrefs.calculator;
+            show-data: SidebarPrefs.data;
+            show-snippets: SidebarPrefs.snippets;
+            show-files: SidebarPrefs.files;
+            show-projects: SidebarPrefs.projects;
+            show-secrets: SidebarPrefs.secrets;
+            show-notes: SidebarPrefs.notes;
+            show-tasks: SidebarPrefs.tasks;
+            show-bookmarks: SidebarPrefs.bookmarks;
+            show-stats: SidebarPrefs.stats;
             theme-index: root.theme-index;
             grp-capture-collapsed <=> root.grp-capture-collapsed;
             grp-organize-collapsed <=> root.grp-organize-collapsed;

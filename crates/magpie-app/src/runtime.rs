@@ -5,8 +5,9 @@ use crate::{
     MdLineVM, MdSpan, NoteRender, NoteRow, NoteVersionRow, Popover, ProjTaskRow, ProjectListRow,
     ProjectsStore, RecentData, RefRow, ScheduleStore, ScratchRow, ScratchStore, ScratchWindow,
     SearchBookmarkRow, SearchFile, SearchLine, SearchNoteRow, SearchStore, SearchTaskRow,
-    SearchTreeRow, SecretRow, SecretsStore, SlotItem, SnippetRow, SnippetsStore, SuggestRow,
-    TaskRow, TimeEntryRow, TimeStore, TransformOpts, WorldClockRow, WorldClockStore,
+    SearchTreeRow, SecretRow, SecretsStore, SidebarPrefs, SidebarToggle, SlotItem, SnippetRow,
+    SnippetsStore, SuggestRow, TaskRow, TimeEntryRow, TimeStore, TransformOpts, WorldClockRow,
+    WorldClockStore,
 };
 use magpie_app::app_state::DataSource;
 use magpie_app::app_state::{current_results, ingest_event, AppState};
@@ -7216,6 +7217,21 @@ pub fn start() {
         });
     }
 
+    // Settings → Sidebar: per-section visibility (config `sidebar_hidden`).
+    apply_sidebar_prefs(&ui, &cfg);
+    {
+        let weak = ui.as_weak();
+        ui.global::<SidebarPrefs>().on_set_shown(move |key, shown| {
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            magpie_app::config::set_sidebar_shown(&mut cfg, key.as_str(), shown);
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
+            if let Some(ui) = weak.upgrade() {
+                apply_sidebar_prefs(&ui, &cfg);
+            }
+        });
+    }
+
     // The menubar popover: a second, chromeless, always-on-top window shown from
     // the tray left-click. Kept alive for the whole run alongside `ui` (dropping it
     // early would tear the window down). It's a separate top-level component with its
@@ -11398,4 +11414,31 @@ mod nav_tests {
         // No match: empty.
         assert!(filter_actions("zzzznomatch").is_empty());
     }
+}
+
+/// Push the persisted sidebar-visibility config into the `SidebarPrefs` global: one
+/// bool per section (the sidebar's `show-*` guards) + the Settings → Sidebar rows.
+fn apply_sidebar_prefs(ui: &LauncherWindow, cfg: &Config) {
+    use magpie_app::config::{sidebar_shown, SIDEBAR_SECTIONS};
+    let p = ui.global::<SidebarPrefs>();
+    let on = |k: &str| sidebar_shown(cfg, k);
+    p.set_snippets(on("snippets"));
+    p.set_notes(on("notes"));
+    p.set_tasks(on("tasks"));
+    p.set_projects(on("projects"));
+    p.set_bookmarks(on("bookmarks"));
+    p.set_secrets(on("secrets"));
+    p.set_files(on("files"));
+    p.set_calculator(on("calculator"));
+    p.set_data(on("data"));
+    p.set_stats(on("stats"));
+    let rows: Vec<SidebarToggle> = SIDEBAR_SECTIONS
+        .iter()
+        .map(|(k, label)| SidebarToggle {
+            key: (*k).into(),
+            label: (*label).into(),
+            shown: on(k),
+        })
+        .collect();
+    p.set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
 }

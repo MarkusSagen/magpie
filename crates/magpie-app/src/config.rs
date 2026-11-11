@@ -109,6 +109,11 @@ pub struct Config {
     /// `tools`, `favorites`). Persisted so the sidebar reopens as left off.
     #[serde(default)]
     pub sidebar_collapsed_groups: Vec<String>,
+    /// Sidebar sections the user hid via Settings → Sidebar (keys: `snippets`, `notes`,
+    /// `tasks`, `projects`, `bookmarks`, `secrets`, `files`, `calculator`, `data`,
+    /// `stats`). Hidden sections stay reachable via `G x` / `⌘K`. Clipboard can't hide.
+    #[serde(default)]
+    pub sidebar_hidden: Vec<String>,
     /// How to resolve an overlapping edit when syncing a project file: `ask` (hold
     /// the file + surface the conflict, default) or `file` (the disk always wins).
     #[serde(default = "default_project_sync_conflict")]
@@ -186,6 +191,7 @@ impl Default for Config {
             popover_width: default_popover_width(),
             popover_height: default_popover_height(),
             sidebar_collapsed_groups: Vec::new(),
+            sidebar_hidden: Vec::new(),
             project_sync_conflict: default_project_sync_conflict(),
             projects_keep_magpie_out_of_git: false,
             scratch_hotkey: default_scratch_hotkey(),
@@ -257,6 +263,33 @@ pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {
     std::fs::write(path, s)
 }
 
+/// Sidebar sections that Settings → Sidebar can hide, as `(key, label)` in sidebar order.
+pub const SIDEBAR_SECTIONS: [(&str, &str); 10] = [
+    ("snippets", "Snippets"),
+    ("notes", "Notes"),
+    ("tasks", "Tasks"),
+    ("projects", "Projects"),
+    ("bookmarks", "Bookmarks"),
+    ("secrets", "Secrets"),
+    ("files", "Files"),
+    ("calculator", "Calculator"),
+    ("data", "Data"),
+    ("stats", "Stats"),
+];
+
+/// Whether sidebar section `key` is shown. Clipboard is always shown.
+pub fn sidebar_shown(cfg: &Config, key: &str) -> bool {
+    key == "clipboard" || !cfg.sidebar_hidden.iter().any(|k| k == key)
+}
+
+/// Show or hide sidebar section `key` (no-op for clipboard / duplicate entries).
+pub fn set_sidebar_shown(cfg: &mut Config, key: &str, shown: bool) {
+    cfg.sidebar_hidden.retain(|k| k != key);
+    if !shown && key != "clipboard" {
+        cfg.sidebar_hidden.push(key.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +341,30 @@ mod tests {
         assert!(c.fetch_link_favicons); // defaults on
         assert!(c.fetch_link_previews); // defaults on
         assert!(c.vault_path.is_none());
+    }
+
+    #[test]
+    fn sidebar_visibility_round_trips_and_clipboard_never_hides() {
+        let mut c = Config::default();
+        assert!(SIDEBAR_SECTIONS.iter().all(|(k, _)| sidebar_shown(&c, k)));
+        set_sidebar_shown(&mut c, "stats", false);
+        set_sidebar_shown(&mut c, "stats", false); // idempotent
+        set_sidebar_shown(&mut c, "clipboard", false); // ignored
+        assert_eq!(c.sidebar_hidden, vec!["stats".to_string()]);
+        assert!(!sidebar_shown(&c, "stats"));
+        assert!(sidebar_shown(&c, "clipboard"));
+        let back: Config = toml::from_str(&toml::to_string(&c).unwrap()).unwrap();
+        assert!(!sidebar_shown(&back, "stats"));
+        set_sidebar_shown(&mut c, "stats", true);
+        assert!(c.sidebar_hidden.is_empty());
+        // Older configs without the key load with everything shown.
+        let text: String = toml::to_string(&Config::default())
+            .unwrap()
+            .lines()
+            .filter(|l| !l.starts_with("sidebar_hidden"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let old: Config = toml::from_str(&text).unwrap();
+        assert!(old.sidebar_hidden.is_empty());
     }
 }

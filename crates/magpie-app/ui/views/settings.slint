@@ -1,5 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
+import { SidebarPrefs } from "../sidebar_prefs.slint";
 import { Palette } from "../types.slint";
 
 // Settings → Appearance (screen 09). Opened via ⌘, and the sidebar Settings row.
@@ -132,6 +133,24 @@ export component SettingsView inherits Rectangle {
                 }
             }
             Text { text: "Changing the scratch hotkey takes effect after restart."; color: Theme.text-ghost;
+                font-size: Theme.fs-xs; }
+
+            // Sidebar: per-section visibility (Clipboard always shows).
+            Text { text: "Sidebar"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+            for row in SidebarPrefs.rows: HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Show " + row.label; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 70px; height: 28px; border-radius: Theme.r-sm;
+                    // Neutral pill (ten accent fills would break "one accent, one job").
+                    background: sbta.has-hover ? Theme.bg-panel : Theme.bg-elevated;
+                    sbta := TouchArea { clicked => { SidebarPrefs.set-shown(row.key, !row.shown); } }
+                    Text { text: row.shown ? "On" : "Off"; color: row.shown ? Theme.text : Theme.text-faint;
+                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            Text { text: "Hidden sections stay reachable with G + key and ⌘K."; color: Theme.text-ghost;
                 font-size: Theme.fs-xs; }
               }
             }

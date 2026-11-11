@@ -77,6 +77,13 @@ export component Sidebar inherits Rectangle {
     in property <bool> show-files;          // reveal Files (screens 19/21/22/23)
     in property <bool> show-projects;       // reveal Projects (screens 25/26)
     in property <bool> show-secrets;         // reveal Secrets vault
+    // Settings → Sidebar (always-on sections can be hidden too; G x / ⌘K still reach them).
+    in property <bool> show-notes: true;
+    in property <bool> show-tasks: true;
+    in property <bool> show-bookmarks: true;
+    in property <bool> show-stats: true;
+    property <bool> any-organize: show-notes || show-tasks || show-projects || show-bookmarks || show-secrets;
+    property <bool> any-tools: show-files || show-calc-data || show-data || show-stats;
     // Collapsible group state (Phase 19, screen 27) — session-scoped.
     in-out property <bool> grp-capture-collapsed;
     in-out property <bool> grp-organize-collapsed;
@@ -154,17 +161,17 @@ export component Sidebar inherits Rectangle {
                     }
                 }
 
-                // ORGANIZE
-                Rectangle { height: 8px; }
-                GroupHeader { label: "ORGANIZE"; collapsed <=> root.grp-organize-collapsed;
+                // ORGANIZE (header hidden when every item in it is hidden)
+                if root.any-organize: Rectangle { height: 8px; }
+                if root.any-organize: GroupHeader { label: "ORGANIZE"; collapsed <=> root.grp-organize-collapsed;
                     toggled(c) => { root.group-toggled("organize", c); } }
-                if !root.grp-organize-collapsed: VerticalLayout {
+                if root.any-organize && !root.grp-organize-collapsed: VerticalLayout {
                     spacing: 2px;
-                    NavItem {
+                    if root.show-notes: NavItem {
                         label: "Notes"; icon: Icons.tab-notes; hint: "G N"; cmd-held: root.cmd-held;
                         active: root.section == "notes"; clicked => { root.set-section("notes"); }
                     }
-                    NavItem {
+                    if root.show-tasks: NavItem {
                         label: "Tasks"; icon: Icons.tab-tasks; hint: "G T"; cmd-held: root.cmd-held;
                         active: root.section == "tasks"; clicked => { root.set-section("tasks"); }
                     }
@@ -172,7 +179,7 @@ export component Sidebar inherits Rectangle {
                         label: "Projects"; icon: Icons.tab-clipboard; hint: "G P"; cmd-held: root.cmd-held;
                         active: root.section == "projects"; clicked => { root.set-section("projects"); }
                     }
-                    NavItem {
+                    if root.show-bookmarks: NavItem {
                         label: "Bookmarks"; icon: Icons.type-link; hint: "G B"; cmd-held: root.cmd-held;
                         active: root.section == "bookmarks"; clicked => { root.set-section("bookmarks"); }
                     }
@@ -182,11 +189,11 @@ export component Sidebar inherits Rectangle {
                     }
                 }
 
-                // TOOLS
-                Rectangle { height: 8px; }
-                GroupHeader { label: "TOOLS"; collapsed <=> root.grp-tools-collapsed;
+                // TOOLS (header hidden when every item in it is hidden)
+                if root.any-tools: Rectangle { height: 8px; }
+                if root.any-tools: GroupHeader { label: "TOOLS"; collapsed <=> root.grp-tools-collapsed;
                     toggled(c) => { root.group-toggled("tools", c); } }
-                if !root.grp-tools-collapsed: VerticalLayout {
+                if root.any-tools && !root.grp-tools-collapsed: VerticalLayout {
                     spacing: 2px;
                     if root.show-files: NavItem {
                         label: "Files"; icon: Icons.search; hint: "G F"; cmd-held: root.cmd-held;
@@ -200,7 +207,7 @@ export component Sidebar inherits Rectangle {
                         label: "Data"; icon: Icons.tab-stats; hint: "G D"; cmd-held: root.cmd-held;
                         active: root.section == "data"; clicked => { root.set-section("data"); }
                     }
-                    NavItem {
+                    if root.show-stats: NavItem {
                         label: "Stats"; icon: Icons.tab-stats; hint: "G S"; cmd-held: root.cmd-held;
                         active: root.section == "stats"; clicked => { root.set-section("stats"); }
                     }
