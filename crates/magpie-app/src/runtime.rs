@@ -4026,6 +4026,39 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
             let st = st.clone();
             move || st.search_gen.load(Ordering::SeqCst) != gen
         };
+        // Documents tab: PDFs / Office / e-books via rga (read-only, never sed).
+        if tab == file_search::Tab::Documents {
+            let outcome = if matches!(mode, magpie_core::filesearch::MatchMode::Sed) {
+                Err("Documents are read-only — replace works on Contents".to_string())
+            } else {
+                file_search::search_documents(
+                    &locations,
+                    &effective_query,
+                    mode,
+                    case,
+                    &Limits::default(),
+                    &cancelled,
+                )
+            };
+            if st.search_gen.load(Ordering::SeqCst) != gen {
+                return;
+            }
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = w.upgrade() else { return };
+                match outcome {
+                    Ok(results) => {
+                        let n = results.files.len() as i32;
+                        populate_search_results(&ui, &st, results, None);
+                        ui.global::<SearchStore>().set_count_documents(n);
+                    }
+                    Err(msg) => {
+                        populate_search_results(&ui, &st, Default::default(), None);
+                        ui.global::<SearchStore>().set_summary(msg.into());
+                    }
+                }
+            });
+            return;
+        }
         let results = file_search::run_search(
             &locations,
             &effective_query,

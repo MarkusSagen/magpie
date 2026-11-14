@@ -168,6 +168,144 @@ fn dir_rel(path: &Path, root: &Path) -> String {
         .unwrap_or_else(|| parent.to_string_lossy().to_string())
 }
 
+/// Document types the Documents tab hands to `rga` (ripgrep-all).
+pub const DOCUMENT_GLOBS: &[&str] = &[
+    "*.pdf", "*.doc", "*.docx", "*.odt", "*.rtf", "*.epub", "*.pptx", "*.odp", "*.xlsx", "*.ods",
+];
+
+/// `rga` on PATH, if installed.
+pub fn rga_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|d| d.join("rga"))
+        .find(|p| p.is_file())
+}
+
+/// One `rg --json` "match" event → `(path, line)`. rga reports page-prefixed lines
+/// ("Page 3: …") and may omit `line_number` (→ 0). The first submatch is highlighted.
+pub fn parse_rga_json_line(line: &str) -> Option<(PathBuf, MatchLine)> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "match" {
+        return None;
+    }
+    let d = v.get("data")?;
+    let path = PathBuf::from(d.get("path")?.get("text")?.as_str()?);
+    let text = d
+        .get("lines")?
+        .get("text")?
+        .as_str()?
+        .trim_end_matches(['\n', '\r'])
+        .to_string();
+    let line_no = d.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
+    let (start, end) = d
+        .get("submatches")
+        .and_then(|s| s.get(0))
+        .and_then(|m| {
+            Some((
+                m.get("start")?.as_u64()? as usize,
+                m.get("end")?.as_u64()? as usize,
+            ))
+        })
+        .filter(|(a, b)| {
+            a <= b && *b <= text.len() && text.is_char_boundary(*a) && text.is_char_boundary(*b)
+        })
+        .unwrap_or((0, 0));
+    Some((
+        path,
+        MatchLine {
+            line_no,
+            text,
+            match_start: start,
+            match_end: end,
+        },
+    ))
+}
+
+/// Search document files (PDF, Office, e-books) under `locations` with `rga`, reading
+/// its JSON stream so a keystroke (`cancelled`) or the caps stop it early (the child is
+/// killed). `Err` = rga missing or failed to start.
+pub fn search_documents(
+    locations: &[String],
+    query: &str,
+    mode: MatchMode,
+    case: CaseMode,
+    limits: &Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SearchResults, String> {
+    use std::io::{BufRead, BufReader};
+    let rga =
+        rga_path().ok_or("Install ripgrep-all (rga) to search PDFs, Office files and e-books")?;
+    let mut cmd = std::process::Command::new(rga);
+    cmd.arg("--json")
+        .arg("--max-count")
+        .arg(limits.max_per_file.to_string());
+    cmd.arg(if case.is_insensitive(query) {
+        "-i"
+    } else {
+        "-s"
+    });
+    if mode == MatchMode::Text {
+        cmd.arg("-F");
+    }
+    for g in DOCUMENT_GLOBS {
+        cmd.arg("-g").arg(g);
+    }
+    let roots: Vec<PathBuf> = locations.iter().map(|l| expand_tilde(l)).collect();
+    cmd.arg("--").arg(query).args(&roots);
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("couldn't start rga: {e}"))?;
+    let mut results = SearchResults::default();
+    let mut index: std::collections::HashMap<PathBuf, usize> = std::collections::HashMap::new();
+    if let Some(out) = child.stdout.take() {
+        for line in BufReader::new(out).lines().map_while(Result::ok) {
+            if cancelled() {
+                break;
+            }
+            let Some((path, m)) = parse_rga_json_line(&line) else {
+                continue;
+            };
+            let i = match index.get(&path) {
+                Some(i) => *i,
+                None => {
+                    if results.files.len() >= limits.max_files {
+                        results.truncated = true;
+                        break;
+                    }
+                    let root = roots
+                        .iter()
+                        .find(|r| path.starts_with(r))
+                        .cloned()
+                        .unwrap_or_default();
+                    results.files.push(FileHit {
+                        name: path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        dir_rel: dir_rel(&path, &root),
+                        path: path.clone(),
+                        matches: Vec::new(),
+                        name_only: false,
+                    });
+                    index.insert(path, results.files.len() - 1);
+                    results.files.len() - 1
+                }
+            };
+            results.files[i].matches.push(m);
+            results.total_matches += 1;
+            if results.total_matches >= limits.max_total_matches {
+                results.truncated = true;
+                break;
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(results)
+}
+
 /// Run a search across `locations` for `query`. `hidden`/`follow_symlinks`/`binary`
 /// toggle the walker; ignore files are always honoured.
 #[allow(clippy::too_many_arguments)]
@@ -320,5 +458,31 @@ mod suggest_tests {
         assert_eq!(s(&abs), vec![format!("{}/Documents/", home.display())]);
         assert!(s("~/nope/").is_empty());
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[cfg(test)]
+mod rga_tests {
+    use super::parse_rga_json_line;
+
+    #[test]
+    fn parses_match_events_only() {
+        let m = r#"{"type":"match","data":{"path":{"text":"/d/report.pdf"},"lines":{"text":"Page 3: the quarterly total\n"},"line_number":12,"absolute_offset":0,"submatches":[{"match":{"text":"quarterly"},"start":12,"end":21}]}}"#;
+        let (p, l) = parse_rga_json_line(m).unwrap();
+        assert_eq!(p.to_str(), Some("/d/report.pdf"));
+        assert_eq!(l.text, "Page 3: the quarterly total");
+        assert_eq!((l.line_no, l.match_start, l.match_end), (12, 12, 21));
+        assert_eq!(&l.text[l.match_start..l.match_end], "quarterly");
+        // null line number + bad offsets → 0 / no highlight, never a panic.
+        let n = r#"{"type":"match","data":{"path":{"text":"/d/a.docx"},"lines":{"text":"x"},"line_number":null,"submatches":[{"match":{"text":"x"},"start":5,"end":9}]}}"#;
+        let (_, l) = parse_rga_json_line(n).unwrap();
+        assert_eq!((l.line_no, l.match_start, l.match_end), (0, 0, 0));
+        for other in [
+            r#"{"type":"begin","data":{"path":{"text":"/d/a.pdf"}}}"#,
+            r#"{"type":"summary","data":{}}"#,
+            "not json",
+        ] {
+            assert!(parse_rga_json_line(other).is_none());
+        }
     }
 }
