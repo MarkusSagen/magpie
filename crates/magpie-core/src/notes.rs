@@ -506,6 +506,22 @@ impl Store {
         Ok(self.conn().last_insert_rowid())
     }
 
+    /// Change a finished session's description and span (Time tab edit). Running
+    /// sessions are left alone (returns false).
+    pub fn update_time_entry(
+        &self,
+        id: i64,
+        task_title: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<bool> {
+        Ok(self.conn().execute(
+            "UPDATE time_entries SET task_title = ?2, start_ms = ?3, end_ms = ?4
+             WHERE id = ?1 AND end_ms IS NOT NULL",
+            rusqlite::params![id, task_title, start_ms, end_ms],
+        )? > 0)
+    }
+
     /// Cut idle time out of the running session: end it at `idle_from_ms` and start
     /// the same task again at `resume_ms`. Returns false when nothing is running or
     /// the idle span doesn't fall inside the running session.
@@ -541,6 +557,31 @@ mod time_entry_tests {
         assert_eq!(all.len(), 2);
         let typed = all.iter().find(|e| e.task_title == "Typed #y").unwrap();
         assert_eq!((typed.start_ms, typed.end_ms), (100, Some(600)));
+    }
+
+    #[test]
+    fn update_edits_finished_entries_only() {
+        let s = open_in_memory().unwrap();
+        let id = s.add_time_entry("k", "Old", 100, 200).unwrap();
+        assert!(s.update_time_entry(id, "New #x", 150, 400).unwrap());
+        let e = s
+            .recent_time_entries(5)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == id)
+            .unwrap();
+        assert_eq!(
+            (e.task_title.as_str(), e.start_ms, e.end_ms),
+            ("New #x", 150, Some(400))
+        );
+        s.start_timer("k2", "Running", None, 1_000).unwrap();
+        let running = s
+            .recent_time_entries(5)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.end_ms.is_none())
+            .unwrap();
+        assert!(!s.update_time_entry(running.id, "x", 1, 2).unwrap());
     }
 
     #[test]

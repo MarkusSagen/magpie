@@ -96,17 +96,20 @@ export component TimeView inherits VerticalLayout {
                                 color: Theme.text-faint; font-size: Theme.fs-body; vertical-alignment: center; overflow: elide; width: 100%; height: 100%; }
                             addin := TextInput {
                                 width: 100%; height: 100%;
+                                text <=> TimeStore.add-draft;
                                 color: Theme.text; font-size: Theme.fs-body;
                                 single-line: true; vertical-alignment: center;
                                 init => { self.focus(); }
                                 edited => { TimeStore.add-error = ""; }
                                 key-pressed(e) => {
                                     if e.text == Key.Return { TimeStore.submit-entry(self.text); return accept; }
-                                    if e.text == Key.Escape { TimeStore.adding = false; TimeStore.add-error = ""; return accept; }
+                                    if e.text == Key.Escape { TimeStore.adding = false; TimeStore.editing-id = 0; TimeStore.add-error = ""; return accept; }
                                     return reject;
                                 }
                             }
                         }
+                        if TimeStore.editing-id > 0: VerticalLayout { alignment: center;
+                            Text { text: "Editing"; color: Theme.text-faint; font-size: Theme.fs-sm; } }
                         VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
                         VerticalLayout { alignment: center; Keycap { text: "esc"; } }
                     }
@@ -139,6 +142,12 @@ export component TimeView inherits VerticalLayout {
                             background: cbt.has-hover ? Theme.bg-elevated : transparent;
                             Text { text: "▶"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                             cbt := TouchArea { clicked => { TimeStore.continue-row(i); } } }
+                        // Edit (finished entries only).
+                        Rectangle { width: 24px; height: 24px; y: (parent.height - 24px)/2; border-radius: Theme.r-xs;
+                            background: edt.has-hover ? Theme.bg-elevated : transparent;
+                            Text { text: row.running ? "" : "✎"; color: edt.has-hover ? Theme.text-dim : Theme.text-ghost;
+                                font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            edt := TouchArea { enabled: !row.running; clicked => { TimeStore.edit-entry(row.id); } } }
                         // Delete (finished entries only — Stop a running one first).
                         Rectangle { width: 24px; height: 24px; y: (parent.height - 24px)/2; border-radius: Theme.r-xs;
                             background: dlt.has-hover ? Theme.bg-elevated : transparent;
@@ -157,7 +166,7 @@ export component TimeView inherits VerticalLayout {
                     cla := TouchArea { clicked => { TimeStore.continue-last(); } }
                     Text { text: "Continue"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
                 Rectangle { height: 28px; width: 116px; border-radius: Theme.r-sm; background: aea.has-hover ? Theme.bg-elevated : transparent;
-                    aea := TouchArea { clicked => { TimeStore.adding = true; TimeStore.add-error = ""; } }
+                    aea := TouchArea { clicked => { TimeStore.editing-id = 0; TimeStore.add-draft = ""; TimeStore.adding = true; TimeStore.add-error = ""; } }
                     HorizontalLayout { alignment: center; spacing: 6px;
                         Text { text: "Add entry"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                         VerticalLayout { alignment: center; Keycap { text: "⌘N"; } } } }

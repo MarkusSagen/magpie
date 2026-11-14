@@ -8506,8 +8506,16 @@ pub fn start() {
                             Ok(g) => g,
                             Err(e) => e.into_inner(),
                         };
-                        let _ = store.add_time_entry(&m.title, &m.title, m.start_ms, m.end_ms);
+                        let editing = ts.get_editing_id() as i64;
+                        if editing > 0 {
+                            let _ =
+                                store.update_time_entry(editing, &m.title, m.start_ms, m.end_ms);
+                        } else {
+                            let _ = store.add_time_entry(&m.title, &m.title, m.start_ms, m.end_ms);
+                        }
                     }
+                    ts.set_editing_id(0);
+                    ts.set_add_draft(SharedString::new());
                     ts.set_adding(false);
                     ts.set_add_error(SharedString::new());
                     refresh_time(&ui, &s);
@@ -8519,6 +8527,32 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
+        ui.global::<TimeStore>().on_edit_entry({
+            let (s, w) = (s.clone(), w.clone());
+            move |id| {
+                let Some(ui) = w.upgrade() else { return };
+                let entry = match s.store.lock() {
+                    Ok(g) => g.recent_time_entries(5000).unwrap_or_default(),
+                    Err(e) => e.into_inner().recent_time_entries(5000).unwrap_or_default(),
+                }
+                .into_iter()
+                .find(|e| e.id == id as i64);
+                let Some(e) = entry else { return };
+                let Some(end) = e.end_ms else { return };
+                let text = magpie_core::timeexport::format_manual_entry(
+                    &e.task_title,
+                    e.start_ms,
+                    end,
+                    now_ms(),
+                    local_offset_seconds() / 60,
+                );
+                let ts = ui.global::<TimeStore>();
+                ts.set_editing_id(id);
+                ts.set_add_draft(text.into());
+                ts.set_add_error(SharedString::new());
+                ts.set_adding(true);
+            }
+        });
         ui.global::<TimeStore>().on_delete_entry(move |id| {
             {
                 let store = match s.store.lock() {

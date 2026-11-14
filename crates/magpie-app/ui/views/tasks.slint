@@ -103,7 +103,7 @@ export component TasksView inherits Rectangle {
                     if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
                     // Time tab: ⌘N opens the manual-entry quick-add.
                     if root.tasks-view == "time" && e.modifiers.control && e.text == "n" {
-                        TimeStore.adding = true; TimeStore.add-error = ""; return accept;
+                        TimeStore.editing-id = 0; TimeStore.add-draft = ""; TimeStore.adding = true; TimeStore.add-error = ""; return accept;
                     }
                     if e.text == Key.Escape {
                         root.set-mode-tasks(false);

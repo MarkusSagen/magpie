@@ -124,6 +124,76 @@ fn clock_token(t: &str) -> Option<i64> {
     ((0..24).contains(&h) && (0..60).contains(&m)).then_some(h * 60 + m)
 }
 
+/// Days since 1970-01-01 for a proleptic Gregorian date (Hinnant's algorithm).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Inverse of [`days_from_civil`].
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// `2026-11-10` → local day number.
+fn parse_ymd(t: &str) -> Option<i64> {
+    let mut it = t.split('-');
+    let (y, m, d) = (
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    );
+    if it.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let day = days_from_civil(y, m, d);
+    // Reject impossible dates like 2026-02-31 (they'd roll into March).
+    (civil_from_days(day) == (y, m, d)).then_some(day)
+}
+
+/// Render an entry back into quick-add syntax (for editing): same local day as now →
+/// `title 9:00-10:30`; yesterday → `title yesterday 9:00-10:30`; older →
+/// `title 2026-11-10 9:00-10:30`. Times are local (`offset_min`).
+pub fn format_manual_entry(
+    title: &str,
+    start_ms: i64,
+    end_ms: i64,
+    now_ms: i64,
+    offset_min: i64,
+) -> String {
+    let off = offset_min * MIN_MS;
+    let day = (start_ms + off).div_euclid(DAY_MS);
+    let today = (now_ms + off).div_euclid(DAY_MS);
+    let clock = |ms: i64| {
+        let mins = (ms + off - day * DAY_MS)
+            .div_euclid(MIN_MS)
+            .clamp(0, 24 * 60 - 1);
+        format!("{}:{:02}", mins / 60, mins % 60)
+    };
+    let when = if day == today {
+        String::new()
+    } else if day == today - 1 {
+        "yesterday ".into()
+    } else {
+        let (y, m, d) = civil_from_days(day);
+        format!("{y:04}-{m:02}-{d:02} ")
+    };
+    format!("{title} {when}{}-{}", clock(start_ms), clock(end_ms))
+}
+
 /// Parse a Time-tab quick-add: `<description> <when>`, where `<when>` is a trailing
 /// duration ending now (`1h30m`, `90m`, `1.5h`, `1h 30m`) or a clock range today
 /// (`9:00-10:30`), optionally prefixed `yesterday` / `today`. `offset_min` is the
@@ -142,19 +212,26 @@ pub fn parse_manual_entry(
             return Err(format!("couldn't read the time range \"{last}\""));
         };
         toks.pop();
-        let mut day_offset = 0;
+        let off = offset_min * MIN_MS;
+        let today = (now_ms + off).div_euclid(DAY_MS);
+        let mut day = today;
         match toks.last().map(|t| t.to_ascii_lowercase()) {
             Some(t) if t == "yesterday" => {
-                day_offset = -1;
+                day = today - 1;
                 toks.pop();
             }
             Some(t) if t == "today" => {
                 toks.pop();
             }
-            _ => {}
+            Some(t) => {
+                if let Some(d) = parse_ymd(&t) {
+                    day = d;
+                    toks.pop();
+                }
+            }
+            None => {}
         }
-        let off = offset_min * MIN_MS;
-        let local_midnight = (now_ms + off).div_euclid(DAY_MS) * DAY_MS + day_offset * DAY_MS;
+        let local_midnight = day * DAY_MS;
         let start = local_midnight + a * MIN_MS - off;
         let end = local_midnight + b * MIN_MS - off;
         if end <= start {
@@ -317,5 +394,58 @@ mod tests {
         ] {
             assert!(parse_manual_entry(inp, NOW, 60).is_err(), "{inp:?}");
         }
+    }
+
+    #[test]
+    fn civil_dates_round_trip() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2026, 11, 14), 20_771);
+        for d in [-1000, 0, 59, 60, 20_771, 40_000] {
+            let (y, m, dd) = civil_from_days(d);
+            assert_eq!(days_from_civil(y, m, dd), d);
+        }
+        assert!(parse_ymd("2026-02-31").is_none());
+        assert!(parse_ymd("2026-13-01").is_none());
+        assert_eq!(parse_ymd("2024-02-29"), Some(days_from_civil(2024, 2, 29)));
+    }
+
+    #[test]
+    fn manual_entry_explicit_date() {
+        // NOW = day 1 (1970-01-02) 13:00 CET; 1970-01-01 is yesterday, 1969-12-31 older.
+        let m = parse_manual_entry("Old task 1969-12-31 9:00-10:00", NOW, 60).unwrap();
+        assert_eq!(m.title, "Old task");
+        assert_eq!(m.start_ms, -DAY_MS + 8 * 3_600_000);
+    }
+
+    #[test]
+    fn format_round_trips_through_parse() {
+        for (start, end) in [
+            (DAY_MS + 8 * 3_600_000, DAY_MS + 9 * 3_600_000 + 30 * MIN_MS), // today
+            (13 * 3_600_000, 14 * 3_600_000),                               // yesterday
+            (-DAY_MS + 8 * 3_600_000, -DAY_MS + 10 * 3_600_000),            // older
+        ] {
+            let text = format_manual_entry("Review PR #magpie", start, end, NOW, 60);
+            let back = parse_manual_entry(&text, NOW, 60).unwrap();
+            assert_eq!(
+                (back.title.as_str(), back.start_ms, back.end_ms),
+                ("Review PR #magpie", start, end),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            format_manual_entry("x", DAY_MS + 8 * 3_600_000, DAY_MS + 9 * 3_600_000, NOW, 60),
+            "x 9:00-10:00"
+        );
+        assert!(
+            format_manual_entry("x", 13 * 3_600_000, 14 * 3_600_000, NOW, 60).contains("yesterday")
+        );
+        assert!(format_manual_entry(
+            "x",
+            -DAY_MS + 8 * 3_600_000,
+            -DAY_MS + 9 * 3_600_000,
+            NOW,
+            60
+        )
+        .contains("1969-12-31"));
     }
 }

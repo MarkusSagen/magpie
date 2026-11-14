@@ -30,6 +30,9 @@ export global TimeStore {
     // Manual entry quick-add (Add entry / ⌘N): "<description> <45m | 9:00-10:30>".
     in-out property <bool> adding;
     in-out property <string> add-error;
+    in-out property <string> add-draft;      // the quick-add text (pre-filled when editing)
+    in-out property <int> editing-id;        // 0 = adding a new entry
+    callback edit-entry(int);                // by time_entries.id → pre-fill + edit mode
     callback submit-entry(string);
     callback delete-entry(int);  // by time_entries.id
     // Idle detection: "Idle 23m while tracking X" → Keep / Discard idle.
