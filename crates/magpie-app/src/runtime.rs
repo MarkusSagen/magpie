@@ -4059,7 +4059,25 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
             });
             return;
         }
-        let results = file_search::run_search(
+        // Stream partial results (every ~200 ms) so big trees show hits early.
+        let progress = {
+            let (st, w, sed) = (st.clone(), w.clone(), sed_cmd.clone());
+            move |partial: &file_search::SearchResults| {
+                if st.search_gen.load(Ordering::SeqCst) != gen {
+                    return;
+                }
+                let (st, w, sed, partial) = (st.clone(), w.clone(), sed.clone(), partial.clone());
+                let _ = slint::invoke_from_event_loop(move || {
+                    if st.search_gen.load(Ordering::SeqCst) != gen {
+                        return;
+                    }
+                    if let Some(ui) = w.upgrade() {
+                        populate_search_results(&ui, &st, partial, sed);
+                    }
+                });
+            }
+        };
+        let results = file_search::run_search_streaming(
             &locations,
             &effective_query,
             mode,
@@ -4069,6 +4087,7 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
             false,
             &Limits::default(),
             &cancelled,
+            &progress,
         );
         if st.search_gen.load(Ordering::SeqCst) != gen {
             return;

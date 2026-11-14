@@ -320,6 +320,39 @@ pub fn run_search(
     limits: &Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> SearchResults {
+    run_search_streaming(
+        locations,
+        query,
+        mode,
+        case,
+        tab,
+        hidden,
+        follow_symlinks,
+        limits,
+        cancelled,
+        &|_| {},
+    )
+}
+
+/// How often partial results are handed to `on_progress` while a search runs.
+pub const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// [`run_search`] that also reports the results found so far to `on_progress`
+/// (at most every [`PROGRESS_EVERY`]), so big trees show hits as they're found.
+#[allow(clippy::too_many_arguments)]
+pub fn run_search_streaming(
+    locations: &[String],
+    query: &str,
+    mode: MatchMode,
+    case: CaseMode,
+    tab: Tab,
+    hidden: bool,
+    follow_symlinks: bool,
+    limits: &Limits,
+    cancelled: &dyn Fn() -> bool,
+    on_progress: &dyn Fn(&SearchResults),
+) -> SearchResults {
+    let mut last_emit = std::time::Instant::now();
     let mut results = SearchResults::default();
     if query.is_empty() && mode != MatchMode::Sed {
         return results;
@@ -423,6 +456,10 @@ pub fn run_search(
                 matches,
                 name_only: name_hit && count > 0 && want_names && !want_contents,
             });
+            if last_emit.elapsed() >= PROGRESS_EVERY {
+                on_progress(&results);
+                last_emit = std::time::Instant::now();
+            }
         }
         if results.truncated {
             break;
@@ -484,5 +521,54 @@ mod rga_tests {
         ] {
             assert!(parse_rga_json_line(other).is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    #[test]
+    fn streaming_matches_the_plain_search() {
+        let dir = std::env::temp_dir().join(format!("magpie-stream-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..20 {
+            std::fs::write(dir.join(format!("f{i}.txt")), "alpha\nneedle here\nomega\n").unwrap();
+        }
+        let locs = vec![dir.to_string_lossy().to_string()];
+        let run = |progress: &dyn Fn(&SearchResults)| {
+            run_search_streaming(
+                &locs,
+                "needle",
+                MatchMode::Text,
+                CaseMode::Smart,
+                Tab::All,
+                false,
+                false,
+                &Limits::default(),
+                &|| false,
+                progress,
+            )
+        };
+        let calls = std::cell::Cell::new(0usize);
+        let streamed = run(&|r| {
+            assert!(r.files.len() <= 20);
+            calls.set(calls.get() + 1);
+        });
+        let plain = run_search(
+            &locs,
+            "needle",
+            MatchMode::Text,
+            CaseMode::Smart,
+            Tab::All,
+            false,
+            false,
+            &Limits::default(),
+            &|| false,
+        );
+        assert_eq!(streamed.files.len(), 20);
+        assert_eq!(streamed.total_matches, plain.total_matches);
+        let _ = calls.get(); // progress is time-based; a fast run may not emit at all
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
