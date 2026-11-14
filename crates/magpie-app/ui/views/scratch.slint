@@ -4,6 +4,7 @@ import { Icons } from "../icons.slint";
 import { ScratchRow, FileTarget } from "../types.slint";
 import { ScratchStore } from "../scratch_store.slint";
 import { Keycap } from "../components/keycap.slint";
+import { NotePreview } from "../components/note_preview.slint";
 
 // Scratch capture (Phase 20, PNG 28): a small always-on-top window summoned with the
 // scratch hotkey over whatever app is focused. Frameless + transparent like the
@@ -42,6 +43,18 @@ export component ScratchWindow inherits Window {
                     vertical-alignment: center; }
                 Text { text: "autosaved · kept 30 days"; color: Theme.text-faint; font-size: Theme.fs-sm;
                     vertical-alignment: center; horizontal-stretch: 1; }
+                // Edit ⇄ Preview (⌘E).
+                if ScratchStore.tab == 0: Rectangle {
+                    height: 28px;
+                    width: pvtxt.preferred-width + 48px;
+                    border-radius: Theme.r-sm;
+                    background: pvta.has-hover ? Theme.bg-elevated : transparent;
+                    pvta := TouchArea { clicked => { ScratchStore.toggle-preview(); } }
+                    HorizontalLayout { alignment: center; spacing: 6px;
+                        pvtxt := Text { text: ScratchStore.preview ? "Edit" : "Preview"; color: Theme.text-dim;
+                            font-size: Theme.fs-sm; vertical-alignment: center; }
+                        VerticalLayout { alignment: center; Keycap { text: "⌘E"; } } }
+                }
                 // Now / Earlier tabs.
                 for t[i] in [{ label: "Now", tab: 0 }, { label: "Earlier " + ScratchStore.earlier.length, tab: 1 }]: Rectangle {
                     height: 28px;
@@ -61,7 +74,34 @@ export component ScratchWindow inherits Window {
             }
 
             // ---- Now: editor ----
-            if ScratchStore.tab == 0: Rectangle {
+            if ScratchStore.tab == 0 && ScratchStore.preview: Rectangle {
+                vertical-stretch: 1;
+                background: Theme.bg-panel;
+                border-radius: Theme.r-md;
+                // Holds focus in preview so Esc / ⌘E / ⌘↵ keep working.
+                FocusScope {
+                    init => { self.focus(); }
+                    key-pressed(e) => {
+                        if (e.text == Key.Escape) {
+                            if (ScratchStore.filing) { ScratchStore.cancel-file(); }
+                            else { ScratchStore.dismiss(); }
+                            return accept;
+                        }
+                        if (e.modifiers.control && e.text == "e") { ScratchStore.toggle-preview(); return accept; }
+                        if (e.text == Key.Return && e.modifiers.control) {
+                            ScratchStore.begin-file(true);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+                NotePreview {
+                    x: 12px; y: 10px;
+                    width: parent.width - 24px;
+                    height: parent.height - 20px;
+                }
+            }
+            if ScratchStore.tab == 0 && !ScratchStore.preview: Rectangle {
                 vertical-stretch: 1;
                 background: Theme.bg-panel;
                 border-radius: Theme.r-md;
@@ -85,6 +125,7 @@ export component ScratchWindow inherits Window {
                                 else { ScratchStore.dismiss(); }
                                 return accept;
                             }
+                            if (e.modifiers.control && e.text == "e") { ScratchStore.toggle-preview(); return accept; }
                             // ⌘↵ file selection, ⌘⇧↵ file all (control == ⌘ on mac).
                             if (e.text == Key.Return && e.modifiers.control) {
                                 ScratchStore.begin-file(e.modifiers.shift);

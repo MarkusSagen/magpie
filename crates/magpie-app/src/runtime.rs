@@ -2558,8 +2558,14 @@ fn refresh_journal(ui: &LauncherWindow, state: &AppState) {
 /// into `NoteRender`. Pure rendering via `magpie_core::md_render`; URL favicons are
 /// not loaded here (the chip falls back to a link glyph).
 fn refresh_note_render(ui: &LauncherWindow, body: &str) {
+    ui.global::<NoteRender>()
+        .set_lines(ModelRc::new(VecModel::from(md_lines_vm(body))));
+}
+
+/// The rich-Markdown line view-model for `body` (shared by Notes and the scratch pad).
+fn md_lines_vm(body: &str) -> Vec<MdLineVM> {
     use magpie_core::md_render::{self, Block, Span};
-    let lines: Vec<MdLineVM> = md_render::render_note(body)
+    md_render::render_note(body)
         .into_iter()
         .map(|line| {
             let (block, done, marker) = match &line.block {
@@ -2643,9 +2649,7 @@ fn refresh_note_render(ui: &LauncherWindow, body: &str) {
                 spans: ModelRc::new(VecModel::from(spans)),
             }
         })
-        .collect();
-    ui.global::<NoteRender>()
-        .set_lines(ModelRc::new(VecModel::from(lines)));
+        .collect()
 }
 
 /// Expand a snippet body for the preview / paste, resolving `{snippet:name}` via
@@ -6931,6 +6935,7 @@ fn refresh_scratch(sc: &ScratchWindow, state: &AppState) {
         .unwrap_or_else(|e| e.into_inner()) = id;
     let ss = sc.global::<ScratchStore>();
     ss.set_body(SharedString::from(body));
+    ss.set_preview(false); // a newly loaded scratch opens editable
     ss.set_pinned(pinned);
     ss.set_earlier(ModelRc::new(VecModel::from(earlier)));
     ss.set_tab(0);
@@ -7118,6 +7123,22 @@ fn file_scratch_lines(state: &AppState, idx: i32, lines: &[String]) {
 /// Wire the scratch window's callbacks (autosave, tabs, pin, new, dismiss, File-to).
 fn wire_scratch(sc: &ScratchWindow, state: &Arc<AppState>) {
     let ss = sc.global::<ScratchStore>();
+    {
+        // ⌘E: rendered Markdown preview of the body (same renderer as Notes).
+        let sw = sc.as_weak();
+        ss.on_toggle_preview(move || {
+            if let Some(sc) = sw.upgrade() {
+                let st = sc.global::<ScratchStore>();
+                let on = !st.get_preview();
+                if on {
+                    let lines = md_lines_vm(st.get_body().as_str());
+                    sc.global::<NoteRender>()
+                        .set_lines(ModelRc::new(VecModel::from(lines)));
+                }
+                st.set_preview(on);
+            }
+        });
+    }
     {
         let s = state.clone();
         ss.on_edited(move |text| {
@@ -11434,12 +11455,20 @@ pub fn start() {
     });
 
     // Dev hook: show the scratch window on launch for screenshots (no-op otherwise).
-    if std::env::var("MAGPIE_SHOW_SCRATCH").is_ok() {
+    // `MAGPIE_SHOW_SCRATCH=preview` also loads a Markdown sample and opens the preview.
+    if let Ok(v) = std::env::var("MAGPIE_SHOW_SCRATCH") {
         let sw = scratch.as_weak();
         let s = state.clone();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(sc) = sw.upgrade() {
                 toggle_scratch(&sc, &s);
+                if v == "preview" {
+                    let st = sc.global::<ScratchStore>();
+                    st.set_body(SharedString::from(
+                        "# Standup\n\n- [x] Ship Graphite polish #magpie\n- [ ] Review **idle** detection @fri\n> One accent, one job.\n\nRun `just test` before commit",
+                    ));
+                    st.invoke_toggle_preview();
+                }
             }
         });
     }

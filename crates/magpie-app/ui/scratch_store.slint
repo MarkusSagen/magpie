@@ -19,6 +19,9 @@ export global ScratchStore {
     callback toggle-pin();
     callback new-scratch();
     callback dismiss();                   // hide the window (Esc / hotkey)
+    // Rendered Markdown preview of the body (⌘E toggles; Slint can't style text inline).
+    in-out property <bool> preview;
+    callback toggle-preview();
 
     callback begin-file(bool);            // open the menu: true = all lines, false = selection
     callback cancel-file();
