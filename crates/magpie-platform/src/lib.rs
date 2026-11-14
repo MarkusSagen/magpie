@@ -15,6 +15,7 @@ pub use hotkey::{parse_hotkey, HotkeySpec, Mods};
 pub use os::accessibility::{
     accessibility_trusted, open_accessibility_settings, prompt_accessibility,
 };
+pub use os::color_picker::{color_picker_supported, pick_screen_color};
 pub use os::db_key::db_key;
 pub use os::entropy::{random_bytes, random_u64};
 pub use os::factory::{platform_autostart, platform_clipboard};

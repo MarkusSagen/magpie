@@ -67,6 +67,7 @@ export component MainView inherits VerticalLayout {
     in-out property <bool> nav-leader;
     callback nav-previous();
     callback nav-section(string);
+    callback pick-screen-color();
     in-out property <bool> needs-accessibility;
     callback new-snippet();
     callback note-from-entry(int);
@@ -477,10 +478,15 @@ export component MainView inherits VerticalLayout {
                                         root.transform-action(root.answer-formats[root.answer-format-index], 0);
                                         return accept;
                                     }
-                                    if event.modifiers.control && event.text == "c" {
+                                    if event.modifiers.control && !event.modifiers.shift && event.text == "c" {
                                         root.transform-action(root.answer-formats[root.answer-format-index], 1);
                                         return accept;
                                     }
+                                }
+                                // ⌘⇧C: pick a color from anywhere on screen (macOS eyedropper).
+                                if event.modifiers.control && event.modifiers.shift && (event.text == "c" || event.text == "C") {
+                                    root.pick-screen-color();
+                                    return accept;
                                 }
                                 // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
                                 if event.text == Key.UpArrow {

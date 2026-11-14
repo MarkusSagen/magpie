@@ -5485,6 +5485,7 @@ const ACTIONS: &[(&str, &str, &str, &str, &str)] = &[
     ("task-from-link", "", "Create task from link", "", "Convert"),
     ("export", "", "Export data…", "", "Convert"),
     ("theme", "", "Theme…", "", "Convert"),
+    ("pick-color", "", "Pick color from screen", "⌘⇧C", "Convert"),
     ("delete", "", "Delete entry", "⌘⌫", ""),
 ];
 
@@ -7488,7 +7489,28 @@ pub fn start() {
             }
         });
     }
-    // Sidebar running-timer row: 1 Hz tick + click → Tasks → Time.
+    // ⌘⇧C / ⌘K "Pick color from screen": the system eyedropper; the picked color
+    // lands in the search field so the color answer card (formats, scale) shows.
+    {
+        let w = ui.as_weak();
+        ui.on_pick_screen_color(move || {
+            let w = w.clone();
+            // Deferred: never start native UI inside the key handler (CLAUDE.md).
+            let _ = slint::invoke_from_event_loop(move || {
+                let w2 = w.clone();
+                magpie_platform::pick_screen_color(move |rgb| {
+                    let Some((r, g, b)) = rgb else { return };
+                    if let Some(ui) = w2.upgrade() {
+                        let hex = SharedString::from(format!("#{r:02x}{g:02x}{b:02x}"));
+                        ui.set_view(SharedString::from("list"));
+                        ui.set_query(hex.clone());
+                        ui.invoke_search_changed(hex);
+                    }
+                });
+            });
+        });
+    }
+
     push_sidebar_timer(&ui, &state);
     {
         let s = state.clone();

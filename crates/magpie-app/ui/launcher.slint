@@ -235,8 +235,10 @@ export component LauncherWindow inherits Window {
         else if id == "open-as-table" { root.open-selected-as-table(); }
         else if id == "favorite" { root.favorite-selected(); }
         else if id == "save-secret" { root.save-secret-selected(); }
+        else if id == "pick-color" { root.pick-screen-color(); }
     }
     callback save-secret-selected(); // ⌘K → Save as secret: promote the selection to the vault
+    callback pick-screen-color();    // ⌘⇧C / ⌘K → eyedropper → color answer card
     callback open-selected-as-table();
     callback export-data();
 
@@ -458,6 +460,7 @@ export component LauncherWindow inherits Window {
     Rectangle {
 
         main := MainView {
+            pick-screen-color() => { root.pick-screen-color(); }
             filter-count: root.filter-count;
             active-app-name: root.active-app-name;
             active-time-label: root.active-time-label;

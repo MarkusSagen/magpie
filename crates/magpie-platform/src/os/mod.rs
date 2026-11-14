@@ -1,4 +1,5 @@
 pub mod accessibility;
+pub mod color_picker;
 pub mod db_key;
 pub mod entropy;
 pub mod hotkeys;
