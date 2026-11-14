@@ -14,6 +14,7 @@ pub fn job_label(id: i64) -> String {
     format!("io.magpie.job.{id}")
 }
 
+#[cfg(target_os = "macos")] // only the launchd plist needs it (dead code elsewhere)
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
