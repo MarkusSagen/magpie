@@ -7351,6 +7351,67 @@ pub fn start() {
             }
         }
     });
+    // Idle detection (macOS): sample every 5 s; after `idle_threshold_min` idle minutes
+    // with a timer running, ask on return (Time tab banner + notification). Discard cuts
+    // the idle span out of the running entry; nothing changes without the user.
+    {
+        let pending: Arc<std::sync::Mutex<Option<magpie_app::idle::IdleSpan>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let threshold = cfg.idle_threshold_min;
+        if threshold > 0 && magpie_platform::idle_seconds().is_some() {
+            let (s, w, p) = (state.clone(), ui.as_weak(), pending.clone());
+            std::thread::spawn(move || {
+                let mut watch = magpie_app::idle::IdleWatch::default();
+                loop {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let Some(idle) = magpie_platform::idle_seconds() else {
+                        continue;
+                    };
+                    let active = match s.store.lock() {
+                        Ok(g) => g.active_timer().ok().flatten(),
+                        Err(e) => e.into_inner().active_timer().ok().flatten(),
+                    };
+                    let Some(span) = watch.feed(now_ms(), idle, active.is_some(), threshold) else {
+                        continue;
+                    };
+                    *p.lock().unwrap_or_else(|e| e.into_inner()) = Some(span);
+                    let title = active.map(|a| a.task_title).unwrap_or_default();
+                    let label = format!("Idle {}m while tracking {title}", span.minutes());
+                    magpie_platform::notify("Magpie — you were idle", &label);
+                    let w = w.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w.upgrade() {
+                            let ts = ui.global::<TimeStore>();
+                            ts.set_idle_label(label.into());
+                            ts.set_idle_pending(true);
+                        }
+                    });
+                }
+            });
+        }
+        let w = ui.as_weak();
+        let p = pending.clone();
+        ui.global::<TimeStore>().on_idle_keep(move || {
+            *p.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            if let Some(ui) = w.upgrade() {
+                ui.global::<TimeStore>().set_idle_pending(false);
+            }
+        });
+        let (s, w) = (state.clone(), ui.as_weak());
+        ui.global::<TimeStore>().on_idle_discard(move || {
+            if let Some(span) = pending.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = store.split_active(span.from_ms, span.to_ms);
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.global::<TimeStore>().set_idle_pending(false);
+                refresh_time(&ui, &s);
+            }
+        });
+    }
     // Sidebar running-timer row: 1 Hz tick + click → Tasks → Time.
     push_sidebar_timer(&ui, &state);
     {

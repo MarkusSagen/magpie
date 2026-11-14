@@ -118,6 +118,10 @@ pub struct Config {
     /// phase end so the next one starts by hand.
     #[serde(default = "default_true")]
     pub pomodoro_auto_continue: bool,
+    /// Ask "keep or discard?" after this many idle minutes while a timer runs
+    /// (macOS; 0 = off). Read at startup.
+    #[serde(default = "default_idle_threshold_min")]
+    pub idle_threshold_min: i64,
     /// How to resolve an overlapping edit when syncing a project file: `ask` (hold
     /// the file + surface the conflict, default) or `file` (the disk always wins).
     #[serde(default = "default_project_sync_conflict")]
@@ -155,6 +159,10 @@ fn default_popover_tab() -> String {
 
 fn default_mask_visible_chars() -> i64 {
     3
+}
+
+fn default_idle_threshold_min() -> i64 {
+    10
 }
 
 fn default_true() -> bool {
@@ -197,6 +205,7 @@ impl Default for Config {
             sidebar_collapsed_groups: Vec::new(),
             sidebar_hidden: Vec::new(),
             pomodoro_auto_continue: true,
+            idle_threshold_min: default_idle_threshold_min(),
             project_sync_conflict: default_project_sync_conflict(),
             projects_keep_magpie_out_of_git: false,
             scratch_hotkey: default_scratch_hotkey(),

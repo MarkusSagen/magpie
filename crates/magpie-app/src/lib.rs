@@ -15,6 +15,7 @@ pub mod file_search;
 pub mod format_time;
 pub mod graph;
 pub mod grouping;
+pub mod idle;
 pub mod image_cache;
 pub mod job_runner;
 pub mod link_meta;

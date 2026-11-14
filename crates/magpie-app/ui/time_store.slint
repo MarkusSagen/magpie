@@ -31,7 +31,12 @@ export global TimeStore {
     in-out property <bool> adding;
     in-out property <string> add-error;
     callback submit-entry(string);
-    callback delete-entry(int);  // by time_entries.id      // all entries → ~/Downloads/magpie-time-<date>.csv
+    callback delete-entry(int);  // by time_entries.id
+    // Idle detection: "Idle 23m while tracking X" → Keep / Discard idle.
+    in-out property <bool> idle-pending;
+    in-out property <string> idle-label;
+    callback idle-keep();
+    callback idle-discard();      // all entries → ~/Downloads/magpie-time-<date>.csv
     callback continue-row(int);
     callback pomo-toggle();     // start/pause
     callback pomo-skip();       // skip to next phase
