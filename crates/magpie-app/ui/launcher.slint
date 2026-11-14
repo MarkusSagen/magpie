@@ -291,6 +291,12 @@ export component LauncherWindow inherits Window {
     in property <[NoteRow]> notes;
     in property <bool> has-project-notes;   // any "From projects" rows (Notes source filter)
     in-out property <int> note-source;      // Notes list: 0 All, 1 Vault, 2 Projects
+    // Sidebar running-timer row.
+    in property <bool> timer-running;
+    in property <string> timer-title;
+    in property <string> timer-elapsed;
+    callback timer-tick();
+    callback open-timer();
     callback set-note-source(int);
     in-out property <int> note-id: -1;
     in property <string> note-body;
@@ -729,6 +735,11 @@ export component LauncherWindow inherits Window {
             x: 0;
             y: 0;
             height: root.height;
+            timer-running: root.timer-running;
+            timer-title: root.timer-title;
+            timer-elapsed: root.timer-elapsed;
+            timer-tick => { root.timer-tick(); }
+            open-timer => { root.open-timer(); }
             section: root.section;
             cmd-held: root.cmd-held;
             screenshare: root.screenshare;

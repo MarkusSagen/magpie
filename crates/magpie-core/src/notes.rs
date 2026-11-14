@@ -488,6 +488,74 @@ impl Store {
             .execute("DELETE FROM time_entries WHERE id = ?1", [id])?
             > 0)
     }
+
+    /// Record a closed session typed in by hand (Time tab quick-add). Doesn't touch
+    /// the running timer.
+    pub fn add_time_entry(
+        &self,
+        task_key: &str,
+        task_title: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<i64> {
+        self.conn().execute(
+            "INSERT INTO time_entries (task_key, task_title, note_id, start_ms, end_ms)
+             VALUES (?1, ?2, NULL, ?3, ?4)",
+            rusqlite::params![task_key, task_title, start_ms, end_ms],
+        )?;
+        Ok(self.conn().last_insert_rowid())
+    }
+
+    /// Cut idle time out of the running session: end it at `idle_from_ms` and start
+    /// the same task again at `resume_ms`. Returns false when nothing is running or
+    /// the idle span doesn't fall inside the running session.
+    pub fn split_active(&self, idle_from_ms: i64, resume_ms: i64) -> Result<bool> {
+        let Some(a) = self.active_timer()? else {
+            return Ok(false);
+        };
+        if idle_from_ms <= a.start_ms || resume_ms < idle_from_ms {
+            return Ok(false);
+        }
+        let note_id: Option<i64> = self.conn().query_row(
+            "SELECT note_id FROM time_entries WHERE end_ms IS NULL LIMIT 1",
+            [],
+            |r| r.get(0),
+        )?;
+        self.stop_active(idle_from_ms)?;
+        self.start_timer(&a.task_key, &a.task_title, note_id, resume_ms)?;
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod time_entry_tests {
+    use crate::open_in_memory;
+
+    #[test]
+    fn add_manual_entry_keeps_running_timer() {
+        let s = open_in_memory().unwrap();
+        s.start_timer("k", "Running #x", None, 1_000).unwrap();
+        s.add_time_entry("manual", "Typed #y", 100, 600).unwrap();
+        assert!(s.active_timer().unwrap().is_some());
+        let all = s.recent_time_entries(10).unwrap();
+        assert_eq!(all.len(), 2);
+        let typed = all.iter().find(|e| e.task_title == "Typed #y").unwrap();
+        assert_eq!((typed.start_ms, typed.end_ms), (100, Some(600)));
+    }
+
+    #[test]
+    fn split_active_cuts_idle_out() {
+        let s = open_in_memory().unwrap();
+        assert!(!s.split_active(10, 20).unwrap()); // nothing running
+        s.start_timer("k", "Task", None, 1_000).unwrap();
+        assert!(!s.split_active(500, 900).unwrap()); // idle before the session
+        assert!(s.split_active(2_000, 5_000).unwrap());
+        let mut all = s.recent_time_entries(10).unwrap();
+        all.sort_by_key(|e| e.start_ms);
+        assert_eq!((all[0].start_ms, all[0].end_ms), (1_000, Some(2_000)));
+        assert_eq!((all[1].start_ms, all[1].end_ms), (5_000, None));
+        assert_eq!(s.active_timer().unwrap().unwrap().task_key, "k");
+    }
 }
 
 #[cfg(test)]

@@ -25,11 +25,17 @@ export global TimeStore {
 
     callback stop-timer();
     callback continue-last();
-    callback add-entry();
     callback report();
-    callback export-csv();      // all entries → ~/Downloads/magpie-time-<date>.csv
+    callback export-csv();
+    // Manual entry quick-add (Add entry / ⌘N): "<description> <45m | 9:00-10:30>".
+    in-out property <bool> adding;
+    in-out property <string> add-error;
+    callback submit-entry(string);
+    callback delete-entry(int);  // by time_entries.id      // all entries → ~/Downloads/magpie-time-<date>.csv
     callback continue-row(int);
     callback pomo-toggle();     // start/pause
     callback pomo-skip();       // skip to next phase
+    in-out property <bool> pomo-auto: true;   // config pomodoro_auto_continue
+    callback set-pomo-auto(bool);
     callback pomo-tick();       // 1 Hz tick from the Slint Timer
 }

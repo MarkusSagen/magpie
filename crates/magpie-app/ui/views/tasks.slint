@@ -7,6 +7,7 @@ import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
 import { TimeView } from "time.slint";
+import { TimeStore } from "../time_store.slint";
 import { ScheduleView } from "schedule.slint";
 import { TodayView } from "today.slint";
 import { BoardView } from "board.slint";
@@ -100,6 +101,10 @@ export component TasksView inherits Rectangle {
                     if e.modifiers.control && e.modifiers.alt && e.text == Key.DownArrow { root.nav-cycle-view(1); return accept; }
                     if e.modifiers.control && e.text == "[" { root.nav-back(); return accept; }
                     if e.modifiers.control && e.text == "]" { root.nav-forward(); return accept; }
+                    // Time tab: ⌘N opens the manual-entry quick-add.
+                    if root.tasks-view == "time" && e.modifiers.control && e.text == "n" {
+                        TimeStore.adding = true; TimeStore.add-error = ""; return accept;
+                    }
                     if e.text == Key.Escape {
                         root.set-mode-tasks(false);
                         root.focus-search();

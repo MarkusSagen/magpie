@@ -114,6 +114,10 @@ pub struct Config {
     /// `stats`). Hidden sections stay reachable via `G x` / `⌘K`. Clipboard can't hide.
     #[serde(default)]
     pub sidebar_hidden: Vec<String>,
+    /// Pomodoro: roll straight into the next phase (true, default) or pause at each
+    /// phase end so the next one starts by hand.
+    #[serde(default = "default_true")]
+    pub pomodoro_auto_continue: bool,
     /// How to resolve an overlapping edit when syncing a project file: `ask` (hold
     /// the file + surface the conflict, default) or `file` (the disk always wins).
     #[serde(default = "default_project_sync_conflict")]
@@ -192,6 +196,7 @@ impl Default for Config {
             popover_height: default_popover_height(),
             sidebar_collapsed_groups: Vec::new(),
             sidebar_hidden: Vec::new(),
+            pomodoro_auto_continue: true,
             project_sync_conflict: default_project_sync_conflict(),
             projects_keep_magpie_out_of_git: false,
             scratch_hotkey: default_scratch_hotkey(),

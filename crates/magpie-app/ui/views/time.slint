@@ -55,6 +55,40 @@ export component TimeView inherits VerticalLayout {
             horizontal-stretch: 1;
             min-width: 0px;
             spacing: 4px;
+            // Quick-add (Add entry / ⌘N). ⏎ adds, Esc cancels.
+            if TimeStore.adding: VerticalLayout {
+                spacing: 4px;
+                Rectangle {
+                    height: 38px;
+                    background: Theme.bg-panel;
+                    border-radius: Theme.r-sm;
+                    border-width: 1px;
+                    border-color: Theme.line-strong;
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 10px; spacing: 10px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            if addin.text == "": Text { text: "What + when — e.g. Review PR #magpie 45m · Standup 9:00-9:15 · yesterday 14:00-15:30";
+                                color: Theme.text-faint; font-size: Theme.fs-body; vertical-alignment: center; overflow: elide; width: 100%; height: 100%; }
+                            addin := TextInput {
+                                width: 100%; height: 100%;
+                                color: Theme.text; font-size: Theme.fs-body;
+                                single-line: true; vertical-alignment: center;
+                                init => { self.focus(); }
+                                edited => { TimeStore.add-error = ""; }
+                                key-pressed(e) => {
+                                    if e.text == Key.Return { TimeStore.submit-entry(self.text); return accept; }
+                                    if e.text == Key.Escape { TimeStore.adding = false; TimeStore.add-error = ""; return accept; }
+                                    return reject;
+                                }
+                            }
+                        }
+                        VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                        VerticalLayout { alignment: center; Keycap { text: "esc"; } }
+                    }
+                }
+                if TimeStore.add-error != "": Text { text: TimeStore.add-error; color: Theme.text-dim; font-size: Theme.fs-sm; }
+            }
             ListView {
                 vertical-stretch: 1;
                 for row[i] in TimeStore.rows: Rectangle {
@@ -81,6 +115,12 @@ export component TimeView inherits VerticalLayout {
                             background: cbt.has-hover ? Theme.bg-elevated : transparent;
                             Text { text: "▶"; color: Theme.text-faint; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                             cbt := TouchArea { clicked => { TimeStore.continue-row(i); } } }
+                        // Delete (finished entries only — Stop a running one first).
+                        Rectangle { width: 24px; height: 24px; y: (parent.height - 24px)/2; border-radius: Theme.r-xs;
+                            background: dlt.has-hover ? Theme.bg-elevated : transparent;
+                            Text { text: row.running ? "" : "×"; color: dlt.has-hover ? Theme.text-dim : Theme.text-ghost;
+                                font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                            dlt := TouchArea { enabled: !row.running; clicked => { TimeStore.delete-entry(row.id); } } }
                     }
                 }
             }
@@ -92,9 +132,11 @@ export component TimeView inherits VerticalLayout {
                 Rectangle { height: 28px; width: 96px; border-radius: Theme.r-sm; background: cla.has-hover ? Theme.bg-elevated : transparent;
                     cla := TouchArea { clicked => { TimeStore.continue-last(); } }
                     Text { text: "Continue"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
-                Rectangle { height: 28px; width: 92px; border-radius: Theme.r-sm; background: aea.has-hover ? Theme.bg-elevated : transparent;
-                    aea := TouchArea { clicked => { TimeStore.add-entry(); } }
-                    Text { text: "Add entry"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { height: 28px; width: 116px; border-radius: Theme.r-sm; background: aea.has-hover ? Theme.bg-elevated : transparent;
+                    aea := TouchArea { clicked => { TimeStore.adding = true; TimeStore.add-error = ""; } }
+                    HorizontalLayout { alignment: center; spacing: 6px;
+                        Text { text: "Add entry"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        VerticalLayout { alignment: center; Keycap { text: "⌘N"; } } } }
                 Rectangle { height: 28px; width: 96px; border-radius: Theme.r-sm; background: eca.has-hover ? Theme.bg-elevated : transparent;
                     eca := TouchArea { clicked => { TimeStore.export-csv(); } }
                     Text { text: "Export CSV"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
@@ -112,7 +154,7 @@ export component TimeView inherits VerticalLayout {
             // Pomodoro card.
             Rectangle {
                 background: Theme.bg-panel; border-radius: Theme.r-lg; border-width: 1px; border-color: Theme.line;
-                height: 320px;
+                height: 350px;  // + the auto-continue row
                 VerticalLayout {
                     padding: 18px; spacing: 10px;
                     HorizontalLayout {
@@ -166,6 +208,21 @@ export component TimeView inherits VerticalLayout {
                             background: ska.has-hover ? Theme.bg-elevated : transparent;
                             ska := TouchArea { clicked => { TimeStore.pomo-skip(); } }
                             Text { text: "Skip"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; } }
+                    }
+                    // Auto-continue: roll into the next phase, or pause at each phase end.
+                    Rectangle {
+                        height: 24px;
+                        acta := TouchArea { clicked => { TimeStore.set-pomo-auto(!TimeStore.pomo-auto); } }
+                        HorizontalLayout {
+                            alignment: center; spacing: 8px;
+                            Rectangle { width: 14px; height: 14px; y: (parent.height - 14px) / 2; border-radius: 4px;
+                                border-width: 1.5px; border-color: TimeStore.pomo-auto ? Theme.text-dim : Theme.line-strong;
+                                background: TimeStore.pomo-auto ? Theme.bg-elevated : transparent;
+                                Text { text: TimeStore.pomo-auto ? "✓" : ""; color: Theme.text; font-size: 10px;
+                                    horizontal-alignment: center; vertical-alignment: center; } }
+                            Text { text: "Auto-continue to the next phase"; color: acta.has-hover ? Theme.text : Theme.text-dim;
+                                font-size: Theme.fs-sm; vertical-alignment: center; }
+                        }
                     }
                 }
             }

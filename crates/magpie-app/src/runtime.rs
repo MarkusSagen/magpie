@@ -2094,6 +2094,7 @@ fn show_window(ui: &LauncherWindow, state: &Arc<AppState>) {
     // summon would silently revert an in-session pick back to the stale value.
     // The snapshot is applied exactly once, right after window creation, in `start()`.
     refresh(ui, state);
+    push_sidebar_timer(ui, state);
     // Backfill site favicons for the visible web-link clips (background).
     spawn_clip_favicons(ui, state);
     // Capture the paste target: whatever app is frontmost right before we show.
@@ -3609,6 +3610,22 @@ fn project_and_tag(title: &str) -> (String, String) {
     (project, tag)
 }
 
+/// Push the running timer (if any) into the sidebar's pinned row.
+fn push_sidebar_timer(ui: &LauncherWindow, state: &AppState) {
+    let active = match state.store.lock() {
+        Ok(g) => g.active_timer().ok().flatten(),
+        Err(e) => e.into_inner().active_timer().ok().flatten(),
+    };
+    match active {
+        Some(a) => {
+            ui.set_timer_running(true);
+            ui.set_timer_title(a.task_title.into());
+            ui.set_timer_elapsed(hms(now_ms() - a.start_ms).into());
+        }
+        None => ui.set_timer_running(false),
+    }
+}
+
 /// Rebuild the Time tab (screen 24) into `TimeStore`: the running-timer bar, entries
 /// grouped by day, the This-week per-project card, and the current Pomodoro state.
 fn refresh_time(ui: &LauncherWindow, state: &AppState) {
@@ -3651,6 +3668,7 @@ fn refresh_time(ui: &LauncherWindow, state: &AppState) {
         *day_ms.entry(local_day(e.start_ms)).or_insert(0) += (end - e.start_ms).max(0);
     }
     let blank_row = |desc: String| crate::TimeRow {
+        id: 0,
         is_day_header: false,
         day_label: SharedString::new(),
         day_total: SharedString::new(),
@@ -3667,6 +3685,7 @@ fn refresh_time(ui: &LauncherWindow, state: &AppState) {
         if d != cur_day {
             cur_day = d;
             rows.push(crate::TimeRow {
+                id: 0,
                 is_day_header: true,
                 day_label: day_label(d, today).into(),
                 day_total: hms(*day_ms.get(&d).unwrap_or(&0)).into(),
@@ -3690,6 +3709,7 @@ fn refresh_time(ui: &LauncherWindow, state: &AppState) {
             }
         );
         rows.push(crate::TimeRow {
+            id: e.id as i32,
             is_day_header: false,
             day_label: SharedString::new(),
             day_total: SharedString::new(),
@@ -3735,6 +3755,7 @@ fn refresh_time(ui: &LauncherWindow, state: &AppState) {
     ts.set_week_total(format!("{}:{:02}", wm / 60, wm % 60).into());
 
     push_pomodoro(ui, state);
+    push_sidebar_timer(ui, state);
 }
 
 /// Continue tracking: start a timer for the row's task (or, when `row_index` points
@@ -7315,6 +7336,41 @@ pub fn start() {
         });
     }
 
+    // Pomodoro auto-continue (config `pomodoro_auto_continue`).
+    ui.global::<TimeStore>()
+        .set_pomo_auto(cfg.pomodoro_auto_continue);
+    ui.global::<TimeStore>().on_set_pomo_auto({
+        let w = ui.as_weak();
+        move |on| {
+            let cfg_path = data_dir().join("config.toml");
+            let mut cfg = magpie_app::config::load_or_default(&cfg_path);
+            cfg.pomodoro_auto_continue = on;
+            let _ = magpie_app::config::save(&cfg, &cfg_path);
+            if let Some(ui) = w.upgrade() {
+                ui.global::<TimeStore>().set_pomo_auto(on);
+            }
+        }
+    });
+    // Sidebar running-timer row: 1 Hz tick + click → Tasks → Time.
+    push_sidebar_timer(&ui, &state);
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_timer_tick(move || {
+            if let Some(ui) = w.upgrade() {
+                push_sidebar_timer(&ui, &s);
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.on_open_timer(move || {
+            if let Some(ui) = w.upgrade() {
+                nav_to(&ui, &s, "tasks", "time");
+            }
+        });
+    }
     // Settings → Sidebar: per-section visibility (config `sidebar_hidden`).
     apply_sidebar_prefs(&ui, &cfg);
     {
@@ -8212,8 +8268,44 @@ pub fn start() {
         });
     }
     {
-        ui.global::<TimeStore>().on_add_entry(move || {
-            // Manual-entry form is deferred; entries come from the task timer.
+        // Manual entry quick-add: "<description> <45m | 9:00-10:30 | yesterday …>".
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_submit_entry(move |text| {
+            let Some(ui) = w.upgrade() else { return };
+            let ts = ui.global::<TimeStore>();
+            let offset_min = local_offset_seconds() / 60;
+            match magpie_core::timeexport::parse_manual_entry(text.as_str(), now_ms(), offset_min) {
+                Ok(m) => {
+                    {
+                        let store = match s.store.lock() {
+                            Ok(g) => g,
+                            Err(e) => e.into_inner(),
+                        };
+                        let _ = store.add_time_entry(&m.title, &m.title, m.start_ms, m.end_ms);
+                    }
+                    ts.set_adding(false);
+                    ts.set_add_error(SharedString::new());
+                    refresh_time(&ui, &s);
+                }
+                Err(e) => ts.set_add_error(e.into()),
+            }
+        });
+    }
+    {
+        let s = state.clone();
+        let w = ui.as_weak();
+        ui.global::<TimeStore>().on_delete_entry(move |id| {
+            {
+                let store = match s.store.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                let _ = store.delete_time_entry(id as i64);
+            }
+            if let Some(ui) = w.upgrade() {
+                refresh_time(&ui, &s);
+            }
         });
     }
     {
@@ -8283,10 +8375,16 @@ pub fn start() {
                 if p.running {
                     p.remaining_sec -= 1;
                     if p.remaining_sec <= 0 {
-                        let finished_focus = p.phase == 0;
                         p.advance();
                         phase_ended = true;
-                        let _ = finished_focus;
+                        // Auto-continue off → wait at the start of the next phase.
+                        let auto = w
+                            .upgrade()
+                            .map(|ui| ui.global::<TimeStore>().get_pomo_auto())
+                            .unwrap_or(true);
+                        if !auto {
+                            p.running = false;
+                        }
                     }
                 }
             }
@@ -10491,6 +10589,7 @@ pub fn start() {
             }
             if let Some(ui) = w.upgrade() {
                 refresh_tasks(&ui, &s);
+                push_sidebar_timer(&ui, &s);
             }
         });
     }

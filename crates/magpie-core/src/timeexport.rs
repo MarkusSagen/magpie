@@ -93,6 +93,113 @@ pub fn to_csv(entries: &[TimeEntry], now_ms: i64) -> String {
     out
 }
 
+/// A manually entered time span (Time tab quick-add).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualEntry {
+    pub title: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+const MIN_MS: i64 = 60_000;
+const DAY_MS: i64 = 86_400_000;
+
+/// `1h30m` / `90m` / `1.5h` / `2h` → minutes.
+fn duration_token(t: &str) -> Option<f64> {
+    let t = t.to_ascii_lowercase();
+    if let Some((h, m)) = t.split_once('h') {
+        if !m.is_empty() {
+            let m = m.strip_suffix('m')?;
+            return Some(h.parse::<f64>().ok()? * 60.0 + m.parse::<f64>().ok()?);
+        }
+        return Some(h.parse::<f64>().ok()? * 60.0);
+    }
+    t.strip_suffix('m')?.parse::<f64>().ok()
+}
+
+/// `9:00` → minutes after midnight.
+fn clock_token(t: &str) -> Option<i64> {
+    let (h, m) = t.split_once(':')?;
+    let (h, m) = (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?);
+    ((0..24).contains(&h) && (0..60).contains(&m)).then_some(h * 60 + m)
+}
+
+/// Parse a Time-tab quick-add: `<description> <when>`, where `<when>` is a trailing
+/// duration ending now (`1h30m`, `90m`, `1.5h`, `1h 30m`) or a clock range today
+/// (`9:00-10:30`), optionally prefixed `yesterday` / `today`. `offset_min` is the
+/// local UTC offset, used to place clock ranges on the local day.
+pub fn parse_manual_entry(
+    input: &str,
+    now_ms: i64,
+    offset_min: i64,
+) -> Result<ManualEntry, String> {
+    let mut toks: Vec<&str> = input.split_whitespace().collect();
+    let last = *toks
+        .last()
+        .ok_or("type a description and a time, e.g. \"Review PR 45m\"")?;
+    let (start_ms, end_ms) = if let Some((a, b)) = last.split_once(['-', '–']) {
+        let (Some(a), Some(b)) = (clock_token(a), clock_token(b)) else {
+            return Err(format!("couldn't read the time range \"{last}\""));
+        };
+        toks.pop();
+        let mut day_offset = 0;
+        match toks.last().map(|t| t.to_ascii_lowercase()) {
+            Some(t) if t == "yesterday" => {
+                day_offset = -1;
+                toks.pop();
+            }
+            Some(t) if t == "today" => {
+                toks.pop();
+            }
+            _ => {}
+        }
+        let off = offset_min * MIN_MS;
+        let local_midnight = (now_ms + off).div_euclid(DAY_MS) * DAY_MS + day_offset * DAY_MS;
+        let start = local_midnight + a * MIN_MS - off;
+        let end = local_midnight + b * MIN_MS - off;
+        if end <= start {
+            return Err("the end time must be after the start".into());
+        }
+        (start, end)
+    } else {
+        let mut mins = 0.0;
+        let mut any = false;
+        while let Some(t) = toks.last() {
+            match duration_token(t) {
+                Some(m) => {
+                    mins += m;
+                    any = true;
+                    toks.pop();
+                }
+                None => break,
+            }
+        }
+        if !any {
+            return Err("end with a duration (45m, 1h30m) or a range (9:00-10:30)".into());
+        }
+        let dur = (mins * MIN_MS as f64).round() as i64;
+        if dur <= 0 {
+            return Err("the duration must be more than zero".into());
+        }
+        (now_ms - dur, now_ms)
+    };
+    if end_ms > now_ms {
+        return Err("that ends in the future".into());
+    }
+    if end_ms - start_ms > DAY_MS {
+        return Err("an entry can't be longer than 24 hours".into());
+    }
+    let title = toks.join(" ");
+    if title.is_empty() {
+        return Err("add a description before the time".into());
+    }
+    Ok(ManualEntry {
+        title,
+        start_ms,
+        end_ms,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +268,54 @@ mod tests {
             "1970-01-01T00:00:00Z,1970-01-01T01:30:00Z,90.0,\"Write \"\"spec\"\", v2 #proj/magpie #docs\",magpie,docs"
         );
         assert_eq!(lines[2], "1970-01-01T00:01:00Z,,30.0,Live #blog,blog,");
+    }
+
+    // now = 1970-01-02 12:00 UTC; local offset +60 (CET) → local 13:00.
+    const NOW: i64 = DAY_MS + 12 * 3_600_000;
+
+    #[test]
+    fn manual_durations_end_now() {
+        let m = parse_manual_entry("Review PR #magpie 1h30m", NOW, 60).unwrap();
+        assert_eq!(m.title, "Review PR #magpie");
+        assert_eq!((m.start_ms, m.end_ms), (NOW - 90 * MIN_MS, NOW));
+        for (inp, mins) in [
+            ("x 90m", 90),
+            ("x 1.5h", 90),
+            ("x 1h 30m", 90),
+            ("x 2h", 120),
+            ("x 45m", 45),
+        ] {
+            let m = parse_manual_entry(inp, NOW, 0).unwrap();
+            assert_eq!(m.end_ms - m.start_ms, mins * MIN_MS, "{inp}");
+        }
+    }
+
+    #[test]
+    fn manual_clock_ranges_use_local_day() {
+        // Local (CET) 9:00-10:30 today = 08:00-09:30 UTC on day 1.
+        let m = parse_manual_entry("Standup 9:00-10:30", NOW, 60).unwrap();
+        assert_eq!(m.start_ms, DAY_MS + 8 * 3_600_000);
+        assert_eq!(m.end_ms, DAY_MS + 9 * 3_600_000 + 30 * MIN_MS);
+        let y = parse_manual_entry("Deep work yesterday 14:00-15:00", NOW, 60).unwrap();
+        assert_eq!(y.title, "Deep work");
+        assert_eq!(y.start_ms, 13 * 3_600_000);
+        let t = parse_manual_entry("Lunch today 11:00–11:45", NOW, 60).unwrap();
+        assert_eq!(t.title, "Lunch");
+    }
+
+    #[test]
+    fn manual_entry_errors() {
+        for inp in [
+            "",
+            "Just words",
+            "45m",
+            "x 10:00-9:00",
+            "x 14:00-15:00", // ends after local 13:00 now → future
+            "x 25h",
+            "x 9:99-10:00",
+            "x 0m",
+        ] {
+            assert!(parse_manual_entry(inp, NOW, 60).is_err(), "{inp:?}");
+        }
     }
 }

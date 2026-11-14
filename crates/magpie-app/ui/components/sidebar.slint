@@ -98,6 +98,12 @@ export component Sidebar inherits Rectangle {
     callback toggle-pause();
     // A group header was collapsed/expanded by the user: (key, collapsed).
     callback group-toggled(string, bool);
+    // Running time-tracking timer (pinned row above the status line).
+    in property <bool> timer-running;
+    in property <string> timer-title;
+    in property <string> timer-elapsed;
+    callback timer-tick();       // 1 Hz while running → Rust refreshes the elapsed label
+    callback open-timer();       // → Tasks → Time
     width: 208px;
     background: Theme.bg-sidebar;
     // hairline right border
@@ -248,6 +254,23 @@ export component Sidebar inherits Rectangle {
         NavItem {
             label: "Settings"; icon: Icons.theme; hint: "⌘,"; cmd-held: root.cmd-held;
             active: false; clicked => { root.open-settings(); }
+        }
+        // Running timer: accent dot · task · live elapsed; click → Tasks → Time.
+        Timer { interval: 1s; running: root.timer-running; triggered => { root.timer-tick(); } }
+        if root.timer-running: Rectangle {
+            height: 30px;
+            border-radius: Theme.r-sm;
+            background: tmta.has-hover ? Theme.bg-elevated : transparent;
+            tmta := TouchArea { clicked => { root.open-timer(); } }
+            HorizontalLayout {
+                padding-left: 10px; padding-right: 10px; spacing: 8px;
+                VerticalLayout { alignment: center;
+                    Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.accent; } }
+                Text { text: root.timer-title; color: Theme.text-dim; font-size: Theme.fs-sm;
+                    vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Text { text: root.timer-elapsed; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-xs;
+                    vertical-alignment: center; }
+            }
         }
         Rectangle { height: 1px; background: Theme.line; }
         HorizontalLayout {
