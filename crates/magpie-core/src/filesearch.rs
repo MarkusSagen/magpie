@@ -119,6 +119,18 @@ pub fn parse_locations_prefix(raw: &str) -> (Vec<String>, String) {
     }
 }
 
+/// While the search field holds `in:<a>,<b>,<partial>` with no space yet (the user is
+/// still typing folders), return `(head, fragment)`: everything before the fragment
+/// being typed, and the fragment itself. `in:~/a,~/co` → `("in:~/a,", "~/co")`.
+pub fn location_fragment(raw: &str) -> Option<(&str, &str)> {
+    let rest = raw.strip_prefix("in:")?;
+    if rest.contains(char::is_whitespace) {
+        return None;
+    }
+    let cut = raw.rfind(',').map(|i| i + 1).unwrap_or(3);
+    Some((&raw[..cut], &raw[cut..]))
+}
+
 /// Convert a sed replacement into a `regex` crate template: `\\N` → `${N}`,
 /// `&` → `${0}` (whole match), `\\&` → literal `&`, `\\\\` → `\\`. `$1` / `${name}`
 /// pass through unchanged, so both sed and regex-crate styles work.
@@ -261,5 +273,15 @@ mod tests {
         );
         // Empty input stays empty.
         assert_eq!(sed_apply("", &re, "x", true), "");
+    }
+
+    #[test]
+    fn location_fragment_table() {
+        assert_eq!(location_fragment("in:"), Some(("in:", "")));
+        assert_eq!(location_fragment("in:~/co"), Some(("in:", "~/co")));
+        assert_eq!(location_fragment("in:~/a,~/co"), Some(("in:~/a,", "~/co")));
+        assert_eq!(location_fragment("in:~/a,"), Some(("in:~/a,", "")));
+        assert_eq!(location_fragment("in:~/a foo"), None); // query started
+        assert_eq!(location_fragment("foo"), None);
     }
 }

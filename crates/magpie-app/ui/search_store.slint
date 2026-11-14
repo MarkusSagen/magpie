@@ -35,5 +35,11 @@ export global SearchStore {
     callback toggle-viewed(int);
     callback toggle-hide-viewed();
     callback collapse-all();
-    callback apply-replace();               // sed: apply the replacement (⌘↵)
+    callback apply-replace();
+    // Typing `in:<folder>` (⌘L / +): folder suggestions; Tab completes, ⏎ adds as chips.
+    in-out property <[string]> suggestions;
+    in-out property <bool> is-location-query;       // query starts with `in:`
+    callback complete-location(string) -> string;   // query → query with 1st suggestion
+    callback commit-locations(string) -> string;    // query → remaining query
+    callback pick-suggestion(int);                   // click: complete with that folder               // sed: apply the replacement (⌘↵)
 }

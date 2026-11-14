@@ -82,6 +82,53 @@ pub fn expand_tilde(p: &str) -> PathBuf {
     PathBuf::from(p)
 }
 
+/// Folder suggestions for a location being typed (`~/co`, `/Users/x/`, `~/code/hobby/`):
+/// subfolders of the fragment's parent whose name starts with the typed prefix
+/// (case-insensitive; dot-folders only when the prefix starts with `.`), sorted, shown
+/// in the user's own form with a trailing `/` so Tab can keep going deeper.
+pub fn suggest_dirs(fragment: &str, limit: usize) -> Vec<String> {
+    match dirs::home_dir() {
+        Some(home) => suggest_dirs_with_home(fragment, &home, limit),
+        None => Vec::new(),
+    }
+}
+
+pub fn suggest_dirs_with_home(fragment: &str, home: &std::path::Path, limit: usize) -> Vec<String> {
+    // Split into the typed parent ("~/code/") and the name prefix ("ho").
+    let frag = if fragment.is_empty() || fragment == "~" {
+        "~/"
+    } else {
+        fragment
+    };
+    let (shown_parent, prefix) = match frag.rfind('/') {
+        Some(i) => (&frag[..=i], &frag[i + 1..]),
+        None => ("~/", frag),
+    };
+    let parent = if let Some(rest) = shown_parent.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(shown_parent)
+    };
+    let want_hidden = prefix.starts_with('.');
+    let lower = prefix.to_lowercase();
+    let Ok(rd) = std::fs::read_dir(&parent) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| want_hidden || !n.starts_with('.'))
+        .filter(|n| n.to_lowercase().starts_with(&lower))
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+        .into_iter()
+        .take(limit)
+        .map(|n| format!("{shown_parent}{n}/"))
+        .collect()
+}
+
 /// Path to Magpie's own ignore file (same location on every OS).
 pub fn magpie_ignore_path() -> PathBuf {
     let base = std::env::var("XDG_CONFIG_HOME")
@@ -244,4 +291,34 @@ pub fn run_search(
         }
     }
     results
+}
+
+#[cfg(test)]
+mod suggest_tests {
+    use super::suggest_dirs_with_home;
+
+    #[test]
+    fn suggests_matching_subfolders_in_the_users_form() {
+        let home = std::env::temp_dir().join(format!("magpie-suggest-{}", std::process::id()));
+        for d in [
+            "code/hobby",
+            "code/work",
+            "Code-old",
+            ".config",
+            "Documents",
+        ] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        std::fs::write(home.join("code/notes.txt"), "x").unwrap(); // files never suggested
+        let s = |f: &str| suggest_dirs_with_home(f, &home, 10);
+        assert_eq!(s("~/co"), vec!["~/code/", "~/Code-old/"]);
+        assert_eq!(s("~/code/"), vec!["~/code/hobby/", "~/code/work/"]);
+        assert_eq!(s("~/code/H"), vec!["~/code/hobby/"]);
+        assert_eq!(s(""), vec!["~/code/", "~/Code-old/", "~/Documents/"]); // no dot-dirs
+        assert_eq!(s("~/.c"), vec!["~/.config/"]);
+        let abs = format!("{}/Doc", home.display());
+        assert_eq!(s(&abs), vec![format!("{}/Documents/", home.display())]);
+        assert!(s("~/nope/").is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

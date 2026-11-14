@@ -3983,6 +3983,24 @@ fn refresh_files(ui: &LauncherWindow, state: &Arc<AppState>) {
         file_search::magpie_ignore_path().display()
     )));
 
+    // Typing `in:<folder>`: show folder suggestions instead of searching.
+    ss.set_is_location_query(query.trim_start().starts_with("in:"));
+    if let Some((_, frag)) = magpie_core::filesearch::location_fragment(query.trim_start()) {
+        let sugg = file_search::suggest_dirs(frag, 8);
+        ss.set_suggestions(ModelRc::new(VecModel::from(
+            sugg.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+        )));
+        ss.set_files(ModelRc::new(VecModel::from(Vec::<SearchFile>::new())));
+        ss.set_tree(ModelRc::new(VecModel::from(Vec::<SearchTreeRow>::new())));
+        ss.set_replace_lines(0);
+        ss.set_replace_files(0);
+        ss.set_summary(SharedString::from(
+            "Tab completes the folder · , adds another · ⏎ adds them as locations",
+        ));
+        return;
+    }
+    ss.set_suggestions(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
+
     // Nothing to search yet.
     let effective_query = query.trim().to_string();
     if locations.is_empty() || (effective_query.is_empty() && mode_i != 2) {
@@ -6693,6 +6711,12 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_query(q.clone());
                             ui.invoke_search_changed(q);
                         }
+                        // File search: typing a location shows folder suggestions (PNG 21).
+                        "files-in" => {
+                            ui.invoke_set_section(SharedString::from("files"));
+                            ui.set_query(SharedString::from("in:~/code/"));
+                            ui.invoke_search_changed(SharedString::from("in:~/code/"));
+                        }
                         // File search, sed mode (PNG 22): replacement PREVIEW only — the
                         // tour never sends ⌘↵, so nothing is written.
                         "files-sed" => {
@@ -8130,28 +8154,72 @@ pub fn start() {
     {
         let s = state.clone();
         let w = ui.as_weak();
+        // `+` / ⌘L: start typing a location (`in:` → folder suggestions).
+        let w_add = w.clone();
         ui.global::<SearchStore>().on_add_location(move || {
-            // Add the typed query as a path if it looks like one; else the home dir.
-            let typed = w
-                .upgrade()
-                .map(|ui| ui.get_query().to_string())
-                .unwrap_or_default();
-            let path = typed.trim().to_string();
-            let candidate = if path.starts_with('~') || path.starts_with('/') {
-                path
-            } else {
-                "~/Documents".to_string()
-            };
-            {
-                let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
-                if !g.locations.contains(&candidate) {
-                    g.locations.push(candidate);
-                }
-            }
-            if let Some(ui) = w.upgrade() {
-                refresh_files(&ui, &s);
+            if let Some(ui) = w_add.upgrade() {
+                let q = SharedString::from("in:");
+                ui.set_query(q.clone());
+                ui.invoke_search_changed(q);
             }
         });
+        {
+            let w = w.clone();
+            ui.global::<SearchStore>().on_complete_location(move |q| {
+                let q = q.to_string();
+                let Some((head, frag)) = magpie_core::filesearch::location_fragment(q.trim_start())
+                else {
+                    return q.into();
+                };
+                let first = w
+                    .upgrade()
+                    .and_then(|ui| ui.global::<SearchStore>().get_suggestions().row_data(0))
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| frag.to_string());
+                format!("{head}{first}").into()
+            });
+        }
+        {
+            let w = w.clone();
+            ui.global::<SearchStore>().on_pick_suggestion(move |i| {
+                let Some(ui) = w.upgrade() else { return };
+                let q = ui.get_query().to_string();
+                let Some((head, _)) = magpie_core::filesearch::location_fragment(q.trim_start())
+                else {
+                    return;
+                };
+                let Some(pick) = ui
+                    .global::<SearchStore>()
+                    .get_suggestions()
+                    .row_data(i as usize)
+                else {
+                    return;
+                };
+                let nq = SharedString::from(format!("{head}{pick}"));
+                ui.set_query(nq.clone());
+                ui.invoke_search_changed(nq);
+            });
+        }
+        {
+            let s = s.clone();
+            ui.global::<SearchStore>().on_commit_locations(move |q| {
+                let (locs, rest) = magpie_core::filesearch::parse_locations_prefix(q.as_str());
+                {
+                    let mut g = s.search.lock().unwrap_or_else(|e| e.into_inner());
+                    for l in locs {
+                        let l = if l.len() > 1 {
+                            l.trim_end_matches('/').to_string()
+                        } else {
+                            l
+                        };
+                        if !l.is_empty() && !g.locations.contains(&l) {
+                            g.locations.push(l);
+                        }
+                    }
+                }
+                rest.into()
+            });
+        }
     }
     {
         let s = state.clone();
