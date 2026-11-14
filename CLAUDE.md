@@ -243,6 +243,9 @@ check timestamps and don't assume "no new report" = "not crashing."
   then rejects with *"the application cannot be opened because it has an incorrect
   executable format."* Free space and rebuild; verify with
   `file target/release/magpie` (should say `Mach-O …executable`, not `data`).
+- **`Window::take_snapshot()` panics on our renderer** (`imgref … assertion failed: stride > 0`,
+  Slint 1.17 GL/femtovg) — don't use it for in-app screenshots; use the `screencapture` recipe.
+  Every dev panic also fires the native crash alert, so failed experiments are visible to the user.
 - **Real-clipboard / real-pasteboard tests must be ONE sequential test per file** —
   parallel `NSPasteboard` access SIGTRAPs on macOS.
 

@@ -13,6 +13,10 @@ export component SearchBar inherits Rectangle {
     // NB: not named accept/escape — those are reserved return values in key handlers.
     callback submit();
     callback dismiss();
+    // Opt-in: ↑/↓ inside the input emit `move(-1/+1)` instead of bubbling (palettes).
+    in property <bool> capture-arrows: false;
+    callback move(int);
+    public function focus-input() { ti.focus(); }
     height: 56px;
     // Bottom hairline (matches the clipboard top bar).
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
@@ -49,6 +53,8 @@ export component SearchBar inherits Rectangle {
                 key-pressed(event) => {
                     if event.text == Key.Return { root.submit(); return accept; }
                     if event.text == Key.Escape { root.dismiss(); return accept; }
+                    if root.capture-arrows && event.text == Key.UpArrow { root.move(-1); return accept; }
+                    if root.capture-arrows && event.text == Key.DownArrow { root.move(1); return accept; }
                     return reject;
                 }
             }

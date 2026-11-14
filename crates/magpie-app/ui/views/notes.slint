@@ -129,11 +129,11 @@ export component NotesView inherits Rectangle {
                                 height: 30px;
                                 width: 62px;
                                 border-radius: Theme.r-sm;
-                                background: root.notes-view == nv ? Pal.accent : (nvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                background: root.notes-view == nv || nvsw1.has-hover ? Theme.bg-elevated : transparent;
                                 nvsw1 := TouchArea { clicked => { root.set-note-view(nv); } }
                                 Text {
                                     text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
-                                    color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                    color: root.notes-view == nv ? Theme.text : Theme.text-dim;
                                     font-size: Theme.fs-sm;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -193,23 +193,23 @@ export component NotesView inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    background: root.note-tag-filter == "" || ntagall.has-hover ? Theme.bg-elevated : transparent;
                                     ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        Text { text: "All"; color: root.note-tag-filter == "" ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                                 for tag in root.note-all-tags: Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    background: root.note-tag-filter == tag || ntagchip.has-hover ? Theme.bg-elevated : transparent;
                                     ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -234,8 +234,14 @@ export component NotesView inherits Rectangle {
                                     if n.is_daily: Image { source: Icons.act-pin; colorize: Theme.text; width: 11px; height: 11px; image-fit: contain; }
                                     Text { text: n.title; color: Theme.text; font-size: Theme.fs-body; overflow: elide; horizontal-stretch: 1; }
                                 }
-                                Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
-                                if n.tags != "": Text { text: n.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
+                                // Two lines fit the 44px row: title, then "when · #tags".
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                                    if n.tags != "": Text { text: "·  " + n.tags; color: Theme.text-faint;
+                                        font-size: Theme.fs-sm; overflow: elide; horizontal-stretch: 1; }
+                                    if n.tags == "": Rectangle { horizontal-stretch: 1; }
+                                }
                             }
                         }
                     }

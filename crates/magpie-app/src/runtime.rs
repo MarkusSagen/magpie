@@ -6389,6 +6389,12 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                             ui.set_search_query(SharedString::from(""));
                             ui.set_search_mode(true);
                         }
+                        // Find everywhere with a query (notes / tasks / bookmarks groups).
+                        "find-query" => {
+                            ui.set_search_mode(true);
+                            ui.set_search_query(SharedString::from("magpie"));
+                            ui.invoke_run_unified_search(SharedString::from("magpie"));
+                        }
                         "actions" => ui.invoke_open_actions(),
                         "filters" => ui.invoke_open_search(),
                         // Filter popover with an active time filter (chip + badge visible).

@@ -106,8 +106,8 @@ export component FilesView inherits VerticalLayout {
         // hierarchy tree
         VerticalLayout {
             horizontal-stretch: 30;
-            min-width: 240px;
-            max-width: 300px;
+            min-width: 220px;
+            max-width: 260px;
             spacing: 6px;
             Text { text: "Where matches are"; color: Theme.text-dim; font-size: Theme.fs-sm; font-weight: 600; }
             Text { text: SearchStore.summary; color: Theme.text-faint; font-size: Theme.fs-sm; }
@@ -177,27 +177,38 @@ export component FilesView inherits VerticalLayout {
                             vwta := TouchArea { clicked => { SearchStore.toggle-viewed(fi); } } }
                     }
                 }
-                // matching lines
-                for line[li] in file.lines: Rectangle {
-                    height: 26px;
-                    HorizontalLayout {
-                        padding-left: 12px; spacing: 12px;
-                        Text { text: line.line-no; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm;
-                            vertical-alignment: center; width: 48px; horizontal-alignment: right; }
+                // matching lines — the match stays at its natural width (no stretch);
+                // a sed replacement shows on its own line beneath (PNG 22: "→ new").
+                for line[li] in file.lines: VerticalLayout {
+                    Rectangle {
+                        height: 26px;
                         HorizontalLayout {
-                            spacing: 0px; horizontal-stretch: 1;
-                            Text { text: line.pre; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
-                                vertical-alignment: center; overflow: elide; }
-                            Rectangle {
-                                background: Theme.accent.with-alpha(0.22); border-radius: 3px;
-                                Text { text: line.mid; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
-                                    vertical-alignment: center; } }
-                            Text { text: line.post; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
-                                vertical-alignment: center; overflow: elide; }
-                            // sed replacement preview
-                            if line.replaced != "": Text { text: "  →  " + line.replaced; color: Theme.accent;
-                                font-family: Theme.mono; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; }
-                            Rectangle { horizontal-stretch: 1; }
+                            padding-left: 12px; spacing: 12px;
+                            Text { text: line.line-no; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                vertical-alignment: center; width: 48px; horizontal-alignment: right; }
+                            HorizontalLayout {
+                                spacing: 0px; horizontal-stretch: 1; alignment: start;
+                                Text { text: line.pre; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                    vertical-alignment: center; overflow: elide; horizontal-stretch: 0; }
+                                Rectangle {
+                                    horizontal-stretch: 0;
+                                    background: Theme.accent.with-alpha(0.22); border-radius: 3px;
+                                    HorizontalLayout { padding-left: 2px; padding-right: 2px;
+                                        Text { text: line.mid; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                            vertical-alignment: center; } } }
+                                Text { text: line.post; color: Theme.text-dim; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                    vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            }
+                        }
+                    }
+                    if line.replaced != "": Rectangle {
+                        height: 24px;
+                        HorizontalLayout {
+                            padding-left: 12px; spacing: 12px;
+                            Text { text: "→"; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                vertical-alignment: center; width: 48px; horizontal-alignment: right; }
+                            Text { text: line.replaced; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
+                                vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                         }
                     }
                 }
