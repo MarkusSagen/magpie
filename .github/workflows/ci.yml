@@ -42,11 +42,11 @@ jobs:
 
       - name: Test (Linux, headless X)
         if: runner.os == 'Linux'
-        run: xvfb-run -a cargo test --workspace -- --quiet
+        run: xvfb-run -a cargo test --workspace
 
       - name: Test (macOS / Windows)
         if: runner.os != 'Linux'
-        run: cargo test --workspace -- --quiet
+        run: cargo test --workspace
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
