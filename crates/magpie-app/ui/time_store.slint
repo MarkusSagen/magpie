@@ -1,0 +1,49 @@
+import { TimeRow, TimeProjectBar } from "types.slint";
+
+// Time-tracking state (screen 24). A global so Rust populates it and the Time tab
+// reads it directly. Pomodoro is a self-contained countdown driven by a Slint Timer
+// + these fields.
+export global TimeStore {
+    // Timer bar.
+    in-out property <bool> running;
+    in-out property <string> running-desc;
+    in-out property <string> running-project;
+    in-out property <string> running-tag;
+    in-out property <string> running-elapsed;   // "0:42:13"
+    // Entries list (day headers interleaved).
+    in-out property <[TimeRow]> rows;
+    // This week card.
+    in-out property <string> week-total;
+    in-out property <[TimeProjectBar]> week-projects;
+    // Pomodoro.
+    in-out property <bool> pomo-running;
+    in-out property <int> pomo-phase;           // 0 focus, 1 break, 2 long break
+    in-out property <string> pomo-remaining;    // "18:24"
+    in-out property <float> pomo-progress;      // 0..1 (elapsed fraction of the phase)
+    in-out property <int> pomo-cycle;           // 1..4 within the set
+    in-out property <int> pomo-cycles-total;
+
+    callback stop-timer();
+    callback continue-last();
+    callback report();
+    callback export-csv();
+    // Manual entry quick-add (Add entry / ⌘N): "<description> <45m | 9:00-10:30>".
+    in-out property <bool> adding;
+    in-out property <string> add-error;
+    in-out property <string> add-draft;      // the quick-add text (pre-filled when editing)
+    in-out property <int> editing-id;        // 0 = adding a new entry
+    callback edit-entry(int);                // by time_entries.id → pre-fill + edit mode
+    callback submit-entry(string);
+    callback delete-entry(int);  // by time_entries.id
+    // Idle detection: "Idle 23m while tracking X" → Keep / Discard idle.
+    in-out property <bool> idle-pending;
+    in-out property <string> idle-label;
+    callback idle-keep();
+    callback idle-discard();      // all entries → ~/Downloads/magpie-time-<date>.csv
+    callback continue-row(int);
+    callback pomo-toggle();     // start/pause
+    callback pomo-skip();       // skip to next phase
+    in-out property <bool> pomo-auto: true;   // config pomodoro_auto_continue
+    callback set-pomo-auto(bool);
+    callback pomo-tick();       // 1 Hz tick from the Slint Timer
+}

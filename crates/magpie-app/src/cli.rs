@@ -9,6 +9,8 @@ pub enum Command {
     Restore(std::path::PathBuf),
     ImportBookmarks(String),
     SyncVault(Option<std::path::PathBuf>),
+    /// Run a scheduled job by id and exit — what OS schedulers invoke (Phase 21).
+    RunJob(i64),
 }
 
 pub fn parse_args(args: &[String]) -> Command {
@@ -48,6 +50,12 @@ pub fn parse_args(args: &[String]) -> Command {
                     _ => None,
                 };
                 return Command::SyncVault(path);
+            }
+            "--run-job" => {
+                return match args.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    Some(id) => Command::RunJob(id),
+                    None => Command::Help,
+                };
             }
             _ => {}
         }
@@ -89,6 +97,24 @@ pub fn run_command(cmd: Command, data_dir: &std::path::Path) -> i32 {
         Command::Restore(src) => restore_data(data_dir, &src),
         Command::ImportBookmarks(which) => import_bookmarks(data_dir, &which),
         Command::SyncVault(p) => sync_vault_cmd(data_dir, p),
+        Command::RunJob(id) => run_job_cmd(data_dir, id),
+    }
+}
+
+/// `magpie --run-job <id>`: the entry point OS schedulers call. Opens the encrypted
+/// DB, verifies the job's command hash, runs it, records the run. Exit 0 on success.
+fn run_job_cmd(data_dir: &std::path::Path, id: i64) -> i32 {
+    let store = match open_store(data_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("run-job: {e}");
+            return 1;
+        }
+    };
+    if crate::job_runner::run_job_by_id(&store, id) {
+        0
+    } else {
+        1
     }
 }
 

@@ -55,6 +55,7 @@ fn text(s: &str, ms: i64) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
         source_app: None,
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }
@@ -66,6 +67,7 @@ fn text_from(s: &str, ms: i64, app: &str) -> CaptureEvent {
             display_name: app.into(),
             icon_path: None,
         }),
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }
@@ -184,6 +186,7 @@ fn content_types_detected_persisted_and_filterable() {
         &CaptureEvent {
             content: Content::Files(vec!["/a".into(), "/b".into()]),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 5,
         },
         &Noop,
@@ -222,6 +225,7 @@ fn image_ingestion_dedups_and_stores_path() {
             &CaptureEvent {
                 content: png.clone(),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 1,
             },
             &images,
@@ -232,6 +236,7 @@ fn image_ingestion_dedups_and_stores_path() {
             &CaptureEvent {
                 content: png.clone(),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: 2,
             },
             &images,
@@ -410,6 +415,7 @@ fn rich_text_dedups_with_plain_text_of_same_body() {
                 rtf: None,
             },
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1,
         },
         &Noop,

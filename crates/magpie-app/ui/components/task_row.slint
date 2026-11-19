@@ -24,8 +24,8 @@ export component PopoverTaskRow inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 border-width: 1px;
-                border-color: root.t.doing && !root.t.done ? Theme.warn : Theme.text-faint;
-                background: root.t.done ? Pal.accent : (root.t.doing ? Theme.warn.with-alpha(0.2) : transparent);
+                border-color: root.t.doing && !root.t.done ? Theme.text-dim : Theme.text-faint;
+                background: root.t.done ? Pal.accent : (root.t.doing ? Theme.text-dim.with-alpha(0.2) : transparent);
                 if root.t.done: Text {
                     text: "✓";
                     color: Pal.on-accent;
@@ -37,7 +37,7 @@ export component PopoverTaskRow inherits Rectangle {
                 }
                 if !root.t.done && root.t.doing: Text {
                     text: "◐";
-                    color: Theme.warn;
+                    color: Theme.text-dim;
                     font-size: 12px;
                     width: 18px;
                     height: 18px;
@@ -61,8 +61,8 @@ export component PopoverTaskRow inherits Rectangle {
                 spacing: Theme.sp2;
                 alignment: start;
                 if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
-                if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.link; font-size: Theme.fs-xs; vertical-alignment: center; }
-                if root.t.recur != "": Text { text: root.t.recur; color: Theme.success; font-size: Theme.fs-xs; vertical-alignment: center; }
+                if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                if root.t.recur != "": Text { text: root.t.recur; color: Theme.text-faint; font-size: Theme.fs-xs; vertical-alignment: center; }
             }
         }
     }

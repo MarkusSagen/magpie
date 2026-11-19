@@ -15,14 +15,14 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            asset: Magpie-macos-arm64.zip
+            asset: Magpie-macos-arm64.dmg
           - os: ubuntu-latest
             asset: magpie-linux-x86_64.tar.gz
           - os: windows-latest
             asset: magpie-windows-x86_64.zip
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # rust-toolchain.toml pins the version; ensure it's installed (release builds
       # need neither clippy nor rustfmt). Keep in sync with rust-toolchain.toml.
@@ -45,7 +45,7 @@ jobs:
       # ---- package (inline, not via justfile: the justfile pins a macOS-arm
       #      toolchain path for local dev and isn't portable to CI runners) ----
 
-      - name: Package (macOS .app → zip)
+      - name: Package (macOS .app → dmg)
         if: runner.os == 'macOS'
         run: |
           APP="target/Magpie.app"
@@ -54,8 +54,16 @@ jobs:
           cp target/release/magpie "$APP/Contents/MacOS/magpie"
           cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
           cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
+          # Stamp the real crate version (checked-in plist carries a placeholder).
+          VERSION="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion            -string "$VERSION" "$APP/Contents/Info.plist"
           codesign --force --deep --sign - --identifier io.magpie "$APP" || echo "ad-hoc sign skipped"
-          ditto -c -k --keepParent "$APP" "${{ matrix.asset }}"
+          # Drag-to-Applications .dmg.
+          STAGE="$(mktemp -d)/Magpie"; mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/Magpie.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Magpie $VERSION" -srcfolder "$STAGE" -ov -format UDZO "${{ matrix.asset }}"
 
       - name: Package (Linux binary + .desktop → tar.gz)
         if: runner.os == 'Linux'

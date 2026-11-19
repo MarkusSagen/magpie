@@ -1,0 +1,70 @@
+// Single source of truth for the Shortcuts sheet. Every row here must correspond
+// to a real handler (see the key-pressed handlers in views/main.slint, the task
+// Space-toggle, the global summon hotkey, and ⌘, wired in runtime.rs). Keeping
+// them in ONE list means the sheet can't drift from what's actually wired.
+export struct ShortcutRow {
+    group: string,
+    keys: string,
+    desc: string,
+}
+
+export global Shortcuts {
+    out property <[ShortcutRow]> rows: [
+        // Navigation
+        { group: "Navigation", keys: "↑ / ↓", desc: "Move selection" },
+        { group: "Navigation", keys: "⏎", desc: "Paste to the previous app + close" },
+        { group: "Navigation", keys: "⌘⏎", desc: "Paste + keep Magpie open" },
+        { group: "Navigation", keys: "Esc", desc: "Clear search, then close" },
+        { group: "Navigation", keys: "⌘1–9", desc: "Paste the Nth entry" },
+        { group: "Navigation", keys: "⌘⇧Space", desc: "Summon Magpie anywhere" },
+        // Search & filters (clipboard search bar — type these inline)
+        { group: "Search & filters", keys: "app:vivaldi", desc: "From a source app (try app:ghostty)" },
+        { group: "Search & filters", keys: "url:  /  site:", desc: "Clip URL, or the page it came from" },
+        { group: "Search & filters", keys: "type:image", desc: "Content kind (link, text, color, file…)" },
+        { group: "Search & filters", keys: "is:pinned", desc: "Pinned entries only" },
+        { group: "Search & filters", keys: "after:  before:  on:", desc: "Date range, YYYY[-MM[-DD]]" },
+        { group: "Search & filters", keys: "browser  editor  terminal", desc: "By source category (bare)" },
+        { group: "Search & filters", keys: "cat:notes", desc: "Other categories (chat, design…)" },
+        { group: "Search & filters", keys: "> command", desc: "Run a command / transform" },
+        { group: "Search & filters", keys: "⌘F", desc: "Append filters (source app, time)" },
+        // Sections
+        { group: "Sections", keys: "G then C/T/N/B/K", desc: "Jump to a section (K = Secrets)" },
+        { group: "Sections", keys: "⌘[ / ⌘]", desc: "Back / forward through screens" },
+        { group: "Sections", keys: "⌘⌥←", desc: "Jump to the previous screen" },
+        { group: "Sections", keys: "⌘⌥↑ / ⌘⌥↓", desc: "Cycle the section's views" },
+        // Actions
+        { group: "Actions", keys: "⌘K", desc: "Open the actions menu" },
+        { group: "Actions", keys: "⌘F", desc: "Filters (source app / time)" },
+        { group: "Actions", keys: "⌘⇧F", desc: "Find everywhere" },
+        { group: "Actions", keys: "⌘C", desc: "Copy (no paste)" },
+        { group: "Actions", keys: "⌘E", desc: "Edit the entry" },
+        { group: "Actions", keys: "⌘N", desc: "New snippet" },
+        { group: "Actions", keys: "⌘P", desc: "Pin / unpin" },
+        { group: "Actions", keys: "⌘S", desc: "Assign to a ⌘1–9 slot" },
+        { group: "Actions", keys: "⌘G", desc: "Add to merge" },
+        { group: "Actions", keys: "⌘J", desc: "New note from this entry" },
+        { group: "Actions", keys: "⌘K → Save as secret", desc: "Promote a clip to the Secrets vault" },
+        { group: "Actions", keys: "⌘V", desc: "Paste clipboard into search" },
+        { group: "Actions", keys: "⌘⇧C", desc: "Pick a color from the screen (macOS)" },
+        { group: "Actions", keys: "⌘⌫", desc: "Delete the entry" },
+        // Files (G F)
+        { group: "Files", keys: "⏎ / ⌘E", desc: "Open / edit the selected file" },
+        { group: "Files", keys: "⌘⇧R", desc: "Reveal in Finder" },
+        { group: "Files", keys: "⌘⇧V", desc: "Mark viewed (skip in a replace)" },
+        { group: "Files", keys: "⌘L  or  in:", desc: "Type a folder to search (suggestions)" },
+        { group: "Files", keys: "Tab / ,", desc: "Complete the folder / add another" },
+        { group: "Files", keys: "⌫", desc: "On an empty field: remove the last folder" },
+        { group: "Files", keys: "⌘⏎", desc: "Apply the s/…/…/ replacement" },
+        // World clock (Calculator → World clock)
+        { group: "World clock", keys: "⌘C", desc: "Copy the time summary" },
+        { group: "World clock", keys: "⌘N", desc: "Add a city" },
+        { group: "World clock", keys: "[ / ]  or  ← / →", desc: "Shift the chosen hour" },
+        // Views
+        { group: "Views", keys: "⌘/  or  ?", desc: "This help sheet" },
+        { group: "Views", keys: "⌘,", desc: "Settings" },
+        { group: "Views", keys: "⌘+ / ⌘− / ⌘0", desc: "Preview text size" },
+        { group: "Views", keys: "Space", desc: "Toggle a task (in a note)" },
+        { group: "Views", keys: "⌘⏎", desc: "Make task (in a note)" },
+        { group: "Views", keys: "⌘E", desc: "Scratch pad: Markdown preview ⇄ edit" },
+    ];
+}

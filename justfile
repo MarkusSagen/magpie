@@ -12,6 +12,11 @@ set shell := ["bash", "-uc"]
 tc := env_var('HOME') + "/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin"
 cargo := "env -u RUSTUP_TOOLCHAIN RUSTC=" + tc + "/rustc PATH=\"" + tc + ":$PATH\" " + tc + "/cargo"
 
+# Cargo profile the LOCAL macOS install uses. Debug by default so `just install-macos`
+# is fast (reuses `just run`'s warm artifacts); `PROFILE=release just install-macos`
+# for an optimized build. Distribution (`package-macos`, `dmg`) is always release.
+profile := env_var_or_default("PROFILE", "debug")
+
 # Run the full test suite
 test:
     {{cargo}} test --workspace
@@ -52,6 +57,10 @@ bin-size: release
 
 fmt:
     {{cargo}} fmt --all
+
+# Non-mutating format check (for the pre-commit gate / CI).
+fmt-check:
+    {{cargo}} fmt --all --check
 
 clippy:
     {{cargo}} clippy --workspace --all-targets -- -D warnings
@@ -100,26 +109,142 @@ icons:
     echo "regenerated packaging/macos/Magpie.icns + crates/magpie-app/icons/tray-template.png from assets/"
 
 # --- packaging ---
+#
+# Cross-platform entry points use just's OS attributes (https://just.systems/man/en/
+# attributes.html): `just package` / `just install` resolve to the recipe tagged for the
+# host OS ([macos]/[linux]/[windows]), like examples/cross-platform.just. The detailed
+# macOS recipes (package-macos, dmg, …) stay callable by name.
 
-# macOS: assemble a minimal .app bundle around the release binary
-package-macos: release
+# Build a distributable package for the current OS (→ target/).
+[macos]
+[group('package')]
+package: package-macos
+
+[linux]
+[group('package')]
+package: release
     #!/usr/bin/env bash
     set -euo pipefail
+    VERSION="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+    STAGE="$(mktemp -d)/magpie-${VERSION}"
+    mkdir -p "$STAGE"
+    cp target/release/magpie "$STAGE/"
+    cp packaging/linux/magpie.desktop "$STAGE/" 2>/dev/null || true
+    OUT="target/magpie-${VERSION}-linux-$(uname -m).tar.gz"
+    tar -C "$(dirname "$STAGE")" -czf "$OUT" "$(basename "$STAGE")"
+    echo "built $OUT"
+
+[windows]
+[group('package')]
+package: release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+    OUT="target/magpie-${VERSION}-windows-x86_64.zip"
+    # Windows' bundled tar (bsdtar) writes zip with -a; fall back to 7z if present.
+    if tar -a -c -f "$OUT" -C target/release magpie.exe 2>/dev/null; then :; \
+    elif command -v 7z >/dev/null; then 7z a "$OUT" ./target/release/magpie.exe >/dev/null; \
+    else echo "no zip tool found; deliverable: target/release/magpie.exe"; exit 0; fi
+    echo "built $OUT"
+
+# Install Magpie for the current OS and register login autostart.
+[macos]
+[group('install')]
+install: install-macos
+
+[linux]
+[group('install')]
+install: release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    install -Dm755 target/release/magpie "$HOME/.local/bin/magpie"
+    install -Dm644 packaging/linux/magpie.desktop "$HOME/.local/share/applications/magpie.desktop" 2>/dev/null || true
+    "$HOME/.local/bin/magpie" --install-autostart || true
+    echo "installed to ~/.local/bin/magpie (ensure ~/.local/bin is on PATH)"
+
+[windows]
+[group('install')]
+install: release
+    #!/usr/bin/env bash
+    echo "Windows: copy target/release/magpie.exe onto your PATH, then run: magpie --install-autostart"
+
+# macOS: assemble (+ ad-hoc sign) target/Magpie.app from a cargo PROFILE
+# ("release" or "debug"). Internal — use package-macos / install-macos.
+[macos]
+_app-macos PROFILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{PROFILE}}" = "release" ]; then
+      {{cargo}} build --release -p magpie-app; BIN="target/release/magpie"
+    else
+      {{cargo}} build -p magpie-app; BIN="target/debug/magpie"
+    fi
     APP="target/Magpie.app"
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    cp target/release/magpie "$APP/Contents/MacOS/magpie"
+    cp "$BIN" "$APP/Contents/MacOS/magpie"
     cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
     cp packaging/macos/Magpie.icns "$APP/Contents/Resources/Magpie.icns"
+    # Stamp the real crate version into the bundle (the checked-in plist carries a
+    # placeholder). plutil edits the copy in place; the source plist is untouched.
+    VERSION="$(awk -F'\"' '/^version = /{print $2; exit}' Cargo.toml)"
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+    plutil -replace CFBundleVersion            -string "$VERSION" "$APP/Contents/Info.plist"
     # Sign so macOS TCC (Accessibility) binds the grant to a consistent identity.
     # Ad-hoc (`-`) changes the code hash every build, so the Accessibility grant
     # RESETS on each rebuild. Set SIGN_ID to a STABLE self-signed cert (see
     # `just make-signing-cert`) and the grant persists across rebuilds.
     SIGN_ID="${SIGN_ID:--}"
     codesign --force --deep --sign "$SIGN_ID" --identifier io.magpie "$APP" \
-      && echo "built $APP (signed: $SIGN_ID)" \
-      || echo "built $APP (unsigned — codesign unavailable)"
+      && echo "built $APP ({{PROFILE}}, signed: $SIGN_ID)" \
+      || echo "built $APP ({{PROFILE}}, unsigned — codesign unavailable)"
     if [ "$SIGN_ID" = "-" ]; then echo "NOTE: ad-hoc signed — the Accessibility grant resets each rebuild. See 'just make-signing-cert' for a stable grant."; fi
+
+# macOS: assemble an optimized (release) .app for distribution.
+[macos]
+[group('package')]
+package-macos: (_app-macos "release")
+
+# Install into /Applications, register login autostart, and launch. Uses the fast DEBUG
+# build by default (PROFILE=release for an optimized bundle); SIGN_ID=… for a stable
+# Accessibility grant; AUTOSTART=0 to skip the login item.
+[macos]
+[group('install')]
+install-macos: (_app-macos profile)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SRC="target/Magpie.app"
+    DEST="/Applications/Magpie.app"
+    # Quit a running copy so the bundle can be replaced cleanly.
+    osascript -e 'tell application "Magpie" to quit' 2>/dev/null || true
+    pkill -x magpie 2>/dev/null || true
+    sleep 1
+    rm -rf "$DEST"
+    cp -R "$SRC" "$DEST"
+    echo "installed $DEST"
+    # Register login autostart (default on; AUTOSTART=0 to skip). Run the INSTALLED
+    # binary so the LaunchAgent points at /Applications, not the build tree.
+    if [ "${AUTOSTART:-1}" = "1" ]; then
+      "$DEST/Contents/MacOS/magpie" --install-autostart && echo "registered login autostart"
+    fi
+    open "$DEST"
+    echo "launched Magpie — look for the menu-bar icon (⌘⇧Space to summon)."
+
+# macOS: build a drag-to-Applications .dmg for distributing to other Macs.
+[macos]
+[group('package')]
+dmg: package-macos
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+    STAGE="$(mktemp -d)/Magpie"
+    mkdir -p "$STAGE"
+    cp -R target/Magpie.app "$STAGE/Magpie.app"
+    ln -s /Applications "$STAGE/Applications"
+    OUT="target/Magpie-${VERSION}.dmg"
+    rm -f "$OUT"
+    hdiutil create -volname "Magpie ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
+    echo "built $OUT (open it, then drag Magpie into Applications)"
 
 # Create a one-time self-signed code-signing cert ("Magpie Dev") so the
 # Accessibility grant survives rebuilds. Then build with: SIGN_ID="Magpie Dev" just package-macos
@@ -138,10 +263,3 @@ make-signing-cert:
     echo "Then rebuild with:  SIGN_ID=\"$NAME\" just package-macos"
     open "/System/Applications/Utilities/Keychain Access.app" || true
 
-# Windows: the release .exe is the deliverable
-package-windows: release
-    @echo "deliverable: target/release/magpie.exe"
-
-# Linux: binary + autostart .desktop template
-package-linux: release
-    @echo "deliverable: target/release/magpie (+ ~/.config/autostart via --install-autostart)"

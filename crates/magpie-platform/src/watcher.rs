@@ -29,11 +29,15 @@ impl<C: Clipboard, S: SourceApp> Watcher<C, S> {
             return None;
         }
         self.last_token = Some(snap.change_token);
-        let app = self.source.frontmost();
+        let (app, title) = match self.source.frontmost_capture() {
+            Some((a, t)) => (Some(a), t),
+            None => (None, String::new()),
+        };
         match self.policy.decide(&snap, app.as_ref()) {
             Decision::Keep => snap.content.map(|content| CaptureEvent {
                 content,
                 source_app: app,
+                source_title: title,
                 copied_at_ms: now_ms,
             }),
             Decision::Skip(_) => None,

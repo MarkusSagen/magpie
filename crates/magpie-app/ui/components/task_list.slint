@@ -1,0 +1,195 @@
+import { ListView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { TaskRow } from "../types.slint";
+
+// The virtualized task list body, shared by the Tasks tab (List view) and the
+// Projects tab (per-project task hub) so both render identical rows: checkbox,
+// priority pill, inline-editable title, badges, and hover actions (edit/star/
+// timer). `group_sort` on the Rust side clusters rows by project, so the flat
+// list reads correctly top-to-bottom with a header per project cluster.
+export component TaskListBody inherits ListView {
+    in property <[TaskRow]> tasks;
+    in-out property <int> task-selected;
+    // Inline title-edit state (the row whose title is being edited, -1 = none).
+    in-out property <int> task-edit-note: -1;
+    in-out property <int> task-edit-line: -1;
+    in-out property <string> task-edit-draft;
+    callback toggle-task(int, int);
+    callback open-task-note(int);
+    callback toggle-bookmark(int, int);
+    callback toggle-timer(int, string);
+    callback rename-task(int, int, string);
+
+    for t[i] in root.tasks: VerticalLayout {
+        spacing: 0px;
+        // Project group header — shown once per project cluster.
+        if i == 0 || root.tasks[i - 1].project != t.project: Text {
+            text: t.project == "" ? "No project" : "#" + t.project;
+            color: Theme.text-dim;
+            font-size: 11px;
+            font-weight: 700;
+            height: 26px;
+            vertical-alignment: bottom;
+        }
+        Rectangle {
+            height: 48px;
+            background: i == root.task-selected ? Theme.bg-elevated : (trow.has-hover ? Theme.bg-elevated : transparent);
+            border-radius: 6px;
+            // Accent bar marks the keyboard-selected row.
+            if i == root.task-selected: Rectangle {
+                x: 0;
+                y: 8px;
+                width: 3px;
+                height: 32px;
+                border-radius: 1.5px;
+                background: Pal.accent;
+            }
+            // Row click jumps to the note that owns this task. The checkbox has
+            // its own TouchArea (declared later → higher z-order) so it toggles
+            // instead of opening the note.
+            trow := TouchArea { clicked => { root.open-task-note(t.note_id); } }
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 10px;
+                spacing: 8px;
+                // Checkbox column.
+                Rectangle {
+                    width: 24px;
+                    Rectangle {
+                        y: 13px;
+                        width: 22px;
+                        height: 22px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: t.doing && !t.done ? Theme.text-dim : Theme.text-faint;
+                        background: t.done ? Pal.accent : (t.doing ? Theme.text-dim.with-alpha(0.2) : transparent);
+                        if t.done: Text {
+                            text: "✓";
+                            color: Pal.on-accent;
+                            font-size: 13px;
+                            width: 22px;
+                            height: 22px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if !t.done && t.doing: Text {
+                            text: "◐";
+                            color: Theme.text-dim;
+                            font-size: 13px;
+                            width: 22px;
+                            height: 22px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    cbta := TouchArea { clicked => { root.toggle-task(t.note_id, t.line_index); } }
+                }
+                // Priority pill in the gutter: labeled H/M/L; blank for None.
+                Rectangle {
+                    width: 20px;
+                    if t.priority <= 2: Rectangle {
+                        y: 15px;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 5px;
+                        background: t.priority == 0 ? Theme.text
+                            : (t.priority == 1 ? Theme.text-faint : Theme.text-faint);
+                        Text {
+                            text: t.priority == 0 ? "H" : (t.priority == 1 ? "M" : "L");
+                            color: Theme.on-accent;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                titlecol := VerticalLayout {
+                    horizontal-stretch: 1;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    property <bool> editing: t.note_id == root.task-edit-note && t.line_index == root.task-edit-line;
+                    if !titlecol.editing: Text {
+                        text: t.title;
+                        // Done tasks are dimmed (Slint Text has no strike).
+                        color: t.done ? Theme.text-faint : Theme.text;
+                        font-size: 14px;
+                        overflow: elide;
+                    }
+                    // Inline title editor: Enter commits, Esc cancels.
+                    if titlecol.editing: TextInput {
+                        text <=> root.task-edit-draft;
+                        color: Theme.text;
+                        font-size: 14px;
+                        single-line: true;
+                        init => { self.focus(); self.select-all(); }
+                        accepted => {
+                            root.rename-task(t.note_id, t.line_index, self.text);
+                            root.task-edit-note = -1;
+                            root.task-edit-line = -1;
+                        }
+                        key-pressed(e) => {
+                            if e.text == Key.Escape {
+                                root.task-edit-note = -1;
+                                root.task-edit-line = -1;
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        if t.due != "": Text { text: t.due; color: t.overdue ? Theme.danger : Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        if t.project != "": Text { text: "#" + t.project; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        if t.recur != "": Text { text: t.recur; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
+                        if t.time_total != "": Text { text: "⏱ " + t.time_total; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                        if t.source != "": Text { text: t.source; color: Theme.text-faint; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                    }
+                }
+                // Inline edit (pencil): enters title-edit mode for this row.
+                Rectangle {
+                    width: 30px;
+                    edt := TouchArea {
+                        clicked => {
+                            root.task-edit-draft = t.title;
+                            root.task-edit-note = t.note_id;
+                            root.task-edit-line = t.line_index;
+                        }
+                    }
+                    if trow.has-hover || edt.has-hover: Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        source: Icons.act-edit;
+                        width: 15px;
+                        height: 15px;
+                        colorize: edt.has-hover ? Theme.text : Theme.text-faint;
+                    }
+                }
+                Rectangle {
+                    width: 30px;
+                    bmk := TouchArea { clicked => { root.toggle-bookmark(t.note_id, t.line_index); } }
+                    Text {
+                        text: t.bookmarked ? "★" : "☆";
+                        color: t.bookmarked ? Theme.text-dim : (bmk.has-hover ? Theme.text : Theme.text-faint);
+                        font-size: 16px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    width: 30px;
+                    tmr := TouchArea { clicked => { root.toggle-timer(t.note_id, t.title); } }
+                    Text {
+                        text: t.tracking ? "⏹" : "▶";
+                        color: t.tracking ? Theme.text-faint : (tmr.has-hover ? Theme.text : Theme.text-faint);
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

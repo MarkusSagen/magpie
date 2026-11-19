@@ -1,6 +1,20 @@
 use crate::traits::Paster;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
+/// Synthesize `n` Backspace presses on the main thread (expand-as-you-type erases
+/// the typed keyword before pasting its expansion). Best-effort; errors are ignored
+/// per keystroke so a partial failure never leaves a modifier stuck.
+pub fn send_backspaces(n: usize) -> Result<(), String> {
+    if n == 0 {
+        return Ok(());
+    }
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+    for _ in 0..n {
+        let _ = enigo.key(Key::Backspace, Direction::Click);
+    }
+    Ok(())
+}
+
 pub struct EnigoPaster;
 
 impl Paster for EnigoPaster {

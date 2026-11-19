@@ -286,6 +286,108 @@ pub fn set_task_status(
             .unwrap_or(false)
 }
 
+/// Replace the title text on task `line_index`, preserving indentation, the
+/// checkbox marker, and every metadata token (`!priority`, `@due` [+ its
+/// following time], `#project`, recurrence, `*` bookmark). Metadata keeps its
+/// original relative order, appended after the new title. No-op if the line
+/// isn't a task line. Mirrors `parse_tasks_in`'s token classification so the
+/// round-trip (parse title → edit → write) is lossless for metadata.
+pub fn set_line_title(body: &str, line_index: usize, new_title: &str) -> String {
+    let mut lines: Vec<String> = body.split('\n').map(|s| s.to_string()).collect();
+    let Some(line) = lines.get(line_index) else {
+        return body.to_string();
+    };
+    let indent_len = line.len() - line.trim_start().len();
+    let (ind, trimmed) = line.split_at(indent_len);
+    let Some((status, rest)) = task_marker(trimmed) else {
+        return body.to_string();
+    };
+    // Bucket tokens: metadata (kept verbatim, in order) vs. title (discarded,
+    // replaced by `new_title`). The `now_ms` used for `@due` parsing is only a
+    // validity check here, so 0 is fine.
+    let mut meta: Vec<&str> = Vec::new();
+    let mut seen_priority = false;
+    let mut seen_due = false;
+    let mut seen_project = false;
+    let mut seen_recur = false;
+    let mut seen_star = false;
+    let mut toks = rest.split_whitespace().peekable();
+    while let Some(tok) = toks.next() {
+        if !seen_priority && parse_priority(tok).is_some() {
+            seen_priority = true;
+            meta.push(tok);
+            continue;
+        }
+        if !seen_due {
+            if let Some(s) = tok.strip_prefix('@') {
+                if parse_due(s, 0).is_some() {
+                    seen_due = true;
+                    meta.push(tok);
+                    if let Some(next) = toks.peek() {
+                        if parse_time(next).is_some() {
+                            meta.push(next);
+                            toks.next();
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+        if !seen_project {
+            if let Some(name) = tok.strip_prefix('#') {
+                if !name.is_empty() && !name.starts_with('#') {
+                    seen_project = true;
+                    meta.push(tok);
+                    continue;
+                }
+            }
+        }
+        if !seen_recur && parse_recur(tok).is_some() {
+            seen_recur = true;
+            meta.push(tok);
+            continue;
+        }
+        if !seen_star && tok == "*" {
+            seen_star = true;
+            meta.push(tok);
+            continue;
+        }
+        // title token — dropped; replaced wholesale by `new_title`.
+    }
+    let glyph = match status {
+        Status::Todo => ' ',
+        Status::Doing => '/',
+        Status::Done => 'x',
+    };
+    let title = new_title.trim();
+    let mut out = format!("{ind}- [{glyph}] {title}");
+    for m in meta {
+        out.push(' ');
+        out.push_str(m);
+    }
+    lines[line_index] = out;
+    lines.join("\n")
+}
+
+/// Persist a title change on a task line. Returns whether the note changed.
+pub fn rename_task(
+    store: &Store,
+    note_id: i64,
+    line_index: usize,
+    new_title: &str,
+    now_ms: i64,
+) -> bool {
+    let body = match store.get_note(note_id) {
+        Ok(Some(n)) => n.body,
+        _ => return false,
+    };
+    let new = set_line_title(&body, line_index, new_title);
+    new != body
+        && store
+            .update_note_body(note_id, &new, now_ms)
+            .unwrap_or(false)
+}
+
 /// Every task across all notes.
 pub fn all_tasks(store: &Store, now_ms: i64) -> Vec<Task> {
     store
@@ -819,6 +921,32 @@ mod tests {
         assert_eq!(ts[0].line_index, 1);
         assert_eq!(ts[0].source_app_id, Some(7));
         assert!(ts[1].done && ts[1].title == "done thing");
+    }
+
+    #[test]
+    fn set_line_title_replaces_title_keeps_status_and_metadata() {
+        // Metadata (priority/due/project/recur/star) survives; only the title
+        // words change, and the checkbox glyph is preserved.
+        let body = "intro\n- [/] Fix mount !high @tomorrow #prod +1w * old words\nplain";
+        let out = set_line_title(body, 1, "Repair the mount");
+        assert_eq!(
+            out,
+            "intro\n- [/] Repair the mount !high @tomorrow #prod +1w *\nplain"
+        );
+        // Re-parsing yields the new title with all metadata intact.
+        let ts = parse_tasks_in(&note(&out), 0);
+        assert_eq!(ts[0].title, "Repair the mount");
+        assert_eq!(ts[0].priority, Priority::High);
+        assert_eq!(ts[0].project.as_deref(), Some("prod"));
+        assert!(ts[0].bookmarked);
+        assert_eq!(ts[0].status, Status::Doing);
+    }
+
+    #[test]
+    fn set_line_title_noop_on_non_task_line() {
+        let body = "just a paragraph\nanother line";
+        assert_eq!(set_line_title(body, 0, "x"), body);
+        assert_eq!(set_line_title(body, 9, "x"), body); // out of range
     }
 
     #[test]

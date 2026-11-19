@@ -83,6 +83,7 @@ mod tests {
             &CaptureEvent {
                 content: Content::Text(t.into()),
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: ms,
             },
             &Noop,

@@ -94,6 +94,112 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE bookmarks ADD COLUMN tags TEXT NOT NULL DEFAULT '';",
     // v2: per-note baseline hash of the last vault-synced content (for 3-way sync).
     "ALTER TABLE notes ADD COLUMN vault_synced_hash TEXT NOT NULL DEFAULT '';",
+    // v3: calculator history (Phase 7) — every evaluated expression. `kind` is
+    // math|date|graph; `syntax` is plain|latex|typst; `result` is the primary
+    // display string; `pinned` exempts a row from the 30-day retention sweep.
+    "CREATE TABLE calc_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        input TEXT NOT NULL,
+        syntax TEXT NOT NULL DEFAULT 'plain',
+        result TEXT NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at_ms INTEGER NOT NULL
+    );",
+    // v4: favorites & quicklinks (Phase 10). `kind` is clip|note|task|bookmark|
+    // file|snippet|search|quicklink; `payload` is the kind-specific target (a URL/
+    // path/query, or JSON); `keyword` (+ optional `{query}` in payload) makes it a
+    // quicklink; `position` orders the sidebar group.
+    "CREATE TABLE favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        label TEXT NOT NULL,
+        keyword TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at_ms INTEGER NOT NULL
+    );",
+    // v5: snippets & commands (Phase 16a). `kind` is snippet|command; `keyword`
+    // (e.g. `;meet`) triggers expansion; `body` holds the text with `{…}`
+    // placeholders (or a command with `{{arg}}` params, pasted never executed).
+    "CREATE TABLE snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        keyword TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'snippet',
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );",
+    // v6: per-file sync baseline for local projects (Phase 18b). `baseline` is the
+    // last content both sides agreed on (the pivot for the line-level 3-way merge);
+    // `baseline_hash` lets the watcher skip unchanged files without a full compare.
+    // Keyed by (project root, path relative to that root).
+    "CREATE TABLE project_sync (
+        root TEXT NOT NULL,
+        rel_path TEXT NOT NULL,
+        baseline TEXT NOT NULL DEFAULT '',
+        baseline_hash TEXT NOT NULL DEFAULT '',
+        updated_at_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (root, rel_path)
+    );",
+    // v7: scratch capture (Phase 20). A scratch is just a note with `scratch = 1`
+    // (so search, vault export and backups already cover it); `scratch_pinned`
+    // exempts it from the 30-day scratch retention sweep.
+    "ALTER TABLE notes ADD COLUMN scratch INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE notes ADD COLUMN scratch_pinned INTEGER NOT NULL DEFAULT 0;",
+    // v8: scheduled jobs (Phase 21). Jobs are created ONLY via the UI and live in this
+    // encrypted DB — never a plaintext file, never from project files. `command_hash`
+    // is verified before every run so an OS scheduler entry (which only ever calls
+    // `magpie --run-job <id>`) can't be made to run something else. `os_managed` = 0 is
+    // Magpie's own while-open scheduler; 1 is exported to the OS scheduler.
+    "CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        command TEXT NOT NULL,
+        cron TEXT NOT NULL,
+        working_dir TEXT NOT NULL DEFAULT '',
+        timeout_secs INTEGER NOT NULL DEFAULT 300,
+        notify_on_failure INTEGER NOT NULL DEFAULT 1,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        os_managed INTEGER NOT NULL DEFAULT 0,
+        command_hash TEXT NOT NULL DEFAULT '',
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );
+    CREATE TABLE job_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER,
+        exit_code INTEGER,
+        stdout TEXT NOT NULL DEFAULT '',
+        stderr TEXT NOT NULL DEFAULT ''
+    );",
+    // v9: per-note version history (backlog #4). A snapshot of the body on save,
+    // coalesced within a short window and capped per note — cheap restore points.
+    "CREATE TABLE note_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+    );",
+    // v10: capture the source window title with each clip so `url:`/`site:` search can
+    // match the page a clip came from (browsers put the site/page name in the title).
+    "ALTER TABLE entries ADD COLUMN source_title TEXT NOT NULL DEFAULT '';",
+    // v11: secrets vault (1Password-style). key→value secrets in this encrypted DB;
+    // `entry_id` links a secret back to the clipboard entry it was promoted from (that
+    // entry's text is scrubbed to a fixed mask so the plaintext leaves entries + FTS).
+    "CREATE TABLE secrets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        entry_id INTEGER,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -167,8 +273,9 @@ impl Store {
                     "INSERT INTO entries
                        (content_hash, kind, preview_text, full_text, image_path,
                         byte_size, char_count, word_count, line_count,
-                        first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11)",
+                        first_copied_at_ms, last_copied_at_ms, copy_count, pinned, source_app_id,
+                        source_title)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,1,0,?11,?12)",
                     rusqlite::params![
                         p.hash,
                         p.kind.as_str(),
@@ -180,7 +287,8 @@ impl Store {
                         p.word_count,
                         p.line_count,
                         ev.copied_at_ms,
-                        app_id
+                        app_id,
+                        ev.source_title,
                     ],
                 )?;
                 self.conn.last_insert_rowid()
@@ -371,6 +479,7 @@ mod tests {
                 &CaptureEvent {
                     content: Content::Text("keep me".into()),
                     source_app: None,
+                    source_title: String::new(),
                     copied_at_ms: 1,
                 },
                 &FakeImages,
@@ -395,6 +504,7 @@ mod tests {
         let ev = CaptureEvent {
             content: Content::Text("hello".into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1000,
         };
         let out = s.ingest(&ev, &FakeImages).unwrap();
@@ -432,6 +542,7 @@ mod tests {
                 display_name: "Ghostty".into(),
                 icon_path: None,
             }),
+            source_title: String::new(),
             copied_at_ms: 5,
         };
         let out = s.ingest(&ev, &FakeImages).unwrap();
@@ -453,6 +564,7 @@ mod tests {
         let mk = |ms| CaptureEvent {
             content: Content::Text("same".into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: ms,
         };
 
@@ -553,6 +665,45 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version_before, version_after);
+    }
+
+    #[test]
+    fn migration_v4_v5_from_v3() {
+        // Simulate a pre-v4 database (user_version = 3, none of the post-v3 tables),
+        // then run the upgrade path and confirm v4 (favorites) + v5 (snippets) land
+        // and the version reaches the latest migration.
+        let s = open_in_memory().unwrap();
+        s.conn
+            .execute_batch(
+                "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
+                 DROP TABLE jobs; DROP TABLE job_runs; DROP TABLE note_versions; \
+                 DROP TABLE secrets; \
+                 ALTER TABLE notes DROP COLUMN scratch; \
+                 ALTER TABLE notes DROP COLUMN scratch_pinned; \
+                 ALTER TABLE entries DROP COLUMN source_title; \
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        run_migrations(&s.conn).unwrap();
+        let version: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version,
+            MIGRATIONS.len() as i64,
+            "version reaches the latest"
+        );
+        let favs: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM favorites", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(favs, 0, "favorites table exists and is empty");
+        let snips: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(snips, 0, "snippets table exists and is empty");
     }
 
     #[test]

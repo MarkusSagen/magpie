@@ -1,0 +1,740 @@
+//! Local projects (Phase 18): pure detection + the line-level checkbox toggle
+//! primitive. The filesystem scan + two-way sync live in the app; everything
+//! testable without IO is here. Files stay the source of truth — Magpie writes the
+//! smallest possible patch (one line) and preserves everything else byte-for-byte.
+
+use crate::merge3::{merge3, Conflict};
+use crate::store::{Result, Store};
+use rusqlite::OptionalExtension;
+
+/// A marker that makes a folder a project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Marker {
+    /// A full `.magpie/` project directory.
+    Magpie,
+    /// A root `TODO.md` / `todo.md` / `TODO.txt`.
+    Todo,
+    /// A git/jj/hg repo (listed only, off by default).
+    Repo,
+    /// An editor/tool marker (`.vscode/`, `.idea/`, `.obsidian/`, …) — identifies
+    /// the root + helps name it, never read as tasks.
+    Editor,
+}
+
+/// Which entry names in a directory imply which markers. `names` is the set of
+/// immediate child file/dir names. Order of the returned vec is stable
+/// (Magpie, Todo, Repo, Editor).
+pub fn markers_for(names: &[String]) -> Vec<Marker> {
+    let has = |n: &str| names.iter().any(|x| x == n);
+    let mut out = Vec::new();
+    if has(".magpie") {
+        out.push(Marker::Magpie);
+    }
+    if has("TODO.md") || has("todo.md") || has("TODO.txt") {
+        out.push(Marker::Todo);
+    }
+    if has(".git") || has(".jj") || has(".hg") {
+        out.push(Marker::Repo);
+    }
+    if has(".vscode")
+        || has(".idea")
+        || has(".obsidian")
+        || has("logseq")
+        || has(".projectile")
+        || names.iter().any(|n| n.ends_with(".code-workspace"))
+    {
+        out.push(Marker::Editor);
+    }
+    out
+}
+
+impl Marker {
+    /// Short badge label for the UI.
+    pub fn badge(self) -> &'static str {
+        match self {
+            Marker::Magpie => ".magpie",
+            Marker::Todo => "TODO.md",
+            Marker::Repo => "git",
+            Marker::Editor => "editor",
+        }
+    }
+    /// A folder is a *synced* project (not merely "listed") if it has `.magpie/`
+    /// or a root TODO file. A bare repo/editor marker only lists it.
+    pub fn is_syncable(markers: &[Marker]) -> bool {
+        markers
+            .iter()
+            .any(|m| matches!(m, Marker::Magpie | Marker::Todo))
+    }
+}
+
+/// A URL/tag-safe slug for a project name (`Home renovation` → `home-renovation`).
+pub fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = true; // avoid leading dash
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// The `#proj/<slug>` tag for a project.
+pub fn project_tag(name: &str) -> String {
+    format!("proj/{}", slugify(name))
+}
+
+/// Flip a task-line body (leading indent already stripped) between open/done, or
+/// `None` if it isn't a checkbox line.
+fn toggled_marker(rest: &str) -> Option<String> {
+    if let Some(after) = rest.strip_prefix("- [ ] ") {
+        return Some(format!("- [x] {after}"));
+    }
+    if let Some(after) = rest.strip_prefix("- [/] ") {
+        return Some(format!("- [x] {after}"));
+    }
+    if let Some(after) = rest
+        .strip_prefix("- [x] ")
+        .or_else(|| rest.strip_prefix("- [X] "))
+    {
+        return Some(format!("- [ ] {after}"));
+    }
+    None
+}
+
+/// The task-file syntax a project file uses (Phase 18b). Chosen by extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskFormat {
+    /// Markdown checklists (`- [ ]` / `- [x]` / `- [/]`).
+    Markdown,
+    /// org-mode headlines (`* TODO` / `* DONE`).
+    Org,
+    /// todo.txt lines (leading `x ` marks completion).
+    TodoTxt,
+}
+
+impl TaskFormat {
+    /// Pick the format from a file name / relative path by extension: `.org` → Org,
+    /// `.txt` → TodoTxt, everything else (incl. `.md`) → Markdown.
+    pub fn for_file(name: &str) -> TaskFormat {
+        let l = name.to_ascii_lowercase();
+        if l.ends_with(".org") {
+            TaskFormat::Org
+        } else if l.ends_with(".txt") {
+            TaskFormat::TodoTxt
+        } else {
+            TaskFormat::Markdown
+        }
+    }
+}
+
+/// One task parsed from a file (format-agnostic): its 0-based line, done state, and
+/// display title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedTask {
+    pub line: usize,
+    pub done: bool,
+    pub title: String,
+}
+
+/// Split a `\r` off the end so CRLF files round-trip byte-for-byte: returns
+/// `(without_cr, "\r" | "")`.
+fn split_trailing_cr(s: &str) -> (&str, &str) {
+    match s.strip_suffix('\r') {
+        Some(core) => (core, "\r"),
+        None => (s, ""),
+    }
+}
+
+/// Match a leading org keyword (`TODO`/`DONE`) that's a whole word, returning it and
+/// the remainder (which starts with the separating space, `\r`, or is empty).
+fn split_org_keyword(body: &str) -> Option<(&str, &str)> {
+    for kw in ["TODO", "DONE"] {
+        if let Some(rest) = body.strip_prefix(kw) {
+            if rest.is_empty() || rest.starts_with([' ', '\t', '\r']) {
+                return Some((kw, rest));
+            }
+        }
+    }
+    None
+}
+
+/// Toggle an org headline's keyword (indent already stripped): `* TODO x` ↔ `* DONE x`,
+/// preserving stars, the title, trailing tags, and a trailing `\r`.
+fn toggled_org(rest: &str) -> Option<String> {
+    let stars = rest.chars().take_while(|c| *c == '*').count();
+    if stars == 0 {
+        return None;
+    }
+    let body = rest[stars..].strip_prefix(' ')?;
+    let (kw, remainder) = split_org_keyword(body)?;
+    let new_kw = if kw == "TODO" { "DONE" } else { "TODO" };
+    Some(format!("{} {new_kw}{remainder}", &rest[..stars]))
+}
+
+/// Drop a leading `YYYY-MM-DD ` completion date, if present.
+fn strip_leading_date(s: &str) -> &str {
+    let b = s.as_bytes();
+    if b.len() >= 11
+        && b[..10].iter().enumerate().all(|(i, &c)| {
+            if i == 4 || i == 7 {
+                c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
+        && b[10] == b' '
+    {
+        &s[11..]
+    } else {
+        s
+    }
+}
+
+/// Toggle a todo.txt line's completion (indent already stripped): a leading `x ` marks
+/// done. Open → done prepends `x `; done → open drops `x ` and an optional completion
+/// date. Preserves the rest (priority, `+project`, `@context`) and a trailing `\r`.
+fn toggled_todotxt(rest: &str) -> Option<String> {
+    let (core, tail) = split_trailing_cr(rest);
+    if core.trim().is_empty() {
+        return None;
+    }
+    if let Some(after) = core.strip_prefix("x ") {
+        Some(format!("{}{tail}", strip_leading_date(after)))
+    } else {
+        Some(format!("x {core}{tail}"))
+    }
+}
+
+/// Toggle the task on line `line_index` of `content` for the given `fmt`, rewriting
+/// ONLY that line (leading whitespace, trailing text, the other lines, and the
+/// final-newline state preserved byte-for-byte). `None` if the line isn't a task in
+/// that format. This is the two-way sync's line-level patch primitive.
+pub fn toggle_task_line_fmt(content: &str, line_index: usize, fmt: TaskFormat) -> Option<String> {
+    let had_final_nl = content.ends_with('\n');
+    let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
+    // `split('\n')` on a trailing-newline string yields a trailing "" — drop it so
+    // indices match visible lines, and restore the newline at the end.
+    if had_final_nl {
+        lines.pop();
+    }
+    let line = lines.get_mut(line_index)?;
+    let indent_len = line.len() - line.trim_start().len();
+    let (indent, rest) = line.split_at(indent_len);
+    let toggled = match fmt {
+        TaskFormat::Markdown => toggled_marker(rest)?,
+        TaskFormat::Org => toggled_org(rest)?,
+        TaskFormat::TodoTxt => toggled_todotxt(rest)?,
+    };
+    *line = format!("{indent}{toggled}");
+    let mut joined = lines.join("\n");
+    if had_final_nl {
+        joined.push('\n');
+    }
+    Some(joined)
+}
+
+/// Markdown convenience wrapper (the common case + back-compat).
+pub fn toggle_task_line(content: &str, line_index: usize) -> Option<String> {
+    toggle_task_line_fmt(content, line_index, TaskFormat::Markdown)
+}
+
+/// Parse the task lines out of `content` for `fmt` (line-indexed). Pure, so the exact
+/// bytes a caller keeps as a sync snapshot match the parsed line indices.
+pub fn parse_task_lines(content: &str, fmt: TaskFormat) -> Vec<ParsedTask> {
+    let mut out = Vec::new();
+    for (i, raw) in content.lines().enumerate() {
+        let t = raw.trim_start().trim_end_matches('\r');
+        let parsed = match fmt {
+            TaskFormat::Markdown => parse_md_task(t),
+            TaskFormat::Org => parse_org_task(t),
+            TaskFormat::TodoTxt => parse_todotxt_task(t),
+        };
+        if let Some((done, title)) = parsed {
+            out.push(ParsedTask {
+                line: i,
+                done,
+                title,
+            });
+        }
+    }
+    out
+}
+
+fn parse_md_task(t: &str) -> Option<(bool, String)> {
+    if let Some(r) = t
+        .strip_prefix("- [ ] ")
+        .or_else(|| t.strip_prefix("- [/] "))
+    {
+        return Some((false, r.trim().to_string()));
+    }
+    t.strip_prefix("- [x] ")
+        .or_else(|| t.strip_prefix("- [X] "))
+        .map(|r| (true, r.trim().to_string()))
+}
+
+fn parse_org_task(t: &str) -> Option<(bool, String)> {
+    let stars = t.chars().take_while(|c| *c == '*').count();
+    if stars == 0 {
+        return None;
+    }
+    let body = t[stars..].strip_prefix(' ')?;
+    let (kw, remainder) = split_org_keyword(body)?;
+    Some((kw == "DONE", remainder.trim().to_string()))
+}
+
+fn parse_todotxt_task(t: &str) -> Option<(bool, String)> {
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(after) = t.strip_prefix("x ") {
+        Some((true, strip_leading_date(after).trim().to_string()))
+    } else {
+        Some((false, t.trim().to_string()))
+    }
+}
+
+/// Metadata read from a project's `.magpie/project.toml` (Phase 18b). All fields are
+/// optional; a missing or unparsable file yields defaults (folder name is used).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectMeta {
+    pub name: Option<String>,
+    pub tags: Vec<String>,
+    pub time_budget_minutes: Option<i64>,
+}
+
+/// Parse a `.magpie/project.toml`. A tiny hand-rolled reader for the documented shape
+/// (`name = "…"`, `tags = ["a", "b"]`, `time_budget_minutes = N`) — no serde/toml
+/// dependency, matching how `parse_espanso_yaml` stays dependency-free. Unknown keys
+/// and `[sections]` are ignored; `#` starts a line comment (outside quotes).
+pub fn parse_project_toml(content: &str) -> ProjectMeta {
+    let mut meta = ProjectMeta::default();
+    for raw in content.lines() {
+        let line = strip_toml_comment(raw).trim();
+        if line.is_empty() || line.starts_with('[') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        match key {
+            "name" => {
+                let n = unquote(value);
+                if !n.is_empty() {
+                    meta.name = Some(n);
+                }
+            }
+            "tags" => {
+                meta.tags = parse_toml_string_array(value);
+            }
+            "time_budget_minutes" => {
+                meta.time_budget_minutes = value.parse::<i64>().ok();
+            }
+            _ => {}
+        }
+    }
+    meta
+}
+
+/// Drop a `#` line comment, but not a `#` inside a quoted string.
+fn strip_toml_comment(line: &str) -> &str {
+    let mut in_quote = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => in_quote = !in_quote,
+            '#' if !in_quote => return &line[..i],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Strip surrounding double quotes (and trim) from a scalar TOML string.
+fn unquote(s: &str) -> String {
+    s.trim().trim_matches('"').to_string()
+}
+
+/// Parse `["a", "b"]` into the quoted strings it contains (order preserved).
+fn parse_toml_string_array(s: &str) -> Vec<String> {
+    let inner = s.trim().trim_start_matches('[').trim_end_matches(']');
+    inner
+        .split(',')
+        .map(unquote)
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// How to resolve overlapping edits when reconciling a project file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    /// Hold the file: don't write, don't advance the baseline; surface the conflicts
+    /// for Review (the file re-surfaces until resolved).
+    Ask,
+    /// The disk always wins a conflicting region; apply the merged result silently.
+    FileWins,
+}
+
+/// The outcome of reconciling one file: what (if anything) to write to disk, what to
+/// store as the new baseline, and any unresolved conflicts to surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileReconcile {
+    /// New content to write to disk. `None` = leave the file untouched (either
+    /// nothing changed, or an unresolved `Ask` conflict is being held).
+    pub write: Option<String>,
+    /// New baseline content to persist. `None` = leave the stored baseline unchanged
+    /// (an unresolved `Ask` conflict, so the divergence re-surfaces next run).
+    pub new_baseline: Option<String>,
+    /// Unresolved conflicts to surface for Review. Empty on a clean or `FileWins` run.
+    pub conflicts: Vec<Conflict>,
+}
+
+/// Reconcile one project file with the line-level 3-way merge.
+///
+/// - `baseline`: the last content both sides agreed on (the merge pivot).
+/// - `mine`: Magpie's intended content = `baseline` with its line patch applied
+///   (equal to `baseline` when Magpie has no pending edit — a pure external pull).
+/// - `disk`: the current bytes on disk.
+///
+/// A clean merge is written (only if it actually differs from `disk`, to avoid mtime
+/// churn) and becomes the new baseline. On conflict, `FileWins` applies the
+/// disk-preferring merge; `Ask` holds the file and returns the conflicts.
+pub fn reconcile_file(
+    baseline: &str,
+    mine: &str,
+    disk: &str,
+    policy: ConflictPolicy,
+) -> FileReconcile {
+    let merged = merge3(baseline, mine, disk);
+    if merged.conflicts.is_empty() || policy == ConflictPolicy::FileWins {
+        // Clean, or File-wins (where `merged` already resolved conflicts to disk).
+        let write = (merged.merged != disk).then(|| merged.merged.clone());
+        FileReconcile {
+            write,
+            new_baseline: Some(merged.merged),
+            conflicts: Vec::new(),
+        }
+    } else {
+        // Ask + unresolved conflicts: hold the file, keep the old baseline.
+        FileReconcile {
+            write: None,
+            new_baseline: None,
+            conflicts: merged.conflicts,
+        }
+    }
+}
+
+impl Store {
+    /// The stored sync baseline (last agreed content) for a project file, keyed by
+    /// its project `root` and path relative to that root. `None` if never synced.
+    pub fn project_baseline(&self, root: &str, rel_path: &str) -> Result<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT baseline FROM project_sync WHERE root = ?1 AND rel_path = ?2",
+                rusqlite::params![root, rel_path],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+    }
+
+    /// Upsert the sync baseline for a project file after a successful reconcile.
+    pub fn set_project_baseline(
+        &self,
+        root: &str,
+        rel_path: &str,
+        baseline: &str,
+        now_ms: i64,
+    ) -> Result<()> {
+        let hash = blake3::hash(baseline.as_bytes()).to_hex().to_string();
+        self.conn().execute(
+            "INSERT INTO project_sync (root, rel_path, baseline, baseline_hash, updated_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(root, rel_path) DO UPDATE SET
+                baseline = excluded.baseline,
+                baseline_hash = excluded.baseline_hash,
+                updated_at_ms = excluded.updated_at_ms",
+            rusqlite::params![root, rel_path, baseline, hash, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Forget a file's baseline (e.g. the user deleted the file and chose not to
+    /// re-link). Never called as part of a normal sync — deletions are surfaced, not
+    /// acted on automatically.
+    pub fn forget_project_baseline(&self, root: &str, rel_path: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM project_sync WHERE root = ?1 AND rel_path = ?2",
+            rusqlite::params![root, rel_path],
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_markers() {
+        let names: Vec<String> = [".magpie", "TODO.md", ".git", "src"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let m = markers_for(&names);
+        assert!(m.contains(&Marker::Magpie));
+        assert!(m.contains(&Marker::Todo));
+        assert!(m.contains(&Marker::Repo));
+        assert!(Marker::is_syncable(&m));
+
+        let repo_only: Vec<String> = [".git"].iter().map(|s| s.to_string()).collect();
+        assert!(!Marker::is_syncable(&markers_for(&repo_only)));
+    }
+
+    #[test]
+    fn slugs_and_tags() {
+        assert_eq!(slugify("Home renovation"), "home-renovation");
+        assert_eq!(slugify("magpie"), "magpie");
+        assert_eq!(slugify("  A/B  c!"), "a-b-c");
+        assert_eq!(project_tag("Home renovation"), "proj/home-renovation");
+    }
+
+    #[test]
+    fn toggle_preserves_everything_else() {
+        let content = "# Tasks\n\n- [ ] one @fri\n  - [ ] nested\n- [x] done\nplain line\n";
+        // Toggle "one" (line 2).
+        let out = toggle_task_line(content, 2).unwrap();
+        assert_eq!(
+            out,
+            "# Tasks\n\n- [x] one @fri\n  - [ ] nested\n- [x] done\nplain line\n"
+        );
+        // Toggle the nested one (line 3) — indentation preserved.
+        let out2 = toggle_task_line(&out, 3).unwrap();
+        assert!(out2.contains("  - [x] nested"));
+        // Toggle the done one back (line 4).
+        let out3 = toggle_task_line(content, 4).unwrap();
+        assert!(out3.contains("- [ ] done"));
+        // A non-task line returns None.
+        assert!(toggle_task_line(content, 5).is_none());
+    }
+
+    #[test]
+    fn toggle_no_final_newline() {
+        let content = "- [ ] a\n- [ ] b";
+        let out = toggle_task_line(content, 1).unwrap();
+        assert_eq!(out, "- [ ] a\n- [x] b");
+        assert!(!out.ends_with('\n'));
+    }
+
+    // ---- reconcile_file (pure orchestration over merge3) ----
+
+    #[test]
+    fn reconcile_clean_pull_updates_baseline_not_disk() {
+        // Magpie made no edit (mine == baseline); disk changed externally.
+        let base = "- [ ] a\n- [ ] b\n";
+        let disk = "- [x] a\n- [ ] b\n";
+        let r = reconcile_file(base, base, disk, ConflictPolicy::Ask);
+        assert_eq!(r.write, None, "disk already has the content; no write");
+        assert_eq!(r.new_baseline.as_deref(), Some(disk), "baseline advances");
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_clean_push_writes_disk() {
+        // Magpie toggled; disk unchanged from baseline.
+        let base = "- [ ] a\n- [ ] b\n";
+        let mine = "- [ ] a\n- [x] b\n";
+        let r = reconcile_file(base, mine, base, ConflictPolicy::Ask);
+        assert_eq!(r.write.as_deref(), Some(mine));
+        assert_eq!(r.new_baseline.as_deref(), Some(mine));
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_clean_merge_of_disjoint_edits() {
+        let base = "- [ ] a\n- [ ] b\n- [ ] c\n";
+        let mine = "- [x] a\n- [ ] b\n- [ ] c\n"; // Magpie toggled line 0
+        let disk = "- [ ] a\n- [ ] b\n- [ ] c edited\n"; // disk edited line 2
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::Ask);
+        assert_eq!(
+            r.write.as_deref(),
+            Some("- [x] a\n- [ ] b\n- [ ] c edited\n")
+        );
+        assert!(r.conflicts.is_empty());
+    }
+
+    #[test]
+    fn reconcile_ask_holds_on_conflict() {
+        let base = "- [ ] task\n";
+        let mine = "- [x] task\n"; // Magpie toggled
+        let disk = "- [ ] task edited\n"; // disk edited same line
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::Ask);
+        assert_eq!(r.write, None, "Ask holds the file");
+        assert_eq!(r.new_baseline, None, "baseline is NOT advanced while held");
+        assert_eq!(r.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn reconcile_file_wins_takes_disk_and_advances() {
+        let base = "- [ ] task\n";
+        let mine = "- [x] task\n";
+        let disk = "- [ ] task edited\n";
+        let r = reconcile_file(base, mine, disk, ConflictPolicy::FileWins);
+        assert_eq!(r.write, None, "merged == disk here, so no write needed");
+        assert_eq!(
+            r.new_baseline.as_deref(),
+            Some(disk),
+            "baseline follows disk"
+        );
+        assert!(r.conflicts.is_empty(), "File-wins resolves the conflict");
+    }
+
+    #[test]
+    fn reconcile_idempotent_when_all_agree() {
+        let s = "- [ ] a\n";
+        let r = reconcile_file(s, s, s, ConflictPolicy::Ask);
+        assert_eq!(r.write, None);
+        assert_eq!(r.new_baseline.as_deref(), Some(s));
+        assert!(r.conflicts.is_empty());
+    }
+
+    // ---- formats: org + todo.txt (Phase 18b) ----
+
+    #[test]
+    fn task_format_by_extension() {
+        assert_eq!(TaskFormat::for_file("TODO.md"), TaskFormat::Markdown);
+        assert_eq!(
+            TaskFormat::for_file(".magpie/tasks.md"),
+            TaskFormat::Markdown
+        );
+        assert_eq!(TaskFormat::for_file("TODO.org"), TaskFormat::Org);
+        assert_eq!(TaskFormat::for_file("TODO.txt"), TaskFormat::TodoTxt);
+    }
+
+    #[test]
+    fn org_toggle_flips_keyword_preserving_rest() {
+        let base =
+            "#+TITLE: x\n* TODO write tests :work:\n  SCHEDULED: <2026-09-27>\n** DONE sub\n";
+        // Toggle the TODO headline (line 1) → DONE; SCHEDULED line untouched.
+        let out = toggle_task_line_fmt(base, 1, TaskFormat::Org).unwrap();
+        assert_eq!(
+            out,
+            "#+TITLE: x\n* DONE write tests :work:\n  SCHEDULED: <2026-09-27>\n** DONE sub\n"
+        );
+        // Toggle the DONE sub-headline (line 3, two stars) → TODO.
+        let out2 = toggle_task_line_fmt(base, 3, TaskFormat::Org).unwrap();
+        assert!(out2.contains("** TODO sub\n"));
+        // A non-headline line isn't a task.
+        assert!(toggle_task_line_fmt(base, 2, TaskFormat::Org).is_none());
+    }
+
+    #[test]
+    fn org_toggle_headline_without_title() {
+        let base = "* TODO\n";
+        assert_eq!(
+            toggle_task_line_fmt(base, 0, TaskFormat::Org).unwrap(),
+            "* DONE\n"
+        );
+    }
+
+    #[test]
+    fn todotxt_toggle_adds_and_removes_completion() {
+        let base = "(A) ship +magpie @home\nx clean desk\n";
+        // Open → done: prepend `x `.
+        let out = toggle_task_line_fmt(base, 0, TaskFormat::TodoTxt).unwrap();
+        assert_eq!(out, "x (A) ship +magpie @home\nx clean desk\n");
+        // Done → open: drop `x ` (and a completion date if present).
+        let out2 = toggle_task_line_fmt(base, 1, TaskFormat::TodoTxt).unwrap();
+        assert_eq!(out2, "(A) ship +magpie @home\nclean desk\n");
+        let dated = "x 2026-09-27 wrote report\n";
+        assert_eq!(
+            toggle_task_line_fmt(dated, 0, TaskFormat::TodoTxt).unwrap(),
+            "wrote report\n"
+        );
+    }
+
+    #[test]
+    fn parse_task_lines_per_format() {
+        let md = parse_task_lines("# T\n- [ ] a\n- [x] b\n", TaskFormat::Markdown);
+        assert_eq!(md.len(), 2);
+        assert_eq!(
+            (md[0].line, md[0].done, md[0].title.as_str()),
+            (1, false, "a")
+        );
+        assert!(md[1].done);
+
+        let org = parse_task_lines("* TODO a\n* DONE b\nplain\n", TaskFormat::Org);
+        assert_eq!(org.len(), 2);
+        assert_eq!((org[1].done, org[1].title.as_str()), (true, "b"));
+
+        let tt = parse_task_lines("(A) a +p\nx done one\n\n", TaskFormat::TodoTxt);
+        assert_eq!(tt.len(), 2);
+        assert_eq!((tt[0].done, tt[0].title.as_str()), (false, "(A) a +p"));
+        assert_eq!((tt[1].done, tt[1].title.as_str()), (true, "done one"));
+    }
+
+    #[test]
+    fn parse_project_toml_reads_documented_shape() {
+        let toml = r#"
+            # a project
+            name = "Home renovation"
+            tags = ["hobby", "house"]
+            time_budget_minutes = 600
+        "#;
+        let m = parse_project_toml(toml);
+        assert_eq!(m.name.as_deref(), Some("Home renovation"));
+        assert_eq!(m.tags, vec!["hobby".to_string(), "house".to_string()]);
+        assert_eq!(m.time_budget_minutes, Some(600));
+    }
+
+    #[test]
+    fn parse_project_toml_tolerates_missing_and_extra() {
+        // Empty → all defaults.
+        assert_eq!(parse_project_toml(""), ProjectMeta::default());
+        // Unknown keys + sections ignored; `#` in a quoted value preserved.
+        let m = parse_project_toml("[meta]\nother = 1\nname = \"a # b\"\ntags = []\n");
+        assert_eq!(m.name.as_deref(), Some("a # b"));
+        assert!(m.tags.is_empty());
+        assert_eq!(m.time_budget_minutes, None);
+        // A trailing comment is stripped.
+        let m2 = parse_project_toml("name = \"x\"  # the name\n");
+        assert_eq!(m2.name.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn project_baseline_roundtrips() {
+        let store = crate::open_in_memory().unwrap();
+        assert_eq!(store.project_baseline("/p", "TODO.md").unwrap(), None);
+        store
+            .set_project_baseline("/p", "TODO.md", "- [ ] a\n", 100)
+            .unwrap();
+        assert_eq!(
+            store.project_baseline("/p", "TODO.md").unwrap().as_deref(),
+            Some("- [ ] a\n")
+        );
+        // Upsert overwrites.
+        store
+            .set_project_baseline("/p", "TODO.md", "- [x] a\n", 200)
+            .unwrap();
+        assert_eq!(
+            store.project_baseline("/p", "TODO.md").unwrap().as_deref(),
+            Some("- [x] a\n")
+        );
+        // Forgetting clears it; other keys are unaffected.
+        store
+            .set_project_baseline("/p", "other.md", "x\n", 200)
+            .unwrap();
+        store.forget_project_baseline("/p", "TODO.md").unwrap();
+        assert_eq!(store.project_baseline("/p", "TODO.md").unwrap(), None);
+        assert_eq!(
+            store.project_baseline("/p", "other.md").unwrap().as_deref(),
+            Some("x\n")
+        );
+    }
+}

@@ -1,21 +1,47 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette } from "types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, Palette, FavoriteRow, SuggestRow, SearchLine } from "types.slint";
 import { Theme, Pal } from "theme.slint";
 import { Icons } from "icons.slint";
 import { TypeIcon, ActionIcon } from "components/glyphs.slint";
 import { HBar } from "components/hbar.slint";
 import { PopoverTaskRow } from "components/task_row.slint";
 import { BoardCard } from "components/board_card.slint";
+import { Sidebar } from "components/sidebar.slint";
+// Re-export the Data/Calculator globals so Rust can reach them via `ui.global::<…>()`.
+import { DataStore } from "data_store.slint";
+import { CalcStore } from "calc_store.slint";
+import { DateStore } from "date_store.slint";
+import { WorldClockStore } from "worldclock_store.slint";
+import { NoteRender } from "note_render_store.slint";
+import { SnippetsStore } from "snippets_store.slint";
+import { SearchStore } from "search_store.slint";
+import { TimeStore } from "time_store.slint";
+import { ProjectsStore } from "projects_store.slint";
+import { SecretsStore } from "secrets_store.slint";
+import { TransformOpts } from "transform_store.slint";
+import { SidebarPrefs, SidebarToggle } from "sidebar_prefs.slint";
+export { DataStore }
+export { CalcStore }
+export { DateStore }
+export { WorldClockStore }
+export { NoteRender }
+export { SnippetsStore }
+export { SearchStore }
+export { TimeStore }
+export { ProjectsStore }
+export { SecretsStore }
+export { TransformOpts }
+export { SidebarPrefs, SidebarToggle }
 import { NotesView } from "views/notes.slint";
 import { TasksView } from "views/tasks.slint";
-import { BoardView } from "views/board.slint";
 import { GraphView } from "views/graph.slint";
 import { BookmarksView } from "views/bookmarks.slint";
-import { TodayView } from "views/today.slint";
 import { JournalView } from "views/journal.slint";
 import { FindView } from "views/find.slint";
 import { HelpView } from "views/help.slint";
+import { SettingsView } from "views/settings.slint";
+import { TransformsView } from "views/transforms.slint";
 import { AccessibilityView } from "views/accessibility.slint";
 import { FiltersView } from "views/filters.slint";
 import { ActionsView } from "views/actions.slint";
@@ -28,6 +54,7 @@ import { StatsView } from "views/stats.slint";
 
 export component LauncherWindow inherits Window {
     title: "Magpie";
+    default-font-family: "Geist";
     preferred-width: 960px;
     min-width: 960px;
     preferred-height: 560px;
@@ -35,10 +62,16 @@ export component LauncherWindow inherits Window {
     forward-focus: main;
 
     // ---- Sidebar navigation (5 sections, Rust-driven router) ----
-    property <length> sidebar-w: 60px;
+    property <length> sidebar-w: 208px;
     in-out property <string> section: "clipboard"; // clipboard|tasks|notes|bookmarks|stats
     in-out property <string> tasks-view: "today"; // today|list|board
     in-out property <string> notes-view: "notes"; // notes|journal|graph
+    // Sidebar group collapse state (persisted via config; set by Rust on startup).
+    in-out property <bool> grp-capture-collapsed;
+    in-out property <bool> grp-organize-collapsed;
+    in-out property <bool> grp-tools-collapsed;
+    in-out property <bool> grp-favorites-collapsed;
+    callback group-toggled(string, bool);
     callback set-section(string);
     callback set-task-view(string);
     callback set-note-view(string);
@@ -47,6 +80,28 @@ export component LauncherWindow inherits Window {
     in-out property <int> theme-index: 0;
     // Select a theme by catalogue index (see themes.rs / Theme.palettes).
     callback set-theme(int);
+    // Settings → Features (wired to config).
+    in-out property <int> settings-popover-tab;
+    in-out property <bool> settings-sync-file-wins;
+    in-out property <bool> settings-keep-git;
+    in-out property <string> settings-scratch-hotkey;
+    callback set-popover-tab(int);
+    callback set-sync-policy(bool);
+    callback set-keep-git(bool);
+    callback cycle-scratch-hotkey();
+    // Transforms (⌘T) palette state.
+    in-out property <string> transform-input;
+    in-out property <int> transform-selected;
+    pure callback transform-input-summary(string) -> string;
+    callback transform-action(string, int);
+    // Inline answer card (dates / math / units) shown above the clipboard results.
+    in-out property <bool> has-answer;
+    in-out property <string> answer-kind;
+    in-out property <string> answer-display;
+    in-out property <string> answer-explanation;
+    in-out property <[string]> answer-formats;
+    in-out property <int> answer-format-index;
+    in-out property <bool> answer-random;
     init => { Theme.index = root.theme-index; }
     changed theme-index => { Theme.index = root.theme-index; }
 
@@ -64,6 +119,9 @@ export component LauncherWindow inherits Window {
 
     in property <[EntryRow]> entries;
     in-out property <string> query;
+    in-out property <string> search-placeholder: "Search clipboard…";
+    in property <[SuggestRow]> search-suggestions;
+    callback apply-suggestion(string);
     in-out property <int> selected: 0;
     // "list" | "edit" | "actions" — gates keyboard routing.
     in-out property <string> mode: "list";
@@ -71,6 +129,15 @@ export component LauncherWindow inherits Window {
     in-out property <int> sort-index: 0;
     in-out property <int> action-selected: 0;
     in property <bool> screenshare: false;
+    in property <bool> paused: false;
+    callback toggle-pause();
+    // Favorites (Phase 10).
+    in property <[FavoriteRow]> favorites;
+    callback activate-favorite(int);
+    callback favorite-selected(); // ⌘D — favorite/unfavorite the current selection
+    in property <bool> has-quicklink;      // query starts with a quicklink keyword + space
+    in property <string> quicklink-hint;   // e.g. "GitHub search → …/search?q=rust"
+    callback activate-quicklink(string);
     in-out property <bool> revealed: false;
     // True while the primary modifier (⌘ on macOS / Ctrl elsewhere) is held —
     in-out property <bool> cmd-held: false;
@@ -97,9 +164,23 @@ export component LauncherWindow inherits Window {
     callback search-changed(string);
     // Detail preview is a virtualized line list — Rust pushes the (bounded) lines
     in property <[string]> preview-lines;
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     // Image entries: the decoded bitmap for the selected entry. Without this the
     in property <image> preview-image;
     in property <bool> preview-has-image: false;
+    // Colour preview (screen 17): scale + harmonies + format strings for a colour entry.
+    in property <bool> preview-is-color: false;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
+    in property <color> color-inverted;
+    callback copy-text(string);
+    // Web-link preview (screen 04): domain, and a cached OG thumbnail if bookmarked.
+    in property <bool> preview-is-link: false;
+    in property <string> preview-domain;
+    in property <image> preview-link-image;
+    in property <bool> preview-has-link-image: false;
     // Selectable preview text for normal-size entries (empty for huge ones, which
     in property <string> preview-text;
     in property <bool> preview-truncated: false;
@@ -149,7 +230,16 @@ export component LauncherWindow inherits Window {
         else if id == "export" { root.export-data(); }
         else if id == "bookmark" { root.bookmark-selected(); }
         else if id == "task-from-link" { root.task-from-link(); }
+        else if id == "transform" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; }
+        else if id == "theme" { root.mode = "settings"; }
+        else if id == "open-as-table" { root.open-selected-as-table(); }
+        else if id == "favorite" { root.favorite-selected(); }
+        else if id == "save-secret" { root.save-secret-selected(); }
+        else if id == "pick-color" { root.pick-screen-color(); }
     }
+    callback save-secret-selected(); // ⌘K → Save as secret: promote the selection to the vault
+    callback pick-screen-color();    // ⌘⇧C / ⌘K → eyedropper → color answer card
+    callback open-selected-as-table();
     callback export-data();
 
     // "none" | "entry" | "snippet" — also drives the edit modal.
@@ -188,14 +278,28 @@ export component LauncherWindow inherits Window {
     // Active source-app filter (-1 = any) so the overlay can mark the current one.
     in-out property <int> app-index: -1;
     in-out property <int> time-index: 0;
+    in-out property <int> match-index: 0; // 0 Words, 1 Fuzzy, 2 Regex
     in property <bool> filtered: false;
+    in property <int> filter-count: 0;    // active-filter count for the Filter badge
+    in property <string> active-app-name;  // active source-app filter chip label ("" = none)
+    in property <string> active-time-label; // active "Copied" range chip label ("" = any time)
     callback open-search();
     callback set-time-filter(int);
     callback set-app-filter(int);
+    callback set-match-mode(int);
     callback clear-filters();
 
     // ---- Notes mode ----
     in property <[NoteRow]> notes;
+    in property <bool> has-project-notes;   // any "From projects" rows (Notes source filter)
+    in-out property <int> note-source;      // Notes list: 0 All, 1 Vault, 2 Projects
+    // Sidebar running-timer row.
+    in property <bool> timer-running;
+    in property <string> timer-title;
+    in property <string> timer-elapsed;
+    callback timer-tick();
+    callback open-timer();
+    callback set-note-source(int);
     in-out property <int> note-id: -1;
     in property <string> note-body;
     in property <string> note-provenance;
@@ -204,6 +308,8 @@ export component LauncherWindow inherits Window {
     in property <[RefRow]> unlinked;
     callback link-mention(int, int);
     in-out property <string> note-filter;
+    in property <[SearchLine]> note-hl-lines;
+    in property <int> note-hl-first;
     // Distinct `#tag` tokens across all notes, for the tag-filter chip strip.
     in property <[string]> note-all-tags;
     // Active tag filter ("" = all notes).
@@ -237,6 +343,7 @@ export component LauncherWindow inherits Window {
     // Keyboard-selected task row index (Tasks mode).
     in-out property <int> task-selected: 0;
     in-out property <string> task-filter: "all";
+    in-out property <string> task-search;
     // Time tracking: the running task's title ("" if none) + live elapsed seconds.
     in property <string> active-title;
     in-out property <int> active-elapsed-sec;
@@ -246,6 +353,7 @@ export component LauncherWindow inherits Window {
     callback toggle-timer(int, string);
     callback open-task-note(int);
     callback refresh-tasks();
+    callback rename-task(int, int, string); // note_id, line_index, new title
 
     // ---- Bookmarks mode ----
     in-out property <bool> bookmarks-mode: false;
@@ -258,6 +366,7 @@ export component LauncherWindow inherits Window {
     callback open-bookmark(string);
     callback delete-bookmark(int);
     callback bookmark-selected();
+    callback open-selected-url();
     // ⌘K "Create task from link": add the currently-selected entry as a task on
     callback task-from-link();
 
@@ -296,9 +405,9 @@ export component LauncherWindow inherits Window {
     in-out property <int> board-sort: 0; // 0=Due, 1=Priority, 2=Title, 3=Status
     in-out property <bool> board-hide-done: false;
     in-out property <string> board-project-filter; // "" = All
-    in-out property <string> board-query;
     in property <[BoardColumn]> board;
     in property <[string]> board-projects;
+    in property <string> board-caption;
     callback board-controls-changed();
     callback board-open-task(int);
     callback board-set-status(int, int, int); // note_id, line_index, status (0/1/2)
@@ -351,6 +460,25 @@ export component LauncherWindow inherits Window {
     Rectangle {
 
         main := MainView {
+            pick-screen-color() => { root.pick-screen-color(); }
+            filter-count: root.filter-count;
+            active-app-name: root.active-app-name;
+            active-time-label: root.active-time-label;
+            has-quicklink: root.has-quicklink;
+            quicklink-hint: root.quicklink-hint;
+            activate-quicklink(a0) => { root.activate-quicklink(a0); }
+            set-app-filter(a0) => { root.set-app-filter(a0); }
+            set-time-filter(a0) => { root.set-time-filter(a0); }
+            transform-input <=> root.transform-input;
+            transform-selected <=> root.transform-selected;
+            transform-action(a0, a1) => { root.transform-action(a0, a1); }
+            has-answer <=> root.has-answer;
+            answer-kind <=> root.answer-kind;
+            answer-display <=> root.answer-display;
+            answer-explanation <=> root.answer-explanation;
+            answer-formats <=> root.answer-formats;
+            answer-format-index <=> root.answer-format-index;
+            answer-random <=> root.answer-random;
             action-selected <=> root.action-selected;
             actions: root.actions;
             actions-backspace() => { root.actions-backspace(); }
@@ -394,6 +522,10 @@ export component LauncherWindow inherits Window {
             notes-mode <=> root.notes-mode;
             open-actions() => { root.open-actions(); }
             open-in-editor(a0) => { root.open-in-editor(a0); }
+            open-selected-url() => { root.open-selected-url(); }
+            bookmark-selected() => { root.bookmark-selected(); }
+            favorite-selected() => { root.favorite-selected(); }
+            save-secret-selected() => { root.save-secret-selected(); }
             open-search() => { root.open-search(); }
             open-slots() => { root.open-slots(); }
             over-time-bars: root.over-time-bars;
@@ -403,10 +535,25 @@ export component LauncherWindow inherits Window {
             preview-font-size <=> root.preview-font-size;
             preview-has-image: root.preview-has-image;
             preview-image: root.preview-image;
+            preview-is-color: root.preview-is-color;
+            color-scale: root.color-scale;
+            color-harmony: root.color-harmony;
+            color-formats: root.color-formats;
+            color-inverted: root.color-inverted;
+            copy-text(a0) => { root.copy-text(a0); }
+            preview-is-link: root.preview-is-link;
+            preview-domain: root.preview-domain;
+            preview-link-image: root.preview-link-image;
+            preview-has-link-image: root.preview-has-link-image;
             preview-lines: root.preview-lines;
+            preview-hl-lines: root.preview-hl-lines;
+            preview-hl-first: root.preview-hl-first;
             preview-text: root.preview-text;
             preview-truncated: root.preview-truncated;
             query <=> root.query;
+            search-placeholder: root.search-placeholder;
+            search-suggestions: root.search-suggestions;
+            apply-suggestion(a0) => { root.apply-suggestion(a0); }
             range-index <=> root.range-index;
             remove-tag(a0, a1) => { root.remove-tag(a0, a1); }
             revealed <=> root.revealed;
@@ -466,12 +613,17 @@ export component LauncherWindow inherits Window {
             note-body: root.note-body;
             note-caret <=> root.note-caret;
             note-filter <=> root.note-filter;
+            note-hl-lines: root.note-hl-lines;
+            note-hl-first: root.note-hl-first;
             note-id <=> root.note-id;
             note-links: root.note-links;
             note-provenance: root.note-provenance;
             note-suggestions: root.note-suggestions;
             note-tag-filter <=> root.note-tag-filter;
             notes: root.notes;
+            has-project-notes: root.has-project-notes;
+            note-source: root.note-source;
+            set-note-source(a0) => { root.set-note-source(a0); }
             notes-mode <=> root.notes-mode;
             notes-view <=> root.notes-view;
             open-note(a0) => { root.open-note(a0); }
@@ -483,8 +635,11 @@ export component LauncherWindow inherits Window {
             unlinked: root.unlinked;
         }
 
-        // ---- Tasks mode (opaque overlay: flat, grouped/sorted task list) ----
-        if root.tasks-mode: TasksView {
+        // ---- Tasks mode (opaque overlay: the single task skeleton — search bar,
+        // tab row, and a content area that swaps between the flat list, Today,
+        // Board, Time, and Schedule by `tasks-view`). Today/Board are embedded
+        // bodies now, so this one overlay serves all three former modes. ----
+        if root.tasks-mode || root.today-mode || root.board-mode: TasksView {
             focus-search() => { main.focus-input(); }
             active-elapsed-sec <=> root.active-elapsed-sec;
             active-title: root.active-title;
@@ -496,11 +651,13 @@ export component LauncherWindow inherits Window {
             nav-section(a0) => { root.nav-section(a0); }
             open-task-note(a0) => { root.open-task-note(a0); }
             refresh-tasks() => { root.refresh-tasks(); }
+            rename-task(a0, a1, a2) => { root.rename-task(a0, a1, a2); }
             set-mode-tasks(a0) => { root.set-mode-tasks(a0); }
             set-task-view(a0) => { root.set-task-view(a0); }
             show-done <=> root.show-done;
             sidebar-w <=> root.sidebar-w;
             task-filter <=> root.task-filter;
+            task-search <=> root.task-search;
             task-selected <=> root.task-selected;
             tasks: root.tasks;
             tasks-mode <=> root.tasks-mode;
@@ -508,12 +665,15 @@ export component LauncherWindow inherits Window {
             toggle-bookmark(a0, a1) => { root.toggle-bookmark(a0, a1); }
             toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
             toggle-timer(a0, a1) => { root.toggle-timer(a0, a1); }
-        }
-
-        // ---- Board mode (opaque overlay: cross-project task board) ----
-        if root.board-mode: BoardView {
-            focus-search() => { main.focus-input(); }
+            // Today tab (embedded body).
+            edit-today-journal(a0) => { root.edit-today-journal(a0); }
+            today-clips: root.today-clips;
+            today-due: root.today-due;
+            today-journal <=> root.today-journal;
+            today-paste-clip(a0) => { root.today-paste-clip(a0); }
+            // Board tab (embedded body).
             board: root.board;
+            board-caption: root.board-caption;
             board-controls-changed() => { root.board-controls-changed(); }
             board-drag-active <=> root.board-drag-active;
             board-drag-line <=> root.board-drag-line;
@@ -524,23 +684,11 @@ export component LauncherWindow inherits Window {
             board-group <=> root.board-group;
             board-hide-done <=> root.board-hide-done;
             board-layout <=> root.board-layout;
-            board-mode <=> root.board-mode;
             board-open-task(a0) => { root.board-open-task(a0); }
             board-project-filter <=> root.board-project-filter;
             board-projects: root.board-projects;
-            board-query <=> root.board-query;
             board-set-status(a0, a1, a2) => { root.board-set-status(a0, a1, a2); }
             board-sort <=> root.board-sort;
-            nav-back() => { root.nav-back(); }
-            nav-cycle-view(a0) => { root.nav-cycle-view(a0); }
-            nav-forward() => { root.nav-forward(); }
-            nav-leader <=> root.nav-leader;
-            nav-previous() => { root.nav-previous(); }
-            nav-section(a0) => { root.nav-section(a0); }
-            set-mode-board(a0) => { root.set-mode-board(a0); }
-            set-task-view(a0) => { root.set-task-view(a0); }
-            sidebar-w <=> root.sidebar-w;
-            tasks-view <=> root.tasks-view;
         }
 
         // ---- Graph mode (opaque overlay: note-link graph) ----
@@ -575,23 +723,6 @@ export component LauncherWindow inherits Window {
             sidebar-w <=> root.sidebar-w;
         }
 
-        // ---- Today dashboard (full-window merge of the popover's Today +
-        if root.today-mode: TodayView {
-            active-elapsed-sec <=> root.active-elapsed-sec;
-            active-title: root.active-title;
-            edit-today-journal(a0) => { root.edit-today-journal(a0); }
-            open-task-note(a0) => { root.open-task-note(a0); }
-            set-task-view(a0) => { root.set-task-view(a0); }
-            sidebar-w <=> root.sidebar-w;
-            tasks-view <=> root.tasks-view;
-            today-clips: root.today-clips;
-            today-due: root.today-due;
-            today-journal <=> root.today-journal;
-            today-mode <=> root.today-mode;
-            today-paste-clip(a0) => { root.today-paste-clip(a0); }
-            toggle-task(a0, a1) => { root.toggle-task(a0, a1); }
-        }
-
         // ---- Journal (chronological timeline over the daily notes) ----
         if root.journal-mode: JournalView {
             edit-journal-entry(a0, a1) => { root.edit-journal-entry(a0, a1); }
@@ -603,128 +734,43 @@ export component LauncherWindow inherits Window {
         }
 
         // ---- Left sidebar: 5 section entry points (clipboard/tasks/notes/
-        sidebar := Rectangle {
+        sidebar := Sidebar {
             x: 0;
             y: 0;
-            width: root.sidebar-w;
             height: root.height;
-            background: Theme.bg-sidebar;
-            VerticalLayout {
-                padding-top: 12px;
-                padding-bottom: 12px;
-                spacing: 2px;
-                for s in [
-                    { id: "clipboard", label: "Clip", icon: Icons.tab-clipboard, accent: Theme.sec-clip },
-                    { id: "tasks", label: "Tasks", icon: Icons.tab-tasks, accent: Theme.sec-tasks },
-                    { id: "notes", label: "Notes", icon: Icons.tab-notes, accent: Theme.sec-notes },
-                    { id: "bookmarks", label: "Links", icon: Icons.type-link, accent: Theme.sec-links },
-                    { id: "stats", label: "Stats", icon: Icons.tab-stats, accent: Theme.sec-stats },
-                ]: Rectangle {
-                    height: 54px;
-                    // Active section = a solid fill in the section's accent color
-                    background: root.section == s.id ? s.accent : (sbnav.has-hover ? Theme.bg-elevated : transparent);
-                    sbnav := TouchArea { clicked => { root.set-section(s.id); } }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            alignment: center;
-                            Image {
-                                source: s.icon;
-                                width: 18px;
-                                height: 18px;
-                                image-fit: contain;
-                                colorize: root.section == s.id ? #16161a : Theme.text-dim;
-                            }
-                        }
-                        Text {
-                            text: s.label;
-                            font-size: 9px;
-                            horizontal-alignment: center;
-                            color: root.section == s.id ? #16161a : Theme.text-dim;
-                        }
-                    }
-                }
-                Rectangle { vertical-stretch: 1; }
-                // ---- Theme picker: bottom of the sidebar. Opens a popup of all
-                Rectangle {
-                    height: 40px;
-                    background: themeta.has-hover ? Theme.bg-elevated : transparent;
-                    themeta := TouchArea { clicked => { themepop.show(); } }
-                    Image {
-                        source: Icons.theme;
-                        width: 16px;
-                        height: 16px;
-                        image-fit: contain;
-                        colorize: Theme.text-dim;
-                    }
-                    themepop := PopupWindow {
-                        x: parent.width + 6px;
-                        y: parent.height - self.height;
-                        width: 210px;
-                        height: min(Theme.palettes.length * 34px + 12px, 360px);
-                        Rectangle {
-                            background: Theme.bg-panel;
-                            border-color: Theme.border-strong;
-                            border-width: 1px;
-                            border-radius: 10px;
-                            Flickable {
-                                viewport-height: Theme.palettes.length * 34px + 12px;
-                                VerticalLayout {
-                                    padding: 6px;
-                                    spacing: 2px;
-                                    for pal[i] in Theme.palettes: Rectangle {
-                                        height: 30px;
-                                        border-radius: 6px;
-                                        background: root.theme-index == i
-                                            ? Theme.bg-elevated
-                                            : (themerowta.has-hover ? Theme.bg-elevated : transparent);
-                                        themerowta := TouchArea {
-                                            clicked => { root.set-theme(i); themepop.close(); }
-                                        }
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            spacing: 8px;
-                                            alignment: start;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                // Swatch: the palette's app bg with an accent ring.
-                                                Rectangle {
-                                                    width: 16px; height: 16px;
-                                                    border-radius: 4px;
-                                                    background: pal.bg-app;
-                                                    border-color: pal.accent;
-                                                    border-width: 2px;
-                                                }
-                                            }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Text {
-                                                    text: pal.name;
-                                                    color: Theme.text;
-                                                    font-size: Theme.fs-body;
-                                                    overflow: elide;
-                                                }
-                                            }
-                                            Rectangle { horizontal-stretch: 1; }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                // Selected marker: a drawn accent dot (no glyphs).
-                                                Rectangle {
-                                                    width: 8px; height: 8px;
-                                                    border-radius: 4px;
-                                                    background: root.theme-index == i ? Theme.accent : transparent;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            timer-running: root.timer-running;
+            timer-title: root.timer-title;
+            timer-elapsed: root.timer-elapsed;
+            timer-tick => { root.timer-tick(); }
+            open-timer => { root.open-timer(); }
+            section: root.section;
+            cmd-held: root.cmd-held;
+            screenshare: root.screenshare;
+            paused: root.paused;
+            favorites: root.favorites;
+            activate-favorite(a0) => { root.activate-favorite(a0); }
+            show-calc-data: SidebarPrefs.calculator;
+            show-data: SidebarPrefs.data;
+            show-snippets: SidebarPrefs.snippets;
+            show-files: SidebarPrefs.files;
+            show-projects: SidebarPrefs.projects;
+            show-secrets: SidebarPrefs.secrets;
+            show-notes: SidebarPrefs.notes;
+            show-tasks: SidebarPrefs.tasks;
+            show-bookmarks: SidebarPrefs.bookmarks;
+            show-stats: SidebarPrefs.stats;
+            theme-index: root.theme-index;
+            grp-capture-collapsed <=> root.grp-capture-collapsed;
+            grp-organize-collapsed <=> root.grp-organize-collapsed;
+            grp-tools-collapsed <=> root.grp-tools-collapsed;
+            grp-favorites-collapsed <=> root.grp-favorites-collapsed;
+            group-toggled(k, c) => { root.group-toggled(k, c); }
+            set-section(s) => { root.set-section(s); }
+            set-theme(i) => { root.set-theme(i); }
+            open-shortcuts => { root.mode = "help"; }
+            toggle-mask => { root.toggle-screenshare(); }
+            toggle-pause => { root.toggle-pause(); }
+            open-settings => { root.mode = "settings"; }
         }
 
         // ---- Find everywhere (⌘⇧F): unified search over notes/tasks/bookmarks.
@@ -740,11 +786,33 @@ export component LauncherWindow inherits Window {
             search-notes: root.search-notes;
             search-query <=> root.search-query;
             search-tasks: root.search-tasks;
+            favorites: root.favorites;
+            activate-favorite(a0) => { root.activate-favorite(a0); }
         }
 
         // ---- Help modal (centered overlay) ----
         if root.mode == "help": HelpView {
             mode <=> root.mode;
+        }
+        if root.mode == "settings": SettingsView {
+            mode <=> root.mode;
+            theme-index: root.theme-index;
+            set-theme(i) => { root.set-theme(i); }
+            popover-tab: root.settings-popover-tab;
+            sync-file-wins: root.settings-sync-file-wins;
+            keep-git: root.settings-keep-git;
+            scratch-hotkey: root.settings-scratch-hotkey;
+            set-popover-tab(i) => { root.set-popover-tab(i); }
+            set-sync-policy(b) => { root.set-sync-policy(b); }
+            set-keep-git(b) => { root.set-keep-git(b); }
+            cycle-scratch-hotkey() => { root.cycle-scratch-hotkey(); }
+        }
+        if root.mode == "transform": TransformsView {
+            mode <=> root.mode;
+            transform-selected <=> root.transform-selected;
+            transform-input: root.transform-input;
+            transform-input-summary(a0) => { return root.transform-input-summary(a0); }
+            transform-action(a0, a1) => { root.transform-action(a0, a1); }
         }
 
         // ---- Accessibility permission modal (macOS auto-paste) ----
@@ -762,7 +830,9 @@ export component LauncherWindow inherits Window {
             clear-filters() => { root.clear-filters(); }
             mode <=> root.mode;
             pinned-only <=> root.pinned-only;
+            match-index <=> root.match-index;
             set-app-filter(a0) => { root.set-app-filter(a0); }
+            set-match-mode(a0) => { root.set-match-mode(a0); }
             set-pinned-only(a0) => { root.set-pinned-only(a0); }
             set-sort(a0) => { root.set-sort(a0); }
             set-time-filter(a0) => { root.set-time-filter(a0); }
@@ -776,6 +846,7 @@ export component LauncherWindow inherits Window {
             actions: root.actions;
             actions-query <=> root.actions-query;
             mode <=> root.mode;
+            entry-preview: root.preview-text;
             run-action(a0) => { root.run-action(a0); }
         }
 
@@ -846,3 +917,6 @@ export component LauncherWindow inherits Window {
 }
 
 export { Popover } from "views/popover.slint";
+export { ScratchWindow } from "views/scratch.slint";
+export { ScratchStore } from "scratch_store.slint";
+export { ScheduleStore } from "schedule_store.slint";

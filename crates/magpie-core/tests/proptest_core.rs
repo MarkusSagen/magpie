@@ -19,6 +19,7 @@ fn ev(s: &str, ms: i64) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
         source_app: None,
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }
@@ -46,7 +47,7 @@ proptest! {
     #[test]
     fn detect_never_panics(s in ".{0,200}") {
         let k = detect_text_kind(&s);
-        prop_assert!(matches!(k, Kind::Text | Kind::Link | Kind::Email | Kind::Color));
+        prop_assert!(matches!(k, Kind::Text | Kind::Link | Kind::Email | Kind::Color | Kind::GitRemote));
         // as_str/from_str round-trips.
         prop_assert_eq!(Kind::from_str(k.as_str()), Some(k));
     }

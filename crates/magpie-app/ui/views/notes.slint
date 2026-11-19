@@ -1,11 +1,14 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { NotePreview } from "../components/note_preview.slint";
+import { NoteRender } from "../note_render_store.slint";
+import { SearchBar } from "../components/search_bar.slint";
 
 export component NotesView inherits Rectangle {
     callback focus-search();
@@ -27,12 +30,19 @@ export component NotesView inherits Rectangle {
     in property <string> note-body;
     in-out property <int> note-caret;
     in-out property <string> note-filter;
+    // Search-match highlight lines for the open note + first-match index (scroll target).
+    in property <[SearchLine]> note-hl-lines;
+    in property <int> note-hl-first;
     in-out property <int> note-id;
     in property <[string]> note-links;
     in property <string> note-provenance;
     in property <[string]> note-suggestions;
     in-out property <string> note-tag-filter;
     in property <[NoteRow]> notes;
+    // All / Vault / Projects source filter (session-scoped; Rust filters the rows).
+    in property <int> note-source;
+    in property <bool> has-project-notes;
+    callback set-note-source(int);
     in-out property <bool> notes-mode;
     in-out property <string> notes-view;
     callback open-note(int);
@@ -83,21 +93,28 @@ export component NotesView inherits Rectangle {
                         return accept;
                     }
                     if e.text == Key.Return {
-                        ned.focus();
+                        // Enter edit mode (the raw editor); Preview is the default.
+                        NoteRender.preview = false;
                         return accept;
                     }
                     return reject;
                 }
             }
-            HorizontalLayout {
-                // Inset to the right of the sidebar via left padding (see the
-                // note by `sidebar-w` for why this isn't an `x`/`width` override).
+            VerticalLayout {
                 padding-left: root.sidebar-w + 8px;
-                padding-right: 8px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 8px;
-                // Left: back + filter + new + list
+                // Shared top search bar (identical to Clipboard/Tasks).
+                SearchBar {
+                    placeholder: "Search notes…";
+                    text <=> root.note-filter;
+                    edited => { root.filter-notes-by-tag(root.note-tag-filter); }
+                }
+                HorizontalLayout {
+                    vertical-stretch: 1;
+                    padding-right: 8px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 8px;
+                // Left: back + new + list
                 VerticalLayout {
                     width: 300px;
                     spacing: 6px;
@@ -112,11 +129,11 @@ export component NotesView inherits Rectangle {
                                 height: 30px;
                                 width: 62px;
                                 border-radius: Theme.r-sm;
-                                background: root.notes-view == nv ? Pal.accent : (nvsw1.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                background: root.notes-view == nv || nvsw1.has-hover ? Theme.bg-elevated : transparent;
                                 nvsw1 := TouchArea { clicked => { root.set-note-view(nv); } }
                                 Text {
                                     text: nv == "notes" ? "Notes" : (nv == "journal" ? "Journal" : "Graph");
-                                    color: root.notes-view == nv ? Pal.on-accent : Theme.text;
+                                    color: root.notes-view == nv ? Theme.text : Theme.text-dim;
                                     font-size: Theme.fs-sm;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -127,29 +144,24 @@ export component NotesView inherits Rectangle {
                     }
                     HorizontalLayout {
                         spacing: 6px;
+                        // All · Vault · Projects (PNG 18). Project notes are the read-only
+                        // "⇄ project/note" rows (synthetic ids ≤ -2,000,000).
                         Rectangle {
-                            horizontal-stretch: 1;
-                            height: 30px;
-                            background: Theme.bg-panel;
-                            border-radius: Theme.r-sm;
+                            height: 30px; width: 200px;
+                            background: Theme.bg-sidebar; border-radius: Theme.r-sm;
                             HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                if root.note-filter == "": Text {
-                                    text: "Filter notes…";
-                                    color: Theme.text-faint;
-                                    font-size: Theme.fs-body;
-                                    vertical-alignment: center;
-                                }
-                                nfilter := TextInput {
-                                    text <=> root.note-filter;
-                                    color: Theme.text;
-                                    font-size: Theme.fs-body;
-                                    single-line: true;
-                                    vertical-alignment: center;
+                                padding: 3px; spacing: 2px;
+                                for src[si] in ["All", "Vault", "Projects"]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: Theme.r-xs;
+                                    background: root.note-source == si || nsrc.has-hover ? Theme.bg-elevated : transparent;
+                                    nsrc := TouchArea { clicked => { root.set-note-source(si); } }
+                                    Text { text: src; color: root.note-source == si ? Theme.text : Theme.text-dim;
+                                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                         }
+                        Rectangle { horizontal-stretch: 1; }
                         Rectangle {
                             width: 60px;
                             height: 30px;
@@ -181,28 +193,31 @@ export component NotesView inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == "" ? Pal.accent : (ntagall.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    background: root.note-tag-filter == "" || ntagall.has-hover ? Theme.bg-elevated : transparent;
                                     ntagall := TouchArea { clicked => { root.filter-notes-by-tag(""); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "All"; color: root.note-tag-filter == "" ? Pal.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        Text { text: "All"; color: root.note-tag-filter == "" ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                                 for tag in root.note-all-tags: Rectangle {
                                     height: 24px;
                                     border-radius: 12px;
-                                    background: root.note-tag-filter == tag ? Pal.accent : (ntagchip.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                    background: root.note-tag-filter == tag || ntagchip.has-hover ? Theme.bg-elevated : transparent;
                                     ntagchip := TouchArea { clicked => { root.filter-notes-by-tag(tag); } }
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
-                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Pal.on-accent : Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                        Text { text: "#" + tag; color: root.note-tag-filter == tag ? Theme.text : Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                     }
                                 }
                             }
                         }
                     }
+                    if root.note-source == 2 && !root.has-project-notes: Text {
+                        text: "No project notes — add .magpie/notes/*.md in a project";
+                        color: Theme.text-faint; font-size: Theme.fs-sm; wrap: word-wrap; }
                     ListView {
                         for n in root.notes: Rectangle {
                             height: 44px;
@@ -219,8 +234,14 @@ export component NotesView inherits Rectangle {
                                     if n.is_daily: Image { source: Icons.act-pin; colorize: Theme.text; width: 11px; height: 11px; image-fit: contain; }
                                     Text { text: n.title; color: Theme.text; font-size: Theme.fs-body; overflow: elide; horizontal-stretch: 1; }
                                 }
-                                Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
-                                if n.tags != "": Text { text: n.tags; color: Theme.text-faint; font-size: 10px; overflow: elide; }
+                                // Two lines fit the 44px row: title, then "when · #tags".
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: n.when; color: Theme.text-dim; font-size: Theme.fs-sm; }
+                                    if n.tags != "": Text { text: "·  " + n.tags; color: Theme.text-faint;
+                                        font-size: Theme.fs-sm; overflow: elide; horizontal-stretch: 1; }
+                                    if n.tags == "": Rectangle { horizontal-stretch: 1; }
+                                }
                             }
                         }
                     }
@@ -235,6 +256,19 @@ export component NotesView inherits Rectangle {
                         HorizontalLayout {
                             spacing: Theme.sp2;
                             Text { text: root.note-provenance; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                            // Rendered preview ⇄ raw editor toggle (screen 18).
+                            Rectangle {
+                                width: 92px;
+                                height: 26px;
+                                border-radius: Theme.r-sm;
+                                background: pvtgl.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                pvtgl := TouchArea { clicked => { NoteRender.toggle-preview(); } }
+                                HorizontalLayout {
+                                    alignment: center; spacing: 4px;
+                                    Text { text: NoteRender.preview ? "Edit" : "Preview"; color: Theme.text;
+                                        font-size: Theme.fs-sm; vertical-alignment: center; }
+                                }
+                            }
                             // Promote the line the cursor is on to a `- [ ]` task
                             // (same as ⌘⏎ in the editor).
                             Rectangle {
@@ -242,7 +276,7 @@ export component NotesView inherits Rectangle {
                                 height: 26px;
                                 border-radius: Theme.r-sm;
                                 background: mktask.has-hover ? Theme.bg-elevated : Theme.bg-panel;
-                                mktask := TouchArea { clicked => { root.promote-line(ned.cursor-position-byte-offset); } }
+                                mktask := TouchArea { clicked => { root.promote-line(root.note-caret); } }
                                 HorizontalLayout {
                                     alignment: center;
                                     spacing: 4px;
@@ -250,10 +284,72 @@ export component NotesView inherits Rectangle {
                                     Text { text: "Make task"; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 }
                             }
+                            // History (backlog #4): toggle the version-history panel.
+                            Rectangle {
+                                width: 84px;
+                                height: 26px;
+                                border-radius: Theme.r-sm;
+                                background: NoteRender.history ? Pal.accent : (histtgl.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                                histtgl := TouchArea { clicked => { NoteRender.toggle-history(); } }
+                                Text { text: "History"; color: NoteRender.history ? Pal.on-accent : Theme.text;
+                                    font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        // Version-history panel (backlog #4): restore points, newest first.
+                        if NoteRender.history: ListView {
+                            vertical-stretch: 1;
+                            for v[i] in NoteRender.versions: Rectangle {
+                                height: 48px;
+                                border-radius: Theme.r-sm;
+                                background: vrow.has-hover ? Theme.bg-elevated : transparent;
+                                vrow := TouchArea {}
+                                HorizontalLayout {
+                                    padding: 8px; spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: center; spacing: 2px; horizontal-stretch: 1;
+                                        Text { text: v.preview; color: Theme.text; font-size: Theme.fs-body; overflow: elide; }
+                                        Text { text: v.when; color: Theme.text-faint; font-size: Theme.fs-xs; }
+                                    }
+                                    Rectangle {
+                                        width: 76px; height: 28px; y: (parent.height - 28px)/2; border-radius: Theme.r-sm;
+                                        background: rst.has-hover ? Pal.accent : Theme.bg-panel;
+                                        rst := TouchArea { clicked => { NoteRender.restore-version(i); } }
+                                        Text { text: "Restore"; color: rst.has-hover ? Pal.on-accent : Theme.text;
+                                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                        // Search active: show the note body as highlighted lines scrolled
+                        // to the first match (like the clipboard preview). Replaces the
+                        // preview/editor while searching so you see WHERE it matches.
+                        if root.note-hl-lines.length > 0 && !NoteRender.history: ListView {
+                            vertical-stretch: 1;
+                            viewport-y: root.note-hl-first > 0 ? -(root.note-hl-first * 22px) : 0px;
+                            for hl in root.note-hl-lines: VerticalLayout {
+                                padding-top: 1px; padding-bottom: 1px;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Text { text: hl.pre; color: Theme.text-dim; font-size: Theme.fs-body;
+                                        vertical-alignment: center; overflow: elide; }
+                                    if hl.mid != "": Rectangle {
+                                        background: Pal.accent; border-radius: 2px;
+                                        HorizontalLayout { padding-left: 1px; padding-right: 1px;
+                                            Text { text: hl.mid; color: Pal.on-accent; font-size: Theme.fs-body;
+                                                vertical-alignment: center; } }
+                                    }
+                                    Text { text: hl.post; color: Theme.text-dim; font-size: Theme.fs-body;
+                                        vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                }
+                            }
+                        }
+                        // Rendered preview (screen 18) — the rich line model.
+                        if root.note-hl-lines.length == 0 && NoteRender.preview && !NoteRender.history: NotePreview {
+                            vertical-stretch: 1;
                         }
                         // Editor — a plain TextInput (not std TextEdit, which renders
                         // invisibly on the dark pane) with an explicit text colour.
-                        Flickable {
+                        if root.note-hl-lines.length == 0 && !NoteRender.preview && !NoteRender.history: Flickable {
                             vertical-stretch: 1;
                             viewport-width: self.width;
                             viewport-height: ned.preferred-height;
@@ -336,7 +432,7 @@ export component NotesView inherits Rectangle {
                         if root.note-suggestions.length > 0: Rectangle {
                             max-height: 160px;
                             background: Theme.bg-elevated;
-                            border-color: Theme.border-strong;
+                            border-color: Theme.line-strong;
                             border-width: 1px;
                             border-radius: Theme.r-sm;
                             VerticalLayout {
@@ -345,7 +441,7 @@ export component NotesView inherits Rectangle {
                                 for name in root.note-suggestions: Rectangle {
                                     height: 24px;
                                     border-radius: 4px;
-                                    background: srow.has-hover ? Theme.border-strong : transparent;
+                                    background: srow.has-hover ? Theme.line-strong : transparent;
                                     srow := TouchArea { clicked => { root.accept-note-suggestion(name); } }
                                     HorizontalLayout {
                                         padding-left: 8px;
@@ -368,7 +464,7 @@ export component NotesView inherits Rectangle {
                                 HorizontalLayout {
                                     padding-left: 10px;
                                     padding-right: 10px;
-                                    Text { text: name; color: Theme.link; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    Text { text: name; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 }
                                 chip := TouchArea { clicked => { root.open-page(name); } }
                             }
@@ -436,7 +532,7 @@ export component NotesView inherits Rectangle {
                                                 border-radius: Theme.r-sm;
                                                 background: lk.has-hover ? Theme.bg-elevated : Theme.bg-panel;
                                                 lk := TouchArea { clicked => { root.link-mention(r.note_id, r.line_index); } }
-                                                Text { text: "Link"; color: Theme.link; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                                Text { text: "Link"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                             }
                                         }
                                     }
@@ -445,5 +541,6 @@ export component NotesView inherits Rectangle {
                         }
                     }
                 }
+            }
             }
         }

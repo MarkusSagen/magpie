@@ -16,6 +16,7 @@ fn ev(text: &str, ms: i64, app: Option<&str>) -> CaptureEvent {
             display_name: a.into(),
             icon_path: None,
         }),
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }

@@ -1,0 +1,159 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Pal } from "../theme.slint";
+import { SidebarPrefs } from "../sidebar_prefs.slint";
+import { Palette } from "../types.slint";
+
+// Settings → Appearance (screen 09). Opened via ⌘, and the sidebar Settings row.
+// The theme grid is functional; Follow system / Density / Text size are shown for
+// parity with the mockup (wiring them is a later pass).
+export component SettingsView inherits Rectangle {
+    in-out property <string> mode;
+    in property <int> theme-index;
+    callback set-theme(int);
+    // Features (Phase 22 settings pass) — wired to config + applied live.
+    in property <int> popover-tab;      // 0 tasks, 1 today, 2 daily, 3 clipboard
+    in property <bool> sync-file-wins;  // project sync conflict: false = Ask, true = File wins
+    in property <bool> keep-git;        // keep .magpie out of git
+    in property <string> scratch-hotkey;
+    callback set-popover-tab(int);
+    callback set-sync-policy(bool);
+    callback set-keep-git(bool);
+    callback cycle-scratch-hotkey();
+    background: Theme.scrim;
+    TouchArea { clicked => { root.mode = "list"; } }
+    Rectangle {
+        width: 720px;
+        height: 520px;
+        background: Theme.bg-app;
+        border-radius: Theme.r-lg;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        TouchArea {}  // swallow clicks on the panel
+        VerticalLayout {
+            padding: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                Text { text: "Settings"; color: Theme.text; font-size: Theme.fs-title; font-weight: 600; horizontal-stretch: 1; }
+                Text { text: "Esc"; color: Theme.text-faint; font-family: Theme.mono; font-size: Theme.fs-xs; vertical-alignment: center; }
+            }
+            // Scrollable body so the Appearance + Features sections both fit.
+            ScrollView {
+              vertical-stretch: 1;
+              VerticalLayout {
+                spacing: 16px;
+            Text { text: "Appearance"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+            Text { text: "Theme"; color: Theme.text-dim; font-size: Theme.fs-body; }
+
+            // 9-theme grid (rows of 3): each card previews the palette; selected = accent border.
+            for r in [0, 1, 2]: HorizontalLayout {
+                spacing: 12px;
+                for c in [0, 1, 2]: Rectangle {
+                    property <int> idx: r * 3 + c;
+                    property <Palette> pal: Theme.palettes[idx];
+                    height: 84px;
+                    border-radius: Theme.r-md;
+                    border-width: root.theme-index == idx ? 2px : 1px;
+                    border-color: root.theme-index == idx ? Theme.accent : Theme.line-strong;
+                    background: pal.bg-app;
+                    cardta := TouchArea { clicked => { root.set-theme(idx); } }
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        // mini window: sidebar strip + accent dot + text lines
+                        HorizontalLayout {
+                            spacing: 6px;
+                            height: 34px;
+                            Rectangle { width: 20px; background: pal.bg-sidebar; border-radius: 3px; }
+                            Rectangle {
+                                background: pal.bg-panel; border-radius: 3px; horizontal-stretch: 1;
+                                HorizontalLayout {
+                                    padding: 5px; spacing: 4px; alignment: start;
+                                    VerticalLayout { alignment: center;
+                                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: pal.accent; } }
+                                    VerticalLayout { alignment: center;
+                                        Rectangle { width: 40px; height: 4px; border-radius: 2px; background: pal.text-dim; } }
+                                }
+                            }
+                        }
+                        Text { text: pal.name; color: pal.text; font-size: Theme.fs-sm; overflow: elide; }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.line; }
+            Text { text: "Features"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+
+            // Quick-menu (tray popover) default tab.
+            HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Quick-menu default tab"; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 110px; height: 28px; border-radius: Theme.r-sm; background: pt.has-hover ? Theme.bg-panel : Theme.bg-elevated;
+                    pt := TouchArea { clicked => { root.set-popover-tab(Math.mod(root.popover-tab + 1, 4)); } }
+                    Text {
+                        text: root.popover-tab == 0 ? "Tasks" : (root.popover-tab == 1 ? "Today" : (root.popover-tab == 2 ? "Daily" : "Clipboard"));
+                        color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            // Project sync conflicts.
+            HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Project sync conflicts"; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 110px; height: 28px; border-radius: Theme.r-sm; background: sp.has-hover ? Theme.bg-panel : Theme.bg-elevated;
+                    sp := TouchArea { clicked => { root.set-sync-policy(!root.sync-file-wins); } }
+                    Text { text: root.sync-file-wins ? "File wins" : "Ask"; color: Theme.text; font-size: Theme.fs-sm;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            // Keep .magpie out of git.
+            HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Keep .magpie out of git"; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 70px; height: 28px; border-radius: Theme.r-sm; background: root.keep-git ? Pal.accent : Theme.bg-elevated;
+                    kg := TouchArea { clicked => { root.set-keep-git(!root.keep-git); } }
+                    Text { text: root.keep-git ? "On" : "Off"; color: root.keep-git ? Pal.on-accent : Theme.text;
+                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            // Scratch pad hotkey.
+            HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Scratch pad hotkey"; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 130px; height: 28px; border-radius: Theme.r-sm; background: sh.has-hover ? Theme.bg-panel : Theme.bg-elevated;
+                    sh := TouchArea { clicked => { root.cycle-scratch-hotkey(); } }
+                    Text { text: root.scratch-hotkey; color: Theme.text; font-family: Theme.mono; font-size: Theme.fs-sm;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            Text { text: "Changing the scratch hotkey takes effect after restart."; color: Theme.text-ghost;
+                font-size: Theme.fs-xs; }
+
+            // Sidebar: per-section visibility (Clipboard always shows).
+            Text { text: "Sidebar"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+            for row in SidebarPrefs.rows: HorizontalLayout {
+                height: 30px; spacing: 8px;
+                Text { text: "Show " + row.label; color: Theme.text-dim; font-size: Theme.fs-body;
+                    horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle {
+                    width: 70px; height: 28px; border-radius: Theme.r-sm;
+                    // Neutral pill (ten accent fills would break "one accent, one job").
+                    background: sbta.has-hover ? Theme.bg-panel : Theme.bg-elevated;
+                    sbta := TouchArea { clicked => { SidebarPrefs.set-shown(row.key, !row.shown); } }
+                    Text { text: row.shown ? "On" : "Off"; color: row.shown ? Theme.text : Theme.text-faint;
+                        font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            Text { text: "Hidden sections stay reachable with G + key and ⌘K."; color: Theme.text-ghost;
+                font-size: Theme.fs-xs; }
+              }
+            }
+        }
+    }
+}

@@ -16,12 +16,18 @@ export struct EntryRow {
     section: string,
     copied_date: string,
     pinned: bool,
+    // For web-link entries: the bare domain (e.g. "github.com"), "" otherwise.
+    // Drives the accent "domain ↗" suffix + chain badge on link rows (screen 04).
+    domain: string,
     // The entry's OWN content preview, as opposed to `icon` (the source app):
     // a thumbnail for image entries, a swatch colour for colour entries.
     thumb: image,
     has_thumb: bool,
     swatch: color,
     has_swatch: bool,
+    // This clip was promoted to the Secrets vault: its text is scrubbed to a fixed
+    // mask; the list shows a lock badge and pasting reads the value back from the vault.
+    is_secret: bool,
 }
 
 export struct Bar {
@@ -35,6 +41,7 @@ export struct ActionItem {
     label: string,
     key: string,
     id: string,
+    group: string,
 }
 
 export struct SlotItem {
@@ -46,6 +53,7 @@ export struct SlotItem {
 export struct AppItem {
     id: int,
     name: string,
+    count: int,
 }
 
 export struct NoteRow {
@@ -54,6 +62,41 @@ export struct NoteRow {
     when: string,
     is_daily: bool,
     tags: string,
+}
+
+// One "Earlier" scratch (Phase 20).
+export struct ScratchRow {
+    id: int,
+    title: string,
+    when: string,
+    pinned: bool,
+}
+
+// One target in the scratch "File N lines to…" menu (Phase 20).
+export struct FileTarget {
+    label: string,
+    detail: string,   // e.g. "from #magpie" / "no project" / "Fri 25 Sep"
+    key: string,      // digit shown on the right
+}
+
+// One note version-history entry (backlog #4).
+export struct NoteVersionRow {
+    id: int,
+    when: string,     // relative time, e.g. "2h ago"
+    preview: string,  // first line of that version
+}
+
+// One scheduled job row (Phase 21, PNG 29).
+export struct JobRow {
+    id: int,
+    name: string,
+    kind: string,          // notification|shell|open|url
+    cron: string,
+    enabled: bool,
+    os-managed: bool,
+    last-run: string,      // "Fri 09:00 · exit 0 · 1.2s" / "failed · exit 1" / "never"
+    failed: bool,
+    next-run: string,      // "next: tomorrow 09:00"
 }
 
 export struct BookmarkRow {
@@ -159,6 +202,58 @@ export struct SearchBookmarkRow {
     title: string,
 }
 
+// One typed column of a parsed Data table (screen 13). `cells` holds one display
+// string per row; `numeric` right-aligns cells and marks the column chartable.
+export struct DataColumn {
+    name: string,
+    kind: string,   // "integer" | "float" | "date" | "bool" | "text"
+    numeric: bool,
+    cells: [string],
+}
+
+// One row of calculator history (screen 11). `kind` is math|date|graph (drives the
+// row glyph + tab filter); `group` is the day bucket ("Today"/"Yesterday"/…) used
+// for section headers.
+export struct CalcRow {
+    id: int,
+    kind: string,
+    input: string,
+    result: string,
+    time: string,
+    group: string,
+    pinned: bool,
+}
+
+// One sidebar Favorites-group row (Phase 10). `kind` drives the leading glyph +
+// the activation behaviour (quicklink → open URL, clip → paste, note → open, …).
+export struct FavoriteRow {
+    id: int,
+    kind: string,
+    label: string,
+    keyword: string,
+}
+
+// A recent-data entry in the Data view's left rail (session-scoped).
+export struct RecentData {
+    name: string,
+    meta: string,   // e.g. "File · CSV · 8 × 6"
+    selected: bool,
+}
+
+// One plotted point for the Data chart (screen 14), pre-normalized to 0..1 with
+// the origin at the bottom-left; `label` is the optional point label.
+export struct ChartPoint {
+    x: float,
+    y: float,
+    label: string,
+}
+
+// One Data-chart axis tick: position along the plotted span (0..1) + label.
+export struct AxisTick {
+    frac: float,
+    label: string,
+}
+
 // Accent + the text colour that is legible ON the accent. White-on-accent only
 // reaches ~2.9:1, so filled controls use `on-accent` for their label.
 // Theme tokens (light + dark). `dark` is wired from the `LauncherWindow` root
@@ -170,35 +265,180 @@ export struct SearchBookmarkRow {
 // One named colour theme. Every colour token the UI consumes lives here, so a
 // new theme is just one more entry in `Theme.palettes` (order MUST match the
 // Rust registry in `themes.rs`). `dark` drives the native window chrome.
+// Graphite token set (one accent, neutral greys). `bg-elevated-2` and
+// `text-ghost` are derived in `Theme` from these base tokens.
 export struct Palette {
     name: string,
     dark: bool,
-    // surfaces
+    // surfaces (darkest → lightest)
+    bg-sidebar: color,
     bg-app: color,
     bg-panel: color,
     bg-elevated: color,
-    bg-sidebar: color,
-    border: color,
-    border-strong: color,
-    // text
+    line: color,
+    line-strong: color,
+    // text (brightest → faintest)
     text: color,
     text-dim: color,
     text-faint: color,
-    // brand + semantic
+    // the single accent + destructive
     accent: color,
     on-accent: color,
     danger: color,
-    warn: color,
-    success: color,
-    link: color,
-    // priority pills
-    prio-high: color,
-    prio-med: color,
-    prio-low: color,
-    // section accents
-    sec-clip: color,
-    sec-tasks: color,
-    sec-notes: color,
-    sec-links: color,
-    sec-stats: color,
+}
+
+// ---- Date answers v2 / calendar (Phase 11, PNG 15) ----
+// One day cell in a month grid. `blank` cells pad the Mon-first grid.
+export struct CalDay {
+    dom: string,
+    blank: bool,
+    in-range: bool,
+    is-target: bool,
+    is-today: bool,
+    is-weekend: bool,
+}
+export struct CalMonth {
+    title: string,      // "September"
+    cells: [CalDay],    // 42 (6×7), Mon-first, row-major
+}
+// One cell of the 53×7 year heatmap.
+export struct CalYearCell {
+    blank: bool,
+    in-range: bool,
+    is-target: bool,
+    is-today: bool,
+}
+export struct CalMonthLabel {
+    label: string,      // "Jan"
+    col: int,           // heatmap column the month starts in
+}
+
+// ---- World clock (Phase 12, PNG 16) ----
+export struct WorldClockRow {
+    name: string,
+    abbrev: string,        // "CEST"
+    offset-label: string,  // "+2"
+    rel-label: string,     // "you" / "-1h" / "+7h"
+    big-time: string,      // "15:00"
+    date-label: string,    // "Fri 25 Sep"
+    is-home: bool,
+    hours: [int],          // 24 local-hour labels, aligned to the home day
+    shades: [int],         // 24 shade bands: 0 night, 1 awake, 2 work
+}
+
+// ---- Notes v2 rich Markdown preview (Phase 14, PNG 18) ----
+// One inline span. `kind`: 0 text, 1 bold, 2 italic, 3 code, 4 wiki, 5 url,
+// 6 prio, 7 date, 8 tag, 9 recur.
+export struct MdSpan {
+    kind: int,
+    text: string,
+    href: string,
+    domain: string,
+    prio: int,       // 1 low, 2 med, 3 high (kind 6)
+    icon: image,     // favicon for a URL span (kind 5), when cached
+    has-icon: bool,
+}
+// One rendered line. `block`: 0 plain, 1 h1, 2 h2, 3 h3, 4 bullet, 5 numbered,
+// 6 quote, 7 task.
+export struct MdLineVM {
+    block: int,
+    done: bool,
+    marker: string,   // "1." for numbered
+    spans: [MdSpan],
+}
+
+// ---- Snippets & commands (Phase 16a, PNG 20) ----
+export struct SnippetRow {
+    id: int,
+    name: string,
+    keyword: string,     // ";meet" (snippet) or the command text chip
+    is-command: bool,
+}
+
+// ---- Search token autocomplete (clipboard search bar) ----
+export struct SuggestRow {
+    // What to show on the chip (e.g. "app:vivaldi  12").
+    label: string,
+    // The full new query text to set when this suggestion is chosen.
+    insert: string,
+    // Optional short hint (e.g. a count or category), dimmed.
+    hint: string,
+}
+
+// ---- Secrets vault ----
+export struct SecretRow {
+    id: int,
+    key: string,
+    value-masked: string,   // SECRET_MASK, or the real value when this row is revealed
+    notes: string,
+    revealed: bool,
+}
+
+// ---- File search (Phase 15, PNGs 19/21/22/23) ----
+export struct SearchLine {
+    line-no: string,
+    // The line split around the match so the middle can be highlighted (Slint has
+    // no substring). `mid` is the matched text.
+    pre: string,
+    mid: string,
+    post: string,
+    replaced: string,   // sed replacement preview ("" when not sed)
+}
+export struct SearchFile {
+    name: string,
+    dir: string,
+    path: string,
+    match-count: string,
+    viewed: bool,
+    name-only: bool,
+    lines: [SearchLine],
+}
+export struct SearchTreeRow {
+    indent: int,        // 0 location, 1 folder, 2 file
+    label: string,
+    count: string,
+    bar: float,         // 0..1 relative match count (bar width)
+    is-file: bool,
+    viewed: bool,
+}
+
+// ---- Time tracking v2 (Phase 17, PNG 24) ----
+export struct TimeRow {
+    id: int,                // time_entries.id (0 on day headers)
+    is-day-header: bool,
+    day-label: string,      // "Today" / "Yesterday" / "Mon 22 Sep"
+    day-total: string,      // "4:22:13" (header rows)
+    desc: string,
+    project: string,        // "magpie" (may be "")
+    tag: string,            // "#ui" (may be "")
+    span: string,           // "13:58 — now"
+    duration: string,       // "0:42:13"
+    running: bool,
+}
+export struct TimeProjectBar {
+    name: string,
+    total: string,          // "22h 05m"
+    bar: float,             // 0..1
+    accent: bool,
+}
+
+// ---- Local projects (Phase 18, PNGs 25/26) ----
+export struct ProjectListRow {
+    name: string,
+    path: string,          // "~/code/hobby/magpie"
+    badges: string,        // ".magpie · TODO.md · git"
+    open-count: string,    // "7 open"
+    conflict: bool,
+    found: bool,           // true = "not added yet" inbox row
+    extra: string,         // found rows: "· TODO.md"
+}
+export struct ProjTaskRow {
+    is-file-header: bool,
+    file-label: string,    // "TODO.md  7 open"
+    sync-label: string,    // "⇄ two-way" / "read-only"
+    title: string,
+    done: bool,
+    source: string,        // "TODO.md:12"
+    idx: int,              // index into the flat task list (for toggle/editor)
+    read-only: bool,       // code-comment lens rows: no checkbox, open in editor only
 }

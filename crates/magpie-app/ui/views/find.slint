@@ -1,12 +1,46 @@
-import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
-import { Theme, Pal } from "../theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
-import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
-import { HBar } from "../components/hbar.slint";
-import { PopoverTaskRow } from "../components/task_row.slint";
-import { BoardCard } from "../components/board_card.slint";
+import { SearchNoteRow, SearchTaskRow, SearchBookmarkRow, FavoriteRow } from "../types.slint";
+import { SearchBar } from "../components/search_bar.slint";
+import { Keycap } from "../components/keycap.slint";
 
+// A group label (Favorites / Notes / Tasks / Bookmarks).
+component GroupLabel inherits Text {
+    color: Theme.text-faint;
+    font-size: Theme.fs-xs;
+    font-weight: 600;
+}
+
+// One result row: icon (or glyph) · title · faint type hint. Selection = bg-elevated.
+component FindRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> glyph;          // used when non-empty (favorites)
+    in property <string> title;
+    in property <string> hint;
+    in property <bool> selected;
+    callback clicked();
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: root.selected || ta.has-hover ? Theme.bg-elevated : transparent;
+    ta := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 10px; spacing: 10px;
+        if root.glyph != "": VerticalLayout { alignment: center;
+            Text { text: root.glyph; color: Theme.text-faint; font-size: 12px; width: 14px;
+                horizontal-alignment: center; } }
+        if root.glyph == "": VerticalLayout { alignment: center;
+            Image { source: root.icon; colorize: Theme.text-faint; width: 14px; height: 14px; image-fit: contain; } }
+        Text { text: root.title; color: root.selected ? Theme.text : Theme.text-dim; font-size: Theme.fs-body;
+            overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+        if root.hint != "": Text { text: root.hint; color: Theme.text-ghost; font-family: Theme.mono;
+            font-size: Theme.fs-xs; vertical-alignment: center; }
+    }
+}
+
+// ⌘⇧F Find everywhere: unified search over notes / tasks / bookmarks, with Favorites
+// on top while the query is empty. Graphite skeleton: shared SearchBar · grouped rows
+// (one flat ↑↓ selection) · bottom bar with keycaps.
 export component FindView inherits Rectangle {
     callback focus-search();
     callback close-search();
@@ -19,90 +53,124 @@ export component FindView inherits Rectangle {
     in property <[SearchNoteRow]> search-notes;
     in-out property <string> search-query;
     in property <[SearchTaskRow]> search-tasks;
-            background: Theme.bg-app;
-            VerticalLayout {
-                padding: 8px;
-                spacing: 8px;
-                HorizontalLayout {
-                    spacing: 8px;
-                    Rectangle {
-                        width: 92px; height: 30px; border-radius: 6px;
-                        background: sback.has-hover ? Theme.bg-elevated : Theme.bg-panel;
-                        sback := TouchArea { clicked => { root.close-search(); } }
-                        Text { text: "← Clipboard"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                    Text { text: "Find everywhere"; color: Theme.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                Rectangle {
-                    height: 30px; background: Theme.bg-panel; border-radius: 6px;
-                    HorizontalLayout {
-                        padding-left: 8px; padding-right: 8px;
-                        if root.search-query == "": Text { text: "Find in notes, tasks, bookmarks…"; color: Theme.text-faint; font-size: 13px; vertical-alignment: center; }
-                        sq := TextInput {
-                            text <=> root.search-query;
-                            color: Theme.text; font-size: 13px; single-line: true; vertical-alignment: center;
-                            init => { self.focus(); }
-                            edited => { root.run-unified-search(self.text); }
-                            accepted => { root.run-unified-search(self.text); }
-                            key-pressed(e) => {
-                                if e.text == Key.Escape {
-                                    root.close-search();
-                                    root.focus-search();
-                                    return accept;
-                                }
-                                return reject;
-                            }
-                        }
-                    }
-                }
-                ScrollView {
-                    vertical-stretch: 1;
-                    VerticalLayout {
-                        spacing: 4px;
+    // Shown at the top while the query is empty (same model as the sidebar group).
+    in property <[FavoriteRow]> favorites;
+    callback activate-favorite(int);
 
-                        Text { text: "Notes"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
-                        for n in root.search-notes: Rectangle {
-                            height: 34px;
-                            background: snrow.has-hover ? Theme.bg-elevated : transparent;
-                            border-radius: 6px;
-                            snrow := TouchArea { clicked => { root.open-search-note(n.id); } }
-                            HorizontalLayout {
-                                padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.tab-notes; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: n.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                            }
-                        }
-                        if root.search-notes.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
+    // Flat selection across the visible groups.
+    property <int> sel: 0;
+    property <bool> empty-query: root.search-query == "";
+    property <int> n-notes: root.search-notes.length;
+    property <int> n-tasks: root.search-tasks.length;
+    property <int> total: root.empty-query ? root.favorites.length
+        : root.n-notes + root.n-tasks + root.search-bookmarks.length;
+    changed search-query => { root.sel = 0; }
 
-                        Text { text: "Tasks"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
-                        for t in root.search-tasks: Rectangle {
-                            height: 34px;
-                            background: strow.has-hover ? Theme.bg-elevated : transparent;
-                            border-radius: 6px;
-                            strow := TouchArea { clicked => { root.open-search-task(t.id); } }
-                            HorizontalLayout {
-                                padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.tab-tasks; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: t.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                            }
-                        }
-                        if root.search-tasks.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
+    function close() {
+        root.close-search();
+        root.focus-search();
+    }
+    function open-selected() {
+        if root.total == 0 { return; }
+        if root.empty-query {
+            root.close-search();
+            root.activate-favorite(root.favorites[root.sel].id);
+        } else if root.sel < root.n-notes {
+            root.open-search-note(root.search-notes[root.sel].id);
+        } else if root.sel < root.n-notes + root.n-tasks {
+            root.open-search-task(root.search-tasks[root.sel - root.n-notes].id);
+        } else {
+            root.open-search-bookmark(root.search-bookmarks[root.sel - root.n-notes - root.n-tasks].url);
+        }
+    }
 
-                        Text { text: "Bookmarks"; color: Theme.text-dim; font-size: 11px; font-weight: 700; }
-                        for b in root.search-bookmarks: Rectangle {
-                            height: 34px;
-                            background: sbrow.has-hover ? Theme.bg-elevated : transparent;
-                            border-radius: 6px;
-                            sbrow := TouchArea { clicked => { root.open-search-bookmark(b.url); } }
-                            HorizontalLayout {
-                                padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                Image { source: Icons.bookmark; colorize: Theme.text-dim; width: 13px; height: 13px; image-fit: contain; }
-                                Text { text: b.title; color: Theme.text; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                            }
-                        }
-                        if root.search-bookmarks.length == 0: Text { text: "—"; color: Theme.text-faint; font-size: 12px; }
-                    }
+    background: Theme.bg-app;
+    TouchArea {}  // swallow clicks behind the panel
+    VerticalLayout {
+        bar := SearchBar {
+            placeholder: "Find in notes, tasks, bookmarks…";
+            text <=> root.search-query;
+            capture-arrows: true;
+            init => { self.focus-input(); }
+            edited(t) => { root.run-unified-search(t); }
+            submit => { root.open-selected(); }
+            dismiss => { root.close(); }
+            move(d) => {
+                if root.total > 0 {
+                    root.sel = Math.max(0, Math.min(root.total - 1, root.sel + d));
                 }
             }
         }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 4px;
+                alignment: start;
+
+                // Empty query: favorites, then a hint.
+                if root.empty-query && root.favorites.length > 0: GroupLabel { text: "Favorites"; }
+                if root.empty-query: VerticalLayout {
+                    spacing: 2px;
+                    alignment: start;
+                    for f[i] in root.favorites: FindRow {
+                        glyph: f.kind == "quicklink" || f.kind == "bookmark" ? "↗" : (f.kind == "note" ? "◇" : (f.kind == "search" ? "⌕" : "★"));
+                        title: f.label;
+                        hint: f.keyword;
+                        selected: root.sel == i;
+                        clicked => { root.sel = i; root.open-selected(); }
+                    }
+                    Rectangle { height: 8px; }
+                    Text { text: "Type to search notes, tasks and bookmarks";
+                        color: Theme.text-faint; font-size: Theme.fs-sm; }
+                }
+
+                if !root.empty-query: VerticalLayout {
+                    spacing: 2px;
+                    alignment: start;
+                    if root.n-notes > 0: GroupLabel { text: "Notes"; }
+                    for n[i] in root.search-notes: FindRow {
+                        icon: Icons.tab-notes; title: n.title; hint: "note";
+                        selected: root.sel == i;
+                        clicked => { root.sel = i; root.open-selected(); }
+                    }
+                    if root.n-tasks > 0: Rectangle { height: 8px; }
+                    if root.n-tasks > 0: GroupLabel { text: "Tasks"; }
+                    for t[i] in root.search-tasks: FindRow {
+                        icon: Icons.tab-tasks; title: t.title; hint: "task";
+                        selected: root.sel == root.n-notes + i;
+                        clicked => { root.sel = root.n-notes + i; root.open-selected(); }
+                    }
+                    if root.search-bookmarks.length > 0: Rectangle { height: 8px; }
+                    if root.search-bookmarks.length > 0: GroupLabel { text: "Bookmarks"; }
+                    for b[i] in root.search-bookmarks: FindRow {
+                        icon: Icons.bookmark; title: b.title; hint: "bookmark";
+                        selected: root.sel == root.n-notes + root.n-tasks + i;
+                        clicked => { root.sel = root.n-notes + root.n-tasks + i; root.open-selected(); }
+                    }
+                    if root.total == 0: Text { text: "No matches in notes, tasks or bookmarks";
+                        color: Theme.text-faint; font-size: Theme.fs-sm; }
+                }
+            }
+        }
+        // Bottom bar.
+        Rectangle {
+            height: 40px;
+            Rectangle { y: 0; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 8px; spacing: 14px;
+                VerticalLayout { alignment: center;
+                    Text { text: "Find everywhere"; color: Theme.text-faint; font-size: 12px; } }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout { alignment: center; Text { text: "Open"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                VerticalLayout { alignment: center; Text { text: "Move"; color: Theme.text-dim; font-size: 12.5px; } }
+                VerticalLayout { alignment: center; Keycap { text: "↑↓"; } }
+                VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                VerticalLayout { alignment: center; Text { text: "Back"; color: Theme.text-dim; font-size: 12.5px; } }
+                VerticalLayout { alignment: center; Keycap { text: "esc"; } }
+            }
+        }
+    }
+}

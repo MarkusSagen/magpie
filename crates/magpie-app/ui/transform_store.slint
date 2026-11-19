@@ -1,0 +1,19 @@
+// ⌘T palette option state (screen 05): the free-text Quote / Separator / Wrap fields
+// for the join-style transforms. A global so the palette view and the main key
+// handler (↵ / ⌥↵ / ⌘C) compute the exact same result.
+export global TransformOpts {
+    in-out property <string> quote;
+    in-out property <string> sep;
+    in-out property <string> wrap;
+    // Rust: transforms::run_index_display_with / run_index_stats_with.
+    pure callback run(int, string, string, string, string) -> string;
+    pure callback stats(int, string, string, string, string) -> string;
+    // (row, field 0=quote 1=sep 2=wrap) → default; "" for rows without options.
+    pure callback default-opt(int, int) -> string;
+    pure callback has-opts(int) -> bool;
+    public function reset(row: int) {
+        self.quote = self.default-opt(row, 0);
+        self.sep = self.default-opt(row, 1);
+        self.wrap = self.default-opt(row, 2);
+    }
+}

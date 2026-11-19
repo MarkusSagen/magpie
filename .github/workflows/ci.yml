@@ -1,6 +1,12 @@
 name: ci
 on: [push, pull_request]
 
+# Quiet logs: no per-crate download/compile lines; tests print as dots and only
+# failures (with their output) are shown in full.
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TERM_QUIET: "true"
+
 jobs:
   check:
     strategy:
@@ -9,7 +15,7 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # rust-toolchain.toml pins 1.97.1, but the runner auto-installs it WITHOUT the
       # clippy/rustfmt components — install them explicitly. Keep the version in sync
@@ -17,14 +23,17 @@ jobs:
       - name: Install pinned Rust toolchain (+ clippy, rustfmt)
         run: rustup toolchain install 1.97.1 --profile minimal -c clippy -c rustfmt
 
+      # Cache ~/.cargo + target between runs (faster, and no crate-download noise).
+      - uses: Swatinem/rust-cache@v2
+
       # System deps for arboard + Slint (winit/femtovg), tray-icon (GTK/glib +
       # ayatana appindicator), enigo (libxdo), notify-rust (D-Bus), plus a headless
       # X server so the Linux clipboard test can actually exercise instead of skipping.
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libfontconfig1-dev \
             libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev \

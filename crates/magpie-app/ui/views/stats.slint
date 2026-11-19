@@ -22,29 +22,39 @@ export component StatsView inherits VerticalLayout {
     in property <string> time-week-total;
     in property <string> totals-line;
     in-out property <string> view;
+    in-out property <int> stats-tab; // 0 Clipboard, 1 Time tracked
                 padding: 8px;
                 spacing: 10px;
 
+                // Tab row (screen 07): Clipboard / Time tracked + a segmented range.
                 HorizontalLayout {
                     spacing: 6px;
-                    alignment: start;
-                    for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
-                        width: 56px;
-                        height: 26px;
-                        background: i == root.range-index ? Theme.bg-elevated : Theme.bg-panel;
+                    for label[i] in ["Clipboard", "Time tracked"]: Rectangle {
+                        height: 30px;
+                        width: 116px;
                         border-radius: Theme.r-sm;
-                        TouchArea {
-                            clicked => {
-                                root.range-index = i;
-                                root.stats-range-changed(i);
+                        background: i == root.stats-tab ? Theme.bg-elevated : (sttab.has-hover ? Theme.bg-elevated : transparent);
+                        sttab := TouchArea { clicked => { root.stats-tab = i; } }
+                        Text { text: label; color: i == root.stats-tab ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-body; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Segmented range control.
+                    Rectangle {
+                        background: Theme.bg-sidebar;
+                        border-radius: Theme.r-sm;
+                        width: 224px;
+                        height: 30px;
+                        HorizontalLayout {
+                            padding: 3px; spacing: 2px;
+                            for label[i] in ["7d", "30d", "90d", "All"]: Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: Theme.r-xs;
+                                background: i == root.range-index ? Theme.bg-elevated : (rgta.has-hover ? Theme.bg-elevated : transparent);
+                                rgta := TouchArea { clicked => { root.range-index = i; root.stats-range-changed(i); } }
+                                Text { text: label; color: i == root.range-index ? Theme.text : Theme.text-dim;
+                                    font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                             }
-                        }
-                        Text {
-                            text: label;
-                            color: Theme.text;
-                            font-size: Theme.fs-sm;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
                         }
                     }
                 }
@@ -52,6 +62,9 @@ export component StatsView inherits VerticalLayout {
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
+                        spacing: Theme.sp2;
+                        // ---- Clipboard tab ----
+                        if root.stats-tab == 0: VerticalLayout {
                         spacing: Theme.sp2;
                         Text { text: root.totals-line; color: Theme.text; font-size: Theme.fs-body; }
 
@@ -107,7 +120,11 @@ export component StatsView inherits VerticalLayout {
                             display: bar.display;
                             value_norm: bar.value_norm;
                         }
+                        }
 
+                        // ---- Time tracked tab ----
+                        if root.stats-tab == 1: VerticalLayout {
+                        spacing: Theme.sp2;
                         Text { text: "Time tracked · last 7 days: " + root.time-week-total; color: Theme.text-dim; font-size: Theme.fs-sm; }
                         for bar in root.time-by-day-bars: HBar {
                             label: bar.label;
@@ -142,8 +159,8 @@ export component StatsView inherits VerticalLayout {
                                     height: 18px;
                                     width: 52px;
                                     border-radius: 9px;
-                                    background: Theme.link.with-alpha(0.25);
-                                    Text { text: "running"; color: Theme.link; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    background: Theme.text-dim.with-alpha(0.25);
+                                    Text { text: "running"; color: Theme.text-dim; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                                 if !e.running: Text { text: e.duration; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
                                 Rectangle {
@@ -152,6 +169,7 @@ export component StatsView inherits VerticalLayout {
                                     Text { text: "×"; color: tedel.has-hover ? Theme.danger : Theme.text-faint; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
+                        }
                         }
                     }
                 }

@@ -12,7 +12,7 @@ export component AccessibilityView inherits Rectangle {
     in-out property <bool> needs-accessibility;
     callback open-accessibility-settings();
     callback recheck-accessibility();
-            background: #000000cc;
+            background: Theme.scrim;
             TouchArea {} // swallow clicks behind the modal
             Rectangle {
                 width: 460px;
@@ -20,7 +20,7 @@ export component AccessibilityView inherits Rectangle {
                 background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: Theme.border-strong;
+                border-color: Theme.line-strong;
                 VerticalLayout {
                     padding: 20px;
                     spacing: 12px;

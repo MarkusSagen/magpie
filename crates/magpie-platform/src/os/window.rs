@@ -51,6 +51,43 @@ pub fn raise_to_front() {
 #[cfg(not(target_os = "macos"))]
 pub fn raise_to_front() {}
 
+/// Bring the menu-bar **popover** to the front WITHOUT un-hiding the rest of the app.
+/// Unlike [`raise_to_front`], this never calls `unhide`, so an app-hidden main launcher
+/// window is NOT resurrected alongside the popover — clicking the tray icon then behaves
+/// like a normal macOS menu-bar dropdown (one surface), not "popover + full window".
+/// Only already-visible windows (the popover we just showed) are ordered front.
+#[cfg(target_os = "macos")]
+pub fn raise_popover_front() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindowCollectionBehavior};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    // NB: deliberately no `app.unhide(None)` here — that is what pulled the hidden main
+    // window back. Order only the currently-visible windows to the front; an app-hidden
+    // launcher reports `!isVisible` and is skipped.
+    for window in app.windows().iter() {
+        if !window.isVisible() {
+            continue;
+        }
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+        );
+        window.orderFrontRegardless();
+    }
+    // Foreground the process so the popover takes clicks/keys, but only after the
+    // visibility guard above decided what to raise (so the hidden launcher isn't lifted).
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+}
+
+/// No-op fallback: on Windows/Linux the WM focuses the window on show.
+#[cfg(not(target_os = "macos"))]
+pub fn raise_popover_front() {}
+
 /// Hide Magpie and return keyboard focus to the app that was active before us, so
 /// a subsequent paste keystroke lands in that app. On macOS `-[NSApplication
 /// hide:]` hides all our windows and activates the next app in line — even when we
@@ -98,3 +135,32 @@ pub fn set_appearance(dark: bool) {
 /// No-op fallback: Windows/Linux window chrome follows the desktop theme.
 #[cfg(not(target_os = "macos"))]
 pub fn set_appearance(_dark: bool) {}
+
+/// Usable size of the main screen in logical points, and the height reserved at the
+/// top by the menu bar — `(width, height, menubar_height)`. Used to dock the pinned
+/// clipboard side panel to the right edge below the menu bar. Call on the main
+/// thread. Returns `None` if no screen can be resolved.
+#[cfg(target_os = "macos")]
+pub fn main_screen_size() -> Option<(i32, i32, i32)> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let mtm = MainThreadMarker::new()?;
+    let screen = NSScreen::mainScreen(mtm)?;
+    // `frame` is the full screen; `visibleFrame` excludes the menu bar (and Dock).
+    // The menu bar height is the gap between the two at the top.
+    let frame = screen.frame();
+    let visible = screen.visibleFrame();
+    let w = frame.size.width as i32;
+    let h = frame.size.height as i32;
+    // In Cocoa's bottom-left origin, the menu bar eats the top: its height is the
+    // full height minus the visible frame's top edge.
+    let menubar = (frame.size.height - (visible.origin.y + visible.size.height)).max(0.0) as i32;
+    Some((w, h, menubar))
+}
+
+/// No-op fallback: other platforms don't dock the panel to the menu-bar edge.
+#[cfg(not(target_os = "macos"))]
+pub fn main_screen_size() -> Option<(i32, i32, i32)> {
+    None
+}

@@ -1,13 +1,25 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SuggestRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { Keycap } from "../components/keycap.slint";
+import { TransformOpts } from "../transform_store.slint";
+import { SearchStore } from "../search_store.slint";
+import { WorldClockStore } from "../worldclock_store.slint";
 import { ClipboardView } from "clipboard.slint";
 import { StatsView } from "stats.slint";
+import { DataView } from "data.slint";
+import { CalcView } from "calculator.slint";
+import { SnippetsView } from "snippets.slint";
+import { SecretsView } from "secrets.slint";
+import { FilesView } from "files.slint";
+import { ProjectsView } from "projects.slint";
+import { CalcStore } from "../calc_store.slint";
+import { DataStore } from "../data_store.slint";
 
 export component MainView inherits VerticalLayout {
     in-out property <int> action-selected;
@@ -33,6 +45,14 @@ export component MainView inherits VerticalLayout {
     callback dismiss-accessibility();
     in property <[EntryRow]> entries;
     in property <bool> filtered;
+    in property <bool> has-quicklink;
+    in property <string> quicklink-hint;
+    callback activate-quicklink(string);
+    in property <int> filter-count;
+    in property <string> active-app-name;
+    in property <string> active-time-label;
+    callback set-app-filter(int);
+    callback set-time-filter(int);
     in-out property <bool> graph-mode;
     callback hide-window();
     in-out property <bool> journal-mode;
@@ -47,12 +67,17 @@ export component MainView inherits VerticalLayout {
     in-out property <bool> nav-leader;
     callback nav-previous();
     callback nav-section(string);
+    callback pick-screen-color();
     in-out property <bool> needs-accessibility;
     callback new-snippet();
     callback note-from-entry(int);
     in-out property <bool> notes-mode;
     callback open-actions();
     callback open-in-editor(int);
+    callback open-selected-url();
+    callback bookmark-selected();
+    callback favorite-selected();
+    callback save-secret-selected();
     callback open-search();
     callback open-slots();
     in property <[Bar]> over-time-bars;
@@ -62,10 +87,27 @@ export component MainView inherits VerticalLayout {
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-color;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
+    in property <color> color-inverted;
+    callback copy-text(string);
+    in property <bool> preview-is-link;
+    in property <string> preview-domain;
+    in property <image> preview-link-image;
+    in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     in property <string> preview-text;
     in property <bool> preview-truncated;
     in-out property <string> query;
+    // Placeholder for the shared top search bar — context-aware (set per section by Rust).
+    in property <string> search-placeholder: "Search clipboard…";
+    // Live token autocomplete for the clipboard search bar.
+    in property <[SuggestRow]> search-suggestions;
+    callback apply-suggestion(string);
     in-out property <int> range-index;
     callback remove-tag(int, string);
     in-out property <bool> revealed;
@@ -102,6 +144,18 @@ export component MainView inherits VerticalLayout {
     in-out property <int> type-index;
     in-out property <string> view;
     callback zoom-preview(int);
+    // Transforms (⌘T) palette.
+    in-out property <string> transform-input;
+    in-out property <int> transform-selected;
+    callback transform-action(string, int);
+    // Inline answer card (dates / math / units).
+    in-out property <bool> has-answer;
+    in-out property <string> answer-kind;
+    in-out property <string> answer-display;
+    in-out property <string> answer-explanation;
+    in-out property <[string]> answer-formats;
+    in-out property <int> answer-format-index;
+    in-out property <bool> answer-random;
     forward-focus: searchinput;
     public function focus-input() { searchinput.focus(); }
             // Inset to the right of the sidebar via left padding (see the note
@@ -116,20 +170,80 @@ export component MainView inherits VerticalLayout {
             // shortcuts). It owns keyboard focus; nav/our ⌘-shortcuts are
             // intercepted in key-pressed, everything else falls through to editing.
             Rectangle {
-                height: 44px;
-                background: Theme.bg-panel;
-                border-radius: Theme.r-md;
-                border-width: 1px;
-                border-color: searchinput.has-focus ? Theme.border-strong : Theme.border;
+                height: 56px;
+                // Graphite top bar: borderless search with a bottom hairline.
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 12px;
-                    spacing: Theme.sp2;
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: Icons.search;
+                            width: 16px; height: 16px; image-fit: contain;
+                            colorize: Theme.text-faint;
+                        }
+                    }
+                    // Active-filter chips (screen 02): App <name> · Copied <range>.
+                    if root.active-app-name != "": VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            background: Theme.bg-elevated;
+                            border-radius: Theme.r-sm;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 8px; spacing: 6px;
+                                Text { text: "App"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Text { text: root.active-app-name; color: Theme.text; font-size: Theme.fs-sm; font-weight: 500; vertical-alignment: center; }
+                                Rectangle { width: 16px; height: 16px; border-radius: 8px;
+                                    background: xa1.has-hover ? Theme.line-strong : transparent;
+                                    Text { text: "✕"; color: Theme.text-dim; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    xa1 := TouchArea { clicked => { root.set-app-filter(-1); } } }
+                            }
+                        }
+                    }
+                    if root.active-time-label != "": VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            background: Theme.bg-elevated;
+                            border-radius: Theme.r-sm;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Copied"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Text { text: root.active-time-label; color: Theme.text; font-size: Theme.fs-sm; font-weight: 500; vertical-alignment: center; }
+                                Rectangle { width: 16px; height: 16px; border-radius: 8px;
+                                    background: xa2.has-hover ? Theme.line-strong : transparent;
+                                    Text { text: "✕"; color: Theme.text-dim; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    xa2 := TouchArea { clicked => { root.set-time-filter(0); } } }
+                            }
+                        }
+                    }
+                    // Quicklink hint chip (screen: Favorites/Quicklinks): the query
+                    // starts with a keyword, ↵ opens its target.
+                    if root.has-quicklink: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            background: Theme.bg-elevated;
+                            border-radius: Theme.r-sm;
+                            border-width: 1px;
+                            border-color: Theme.accent;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px; spacing: 6px;
+                                Text { text: "↗"; color: Theme.accent; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                Text { text: root.quicklink-hint; color: Theme.text; font-size: Theme.fs-sm;
+                                    vertical-alignment: center; overflow: elide; }
+                                Text { text: "⏎"; color: Theme.text-faint; font-family: Theme.mono; font-size: 11px; vertical-alignment: center; }
+                            }
+                        }
+                    }
                     Rectangle {
                         horizontal-stretch: 1;
                         if root.query == "": Text {
                             x: 0;
-                            text: "Search clipboard…";
+                            text: root.search-placeholder;
                             color: Theme.text-faint;
                             font-size: Theme.fs-lg;
                             vertical-alignment: center;
@@ -154,6 +268,25 @@ export component MainView inherits VerticalLayout {
                                 // ---- overlays / non-list modes: swallow, route to overlay ----
                                 if root.mode == "help" {
                                     if event.text == Key.Escape || event.text == "?" || (event.modifiers.control && event.text == "/") { root.mode = "list"; }
+                                    return accept;
+                                }
+                                if root.mode == "settings" {
+                                    if event.text == Key.Escape || (event.modifiers.control && event.text == ",") { root.mode = "list"; }
+                                    return accept;
+                                }
+                                if root.mode == "transform" {
+                                    if event.text == Key.Escape { root.mode = "list"; return accept; }
+                                    if event.text == Key.UpArrow { if root.transform-selected > 0 { root.transform-selected -= 1; } return accept; }
+                                    if event.text == Key.DownArrow { if root.transform-selected < 17 { root.transform-selected += 1; } return accept; }
+                                    if event.text == Key.Return {
+                                        root.transform-action(TransformOpts.run(root.transform-selected, root.transform-input, TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap), event.modifiers.alt ? 2 : 0);
+                                        if !event.modifiers.alt { root.mode = "list"; }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == "c" {
+                                        root.transform-action(TransformOpts.run(root.transform-selected, root.transform-input, TransformOpts.quote, TransformOpts.sep, TransformOpts.wrap), 1);
+                                        return accept;
+                                    }
                                     return accept;
                                 }
                                 if root.mode == "search" {
@@ -223,10 +356,136 @@ export component MainView inherits VerticalLayout {
                                     if event.text == "n" { root.nav-section("notes"); return accept; }
                                     if event.text == "b" { root.nav-section("bookmarks"); return accept; }
                                     if event.text == "s" { root.nav-section("stats"); return accept; }
+                                    if event.text == "d" { root.nav-section("data"); return accept; }
+                                    if event.text == "=" { root.nav-section("calculator"); return accept; }
+                                    if event.text == "x" || event.text == "X" { root.nav-section("snippets"); return accept; }
+                                    if event.text == "k" || event.text == "K" { root.nav-section("secrets"); return accept; }
+                                    if event.text == "f" || event.text == "F" { root.nav-section("files"); return accept; }
+                                    if event.text == "p" || event.text == "P" { root.nav-section("projects"); return accept; }
                                     return accept;
                                 }
                                 if !event.modifiers.control && event.text == "g" && root.query == "" {
                                     root.nav-leader = true;
+                                    return accept;
+                                }
+                                // Tab accepts the first search-token suggestion (autocomplete).
+                                if event.text == Key.Tab && root.view == "list" && root.search-suggestions.length > 0 {
+                                    root.apply-suggestion(root.search-suggestions[0].insert);
+                                    return accept;
+                                }
+                                // ---- files view (screens 19/22): ↑↓ file, ↵ open, ⌘E edit,
+                                // ⌘⇧R reveal, ⌘⇧V viewed / skip, ⌘L add location, ⌘↵ apply
+                                // the sed replacement (the explicit confirm), Esc back. ----
+                                if root.view == "files" {
+                                    // ⌘L / typing `in:` → folder suggestions; Tab completes,
+                                    // ⏎ adds chips, ⌫ on an empty field removes the last chip.
+                                    if event.modifiers.control && event.text == "l" { self.text = "in:"; root.search-changed(self.text); return accept; }
+                                    if event.text == Key.Tab && SearchStore.suggestions.length > 0 {
+                                        self.text = SearchStore.complete-location(self.text);
+                                        root.search-changed(self.text);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return && !event.modifiers.control && self.text.character-count > 3 && SearchStore.is-location-query {
+                                        self.text = SearchStore.commit-locations(self.text);
+                                        root.search-changed(self.text);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Backspace && self.text == "" && SearchStore.locations.length > 0 {
+                                        SearchStore.remove-location(SearchStore.locations.length - 1);
+                                        return accept;
+                                    }
+                                    if event.text == Key.UpArrow {
+                                        if SearchStore.selected > 0 { SearchStore.selected -= 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.DownArrow {
+                                        if SearchStore.selected < SearchStore.files.length - 1 { SearchStore.selected += 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        if event.modifiers.control {
+                                            if SearchStore.is-sed && SearchStore.replace-lines > 0 { SearchStore.apply-replace(); }
+                                        } else if SearchStore.files.length > 0 {
+                                            SearchStore.open-file(SearchStore.selected);
+                                        }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && SearchStore.files.length > 0 {
+                                        if event.text == "e" { SearchStore.edit-file(SearchStore.selected); return accept; }
+                                        if event.modifiers.shift && (event.text == "r" || event.text == "R") { SearchStore.reveal-file(SearchStore.selected); return accept; }
+                                        if event.modifiers.shift && (event.text == "v" || event.text == "V") { SearchStore.toggle-viewed(SearchStore.selected); return accept; }
+                                    }
+                                    if event.text == Key.Escape {
+                                        if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
+                                        root.nav-section("clipboard");
+                                        return accept;
+                                    }
+                                }
+                                // ---- calculator view: ↵ commit/copy, Tab reuse, ⌘⌫ delete ----
+                                if root.view == "calculator" {
+                                    // World clock tab (screen 16): ⌘C copy summary, ⌘N add
+                                    // city, [ ] (or ←/→ with an empty query) shift the hour.
+                                    if CalcStore.worldclock-open {
+                                        if event.modifiers.control && event.text == "c" { WorldClockStore.copy-summary(); return accept; }
+                                        if event.modifiers.control && event.text == "n" { WorldClockStore.add-city(); return accept; }
+                                        if !event.modifiers.control && root.query == "" {
+                                            if event.text == "[" || event.text == Key.LeftArrow { WorldClockStore.shift-hour(-1); return accept; }
+                                            if event.text == "]" || event.text == Key.RightArrow { WorldClockStore.shift-hour(1); return accept; }
+                                        }
+                                    }
+                                    if CalcStore.graphs-open {
+                                        if event.text == Key.Escape { CalcStore.close-graphs(); return accept; }
+                                    }
+                                    if event.text == Key.UpArrow {
+                                        if CalcStore.selected > 0 { CalcStore.selected -= 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.DownArrow {
+                                        if CalcStore.selected < CalcStore.history.length - 1 { CalcStore.selected += 1; }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Tab {
+                                        if CalcStore.history.length > 0 { CalcStore.reuse(CalcStore.selected); }
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && event.text == Key.Backspace {
+                                        if CalcStore.history.length > 0 { CalcStore.delete-row(CalcStore.selected); }
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        CalcStore.commit();
+                                        return accept;
+                                    }
+                                    if event.text == Key.Escape {
+                                        if root.query != "" { self.text = ""; root.search-changed(""); return accept; }
+                                    }
+                                    // everything else falls through to native text editing
+                                }
+                                // ---- quicklink: ↵ opens the keyword's target ----
+                                if root.has-quicklink && event.text == Key.Return {
+                                    root.activate-quicklink(root.query);
+                                    return accept;
+                                }
+                                // ---- inline answer card: Tab cycles format, ↵ pastes, ⌘C copies ----
+                                if root.has-answer && root.answer-formats.length > 0 {
+                                    if event.text == Key.Tab {
+                                        root.answer-format-index = Math.mod(root.answer-format-index + 1, root.answer-formats.length);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        // Evaluating in the search bar also lands in calc history.
+                                        CalcStore.commit();
+                                        root.transform-action(root.answer-formats[root.answer-format-index], 0);
+                                        return accept;
+                                    }
+                                    if event.modifiers.control && !event.modifiers.shift && event.text == "c" {
+                                        root.transform-action(root.answer-formats[root.answer-format-index], 1);
+                                        return accept;
+                                    }
+                                }
+                                // ⌘⇧C: pick a color from anywhere on screen (macOS eyedropper).
+                                if event.modifiers.control && event.modifiers.shift && (event.text == "c" || event.text == "C") {
+                                    root.pick-screen-color();
                                     return accept;
                                 }
                                 // ---- list mode: intercept nav + our shortcuts; rest is native editing ----
@@ -253,6 +512,8 @@ export component MainView inherits VerticalLayout {
                                     // idiom). Esc still clears the whole query, ⌥⌫ a word.
                                     if event.text == Key.Backspace { root.delete-entry(root.selected); return accept; }
                                     if event.text == "c" { root.copy-only(root.selected); return accept; }
+                                    if event.text == "o" { root.open-selected-url(); return accept; }
+                                    if event.text == "d" { root.favorite-selected(); return accept; }
                                     if event.text == "k" { root.open-actions(); return accept; }
                                     if event.text == "s" { root.open-slots(); return accept; }
                                     // ⌘⇧F — "Find everywhere": must be checked before the
@@ -273,8 +534,12 @@ export component MainView inherits VerticalLayout {
                                     }
                                     if event.text == "f" { root.open-search(); return accept; }
                                     if event.text == "/" { root.mode = "help"; return accept; }
+                                    if event.text == "," { root.mode = "settings"; return accept; }
+                                    if event.text == "t" { root.transform-input = root.preview-text; root.transform-selected = 0; root.mode = "transform"; return accept; }
                                     if event.text == "e" { root.start-edit(root.selected); return accept; }
                                     if event.text == "n" { root.new-snippet(); return accept; }
+                                    // ⌘⇧G toggles the Data chart (no clash with ⌘G merge).
+                                    if event.modifiers.shift && (event.text == "g" || event.text == "G") && root.view == "data" { DataStore.chart-toggle(); return accept; }
                                     if event.text == "g" { root.toggle-merge(root.selected); return accept; }
                                     if event.text == "j" { root.note-from-entry(root.selected); return accept; }
                                     if event.text == "p" { root.toggle-pin(root.selected); return accept; }
@@ -305,11 +570,63 @@ export component MainView inherits VerticalLayout {
                             }
                         }
                     }
+                    // Filter button — opens the Filters popover (⌘F).
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 30px;
+                            border-radius: 7px;
+                            background: filterta.has-hover ? Theme.bg-elevated : transparent;
+                            filterta := TouchArea { clicked => { root.open-search(); } }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                VerticalLayout { alignment: center;
+                                    Text { text: "Filter"; color: Theme.text-dim; font-size: Theme.fs-body; } }
+                                // Active-filter count badge (screen 02).
+                                if root.filter-count > 0: VerticalLayout { alignment: center;
+                                    Rectangle {
+                                        width: 18px; height: 18px; border-radius: 9px; background: Theme.accent;
+                                        Text { text: root.filter-count; color: Theme.on-accent; font-size: 11px;
+                                            font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                VerticalLayout { alignment: center; Keycap { text: "⌘F"; } }
+                            }
+                        }
+                    }
                 }
+            }
+
+            // ---- Search token suggestions (clipboard bar autocomplete) ----
+            if root.search-suggestions.length > 0: HorizontalLayout {
+                padding-left: 24px; padding-right: 24px; padding-bottom: 6px; spacing: 6px;
+                for sug in root.search-suggestions: Rectangle {
+                    height: 26px; border-radius: Theme.r-sm;
+                    background: sgta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                    border-width: 1px; border-color: Theme.line;
+                    sgta := TouchArea { clicked => { root.apply-suggestion(sug.insert); } }
+                    HorizontalLayout {
+                        padding-left: 8px; padding-right: 8px; spacing: 6px;
+                        Text { text: sug.label; color: Theme.text; font-family: Theme.mono;
+                            font-size: Theme.fs-sm; vertical-alignment: center; }
+                        if sug.hint != "": Text { text: sug.hint; color: Theme.text-faint;
+                            font-size: Theme.fs-xs; vertical-alignment: center; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
             }
 
             // ---- List view ----
             if root.view == "list": ClipboardView {
+                has-answer: root.has-answer;
+                answer-kind: root.answer-kind;
+                answer-display: root.answer-display;
+                answer-explanation: root.answer-explanation;
+                answer-formats: root.answer-formats;
+                answer-format-index: root.answer-format-index;
+                answer-random: root.answer-random;
                 activate(a0) => { root.activate(a0); }
                 add-tag(a0, a1) => { root.add-tag(a0, a1); }
                 add-tag-text <=> root.add-tag-text;
@@ -324,11 +641,25 @@ export component MainView inherits VerticalLayout {
                 merge-sep <=> root.merge-sep;
                 mode <=> root.mode;
                 open-in-editor(a0) => { root.open-in-editor(a0); }
+                open-selected-url() => { root.open-selected-url(); }
+                bookmark-selected() => { root.bookmark-selected(); }
                 paste-slot(a0) => { root.paste-slot(a0); }
                 preview-font-size <=> root.preview-font-size;
                 preview-has-image: root.preview-has-image;
                 preview-image: root.preview-image;
+                preview-is-color: root.preview-is-color;
+                color-scale: root.color-scale;
+                color-harmony: root.color-harmony;
+                color-formats: root.color-formats;
+                color-inverted: root.color-inverted;
+                copy-text(a0) => { root.copy-text(a0); }
+                preview-is-link: root.preview-is-link;
+                preview-domain: root.preview-domain;
+                preview-link-image: root.preview-link-image;
+                preview-has-link-image: root.preview-has-link-image;
                 preview-lines: root.preview-lines;
+                preview-hl-lines: root.preview-hl-lines;
+                preview-hl-first: root.preview-hl-first;
                 preview-text: root.preview-text;
                 preview-truncated: root.preview-truncated;
                 query <=> root.query;
@@ -368,6 +699,137 @@ export component MainView inherits VerticalLayout {
                 time-week-total: root.time-week-total;
                 totals-line: root.totals-line;
                 view <=> root.view;
+            }
+
+            // ---- Data view (screens 13/14): reads the DataStore global ----
+            if root.view == "data": DataView { }
+
+            // ---- Snippets view (screen 20): reads the SnippetsStore global ----
+            if root.view == "snippets": SnippetsView { }
+            if root.view == "secrets": SecretsView { }
+
+            // ---- Files view (screens 19/21/22/23): reads the SearchStore global ----
+            if root.view == "files": FilesView { }
+
+            // ---- Projects view (screens 25/26): reads the ProjectsStore global ----
+            if root.view == "projects": ProjectsView { }
+
+            // ---- Calculator view (screens 11/12): reads the CalcStore global ----
+            if root.view == "calculator": CalcView {
+                answer-has: root.has-answer;
+                answer-kind: root.answer-kind;
+                answer-display: root.answer-display;
+                answer-explanation: root.answer-explanation;
+                answer-formats: root.answer-formats;
+                answer-format-index: root.answer-format-index;
+            }
+
+            // ---- Bottom hint bar: context + next actions with keycaps ----
+            // Hidden in Calculator view — CalcView carries its own footer.
+            if root.view != "calculator": Rectangle {
+                height: 40px;
+                Rectangle { y: 0; height: 1px; background: Theme.line; }
+                // Answer-card footer: paste the selected format, cycle with Tab, copy.
+                if root.has-answer && root.answer-formats.length > 0: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Answers for dates, math and units appear above your results";
+                            color: Theme.text-faint; font-size: 12px; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: "Paste " + root.answer-formats[root.answer-format-index];
+                            color: Theme.text; font-size: 12.5px; font-weight: 500; overflow: elide; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Next format"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "Tab"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Copy"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘C"; } }
+                }
+                // Files: sed preview → confirm bar (screen 22); otherwise file actions (19).
+                // Typing a location (`in:…`): folder keys.
+                if root.view == "files" && SearchStore.is-location-query: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Pick folders to search"; color: Theme.text-faint; font-size: 12px; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; Text { text: "Add folder"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Complete"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "Tab"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Another"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: ","; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Cancel"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "esc"; } }
+                }
+                if root.view == "files" && !SearchStore.is-location-query && SearchStore.is-sed: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: "Preview only — nothing is written until you confirm · a .magpie-bak backup is kept";
+                            color: Theme.text-faint; font-size: 12px; overflow: elide; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: SearchStore.replace-lines == 0 ? "Nothing to replace"
+                                : "Replace " + SearchStore.replace-lines + " in " + SearchStore.replace-files + (SearchStore.replace-files == 1 ? " file" : " files");
+                            color: SearchStore.replace-lines == 0 ? Theme.text-faint : Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Skip file"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧V"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Back"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "esc"; } }
+                }
+                if root.view == "files" && !SearchStore.is-location-query && !SearchStore.is-sed: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: SearchStore.summary; color: Theme.text-faint; font-size: 12px; overflow: elide; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; Text { text: "Open"; color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Edit"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘E"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Reveal"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧R"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Viewed"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘⇧V"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Add folder"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘L"; } }
+                }
+                if root.view != "files" && !(root.has-answer && root.answer-formats.length > 0): HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    spacing: 14px;
+                    VerticalLayout { alignment: center;
+                        Text { text: root.entries.length + " items"; color: Theme.text-faint; font-size: 12px; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center;
+                        Text { text: root.target-app != "" ? "Paste to " + root.target-app : "Paste";
+                            color: Theme.text; font-size: 12.5px; font-weight: 500; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⏎"; strong: true; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Copy"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘C"; } }
+                    VerticalLayout { alignment: center; Rectangle { width: 1px; height: 14px; background: Theme.line-strong; } }
+                    VerticalLayout { alignment: center; Text { text: "Actions"; color: Theme.text-dim; font-size: 12.5px; } }
+                    VerticalLayout { alignment: center; Keycap { text: "⌘K"; } }
+                }
             }
 
         }

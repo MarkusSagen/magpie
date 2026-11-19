@@ -106,6 +106,7 @@ mod tests {
             copy_count: 1,
             pinned: false,
             source_app_id: None,
+            source_title: String::new(),
         };
         let now = 10 * DAY + 1;
         let entries = vec![mk(1, 10 * DAY), mk(2, 9 * DAY), mk(3, DAY)];

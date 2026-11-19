@@ -25,6 +25,10 @@ pub enum Content {
 pub struct CaptureEvent {
     pub content: Content,
     pub source_app: Option<AppInfo>,
+    /// The frontmost window's title at copy time (for browsers this carries the page /
+    /// site name). Empty when unavailable. Enables `url:`/`site:` search to match the
+    /// source page a clip came from, not just the clip's own text.
+    pub source_title: String,
     pub copied_at_ms: i64,
 }
 
@@ -45,6 +49,8 @@ pub struct Entry {
     pub copy_count: i64,
     pub pinned: bool,
     pub source_app_id: Option<i64>,
+    /// Frontmost window title captured with the clip (source page/site for browsers).
+    pub source_title: String,
 }
 
 pub fn content_hash(content: &Content) -> String {

@@ -1,0 +1,17 @@
+import { MdLineVM, NoteVersionRow } from "types.slint";
+
+// Notes v2 rich-preview state (screen 18). A global so Rust builds the line model
+// once and the preview reads it directly (mirrors DataStore / DateStore). The raw
+// editor stays the edit surface; `preview` toggles between them.
+export global NoteRender {
+    in-out property <[MdLineVM]> lines;
+    in-out property <bool> preview: false;   // true = rendered preview, false = raw editor (default: open editable)
+    callback toggle-preview();
+    callback open-wiki(string);       // open a [[note]] by title
+    callback open-url(string);        // open a URL span
+    // Version history (backlog #4).
+    in-out property <bool> history;   // history panel open
+    in property <[NoteVersionRow]> versions;
+    callback toggle-history();
+    callback restore-version(int);    // restore the version at this row index
+}

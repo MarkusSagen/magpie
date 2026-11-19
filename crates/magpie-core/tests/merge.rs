@@ -13,6 +13,7 @@ fn ingest(s: &Store, t: &str) -> i64 {
         &CaptureEvent {
             content: Content::Text(t.into()),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1,
         },
         &Noop,

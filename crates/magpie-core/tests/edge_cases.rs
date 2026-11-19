@@ -14,6 +14,7 @@ fn text(s: &str, ms: i64) -> CaptureEvent {
     CaptureEvent {
         content: Content::Text(s.into()),
         source_app: None,
+        source_title: String::new(),
         copied_at_ms: ms,
     }
 }
@@ -81,6 +82,7 @@ fn rich_html_content_gets_html_kind_and_is_searchable_by_text() {
                 rtf: None,
             },
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1,
         },
         &Noop,
@@ -106,6 +108,7 @@ fn files_content_dedups_and_is_searchable() {
         &CaptureEvent {
             content: files.clone(),
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 1,
         },
         &Noop,
@@ -115,6 +118,7 @@ fn files_content_dedups_and_is_searchable() {
         &CaptureEvent {
             content: files,
             source_app: None,
+            source_title: String::new(),
             copied_at_ms: 2,
         },
         &Noop,

@@ -28,6 +28,14 @@ impl Clipboard for Box<dyn Clipboard> {
 
 pub trait SourceApp: Send {
     fn frontmost(&self) -> Option<AppInfo>;
+
+    /// The frontmost app together with its window title (the source page/site for
+    /// browsers). Default delegates to [`Self::frontmost`] with an empty title so
+    /// existing implementations (tests, other platforms) keep working; the real
+    /// adapter overrides it to read both from one OS query.
+    fn frontmost_capture(&self) -> Option<(AppInfo, String)> {
+        self.frontmost().map(|a| (a, String::new()))
+    }
 }
 
 pub trait Paster: Send {

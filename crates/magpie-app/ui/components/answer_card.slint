@@ -1,0 +1,130 @@
+import { Theme } from "../theme.slint";
+
+// Inline answer card (screen 10): shown above the clipboard results when the
+// search query is a date / math / unit expression. Rendering only — Tab (cycle
+// format), ↵ (paste) and ⌘C (copy) are handled by the search key handler.
+export component AnswerCard inherits Rectangle {
+    in property <string> kind;
+    in property <string> display;
+    in property <string> explanation;
+    in property <[string]> formats;
+    in property <int> format-index;
+    // Random generators (Phase 13): the candidates are ephemeral — never saved —
+    // so the header must NOT claim "saved to history".
+    in property <bool> is-random;
+    // Math typesetting (Phase 8) — off by default so the clipboard card is unchanged.
+    in property <bool> show-syntax-toggle;
+    in property <bool> math-has;
+    in property <image> math-svg;
+    in property <int> syntax-mode;      // 0 Plain, 1 LaTeX, 2 Typst
+    callback set-syntax(int);
+    callback copy-latex();
+    callback copy-typst();
+
+    background: Theme.bg-panel;
+    border-radius: Theme.r-lg;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        // Header: kind label (left) · Plain/LaTeX/Typst toggle or history note (right).
+        HorizontalLayout {
+            Text {
+                text: root.kind;
+                color: Theme.text-dim;
+                font-size: Theme.fs-xs;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.show-syntax-toggle: Rectangle {
+                background: Theme.bg-sidebar;
+                border-radius: Theme.r-sm;
+                width: 210px;
+                height: 30px;
+                HorizontalLayout {
+                    padding: 3px; spacing: 2px;
+                    for label[i] in ["Plain", "LaTeX", "Typst"]: Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: Theme.r-xs;
+                        background: i == root.syntax-mode ? Theme.bg-elevated : (syt.has-hover ? Theme.bg-elevated : transparent);
+                        syt := TouchArea { clicked => { root.set-syntax(i); } }
+                        Text { text: label; color: i == root.syntax-mode ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+            if !root.show-syntax-toggle: Text {
+                text: root.is-random ? "Never saved — press ⏎ to paste" : "Saved to Calculator history";
+                color: Theme.text-faint;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+        }
+        // Typeset math (when a LaTeX/Typst render is available) …
+        if root.math-has: Rectangle {
+            height: 96px;
+            clip: true;
+            Image {
+                source: root.math-svg;
+                image-fit: preserve;
+                x: 0;
+                width: min(self.preferred-width, parent.width);
+                height: parent.height;
+            }
+        }
+        // … otherwise the big plain result.
+        if !root.math-has: Text {
+            text: root.display;
+            color: Theme.text;
+            font-size: 30px;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+        // How the query was read (mono, dim).
+        if root.explanation != "": Text {
+            text: root.explanation;
+            color: Theme.text-faint;
+            font-family: Theme.mono;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+        // Format chips — the selected one gets an accent ring.
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            for chip[i] in root.formats: Rectangle {
+                height: 34px;
+                background: Theme.bg-elevated;
+                border-radius: Theme.r-sm;
+                border-width: 1px;
+                border-color: root.format-index == i ? Theme.accent : Theme.line;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text {
+                        text: chip;
+                        color: root.format-index == i ? Theme.text : Theme.text-dim;
+                        font-family: Theme.mono;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            if root.show-syntax-toggle: Rectangle {
+                height: 34px; border-radius: Theme.r-sm; border-width: 1px; border-color: Theme.line;
+                HorizontalLayout { padding-left: 12px; padding-right: 12px;
+                    Text { text: "Copy LaTeX"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+                clta := TouchArea { clicked => { root.copy-latex(); } }
+            }
+            if root.show-syntax-toggle: Rectangle {
+                height: 34px; border-radius: Theme.r-sm; border-width: 1px; border-color: Theme.line;
+                HorizontalLayout { padding-left: 12px; padding-right: 12px;
+                    Text { text: "Copy Typst"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; } }
+                ctya := TouchArea { clicked => { root.copy-typst(); } }
+            }
+        }
+    }
+}

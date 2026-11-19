@@ -16,6 +16,7 @@ fn ingest(store: &Store, content: Content, ms: i64) -> i64 {
             &CaptureEvent {
                 content,
                 source_app: None,
+                source_title: String::new(),
                 copied_at_ms: ms,
             },
             &FakeImages,

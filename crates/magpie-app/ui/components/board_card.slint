@@ -2,21 +2,23 @@ import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
 import { TaskRow } from "../types.slint";
 
-// A Board card: title + priority pill + due (red if overdue) + project chip,
-// with three tiny status targets (To do / Doing / Done) and a click-through to
-// the owning note. Shared by the Kanban and List board layouts.
+// A task card (Graphite): ring checkbox + title + due/#tag + a monochrome 3-bar
+// priority glyph. Focused/hovered = 1px accent border. Shared by every board
+// layout (Kanban / List / Grid / Table).
 export component BoardCard inherits Rectangle {
     in property <TaskRow> t;
     in property <bool> draggable;
     callback open();
     callback set-status(int); // 0=Todo, 1=Doing, 2=Done
-    callback drag-start(int, int, string); // note_id, line_index, title
-    callback drag-move(length, length); // window x, y
-    callback drag-end(length, length); // window x, y
+    callback drag-start(int, int, string);
+    callback drag-move(length, length);
+    callback drag-end(length, length);
     property <bool> dragging: false;
-    height: 72px;
+    height: 56px;
     background: bcta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
     border-radius: Theme.r-md;
+    border-width: 1px;
+    border-color: bcta.has-hover ? Theme.accent : transparent;
     opacity: root.dragging ? 0.4 : 1.0;
     bcta := TouchArea {
         moved => {
@@ -41,57 +43,52 @@ export component BoardCard inherits Rectangle {
             }
         }
     }
-    VerticalLayout {
+    HorizontalLayout {
         padding: Theme.sp2;
-        spacing: 4px;
-        HorizontalLayout {
-            spacing: 6px;
+        spacing: 8px;
+        // Ring checkbox — toggles Done. Filled accent + inner dot when done.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border-width: 1.5px;
+                border-color: root.t.done ? Theme.accent : Theme.text-faint;
+                background: root.t.done ? Theme.accent : transparent;
+                if root.t.done: Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.on-accent; }
+                chkta := TouchArea { clicked => { root.set-status(root.t.done ? 0 : 2); } }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
             Text {
                 text: root.t.title;
                 color: root.t.done ? Theme.text-faint : Theme.text;
                 font-size: Theme.fs-body;
                 overflow: elide;
-                horizontal-stretch: 1;
-                vertical-alignment: center;
             }
-            if root.t.priority <= 2: Rectangle {
-                width: 16px;
-                height: 16px;
-                border-radius: 4px;
-                background: root.t.priority == 0 ? Theme.prio-high : (root.t.priority == 1 ? Theme.prio-med : Theme.prio-low);
-                Text {
-                    text: root.t.priority == 0 ? "H" : (root.t.priority == 1 ? "M" : "L");
-                    color: #16161a;
-                    font-size: 10px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+            }
+        }
+        // Monochrome 3-bar priority glyph (High=3 filled, Med=2, Low=1; rest faint).
+        if root.t.priority <= 2: VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 2px;
+                alignment: end;
+                for b in [0, 1, 2]: Rectangle {
+                    width: 3px;
+                    height: 5px + b * 3px;
+                    border-radius: 1px;
+                    background: b < (root.t.priority == 0 ? 3 : (root.t.priority == 1 ? 2 : 1)) ? Theme.text : Theme.text-faint;
                 }
-            }
-        }
-        HorizontalLayout {
-            spacing: Theme.sp2;
-            alignment: start;
-            if root.t.due != "": Text { text: root.t.due; color: root.t.overdue ? Theme.danger : Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
-            if root.t.project != "": Text { text: "#" + root.t.project; color: Theme.link; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
-        }
-        // Status targets: click one to move the card straight to that column.
-        // Drawn as small circles (no font glyph dependency — some fonts lack ◐):
-        // a filled dot marks the active status, hollow rings are the other two.
-        HorizontalLayout {
-            spacing: 9px;
-            alignment: start;
-            for i in [0, 1, 2]: Rectangle {
-                width: 13px;
-                height: 13px;
-                border-radius: 7px;
-                border-width: 1.5px;
-                background: (i == 1 && root.t.doing) ? Theme.warn : (i == 2 && root.t.done) ? Theme.success : transparent;
-                border-color: (i == 0 && !root.t.done && !root.t.doing) ? Pal.accent
-                    : (i == 1 && root.t.doing) ? transparent
-                    : (i == 2 && root.t.done) ? transparent
-                    : (sst.has-hover ? Theme.text : Theme.text-faint);
-                sst := TouchArea { clicked => { root.set-status(i); } }
             }
         }
     }

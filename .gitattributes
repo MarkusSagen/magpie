@@ -1,0 +1,4 @@
+# Keep text files LF on every OS. Windows runners check out with core.autocrlf, which
+# turned test fixtures' newlines into CRLF and broke byte-exact tests (e.g. table.rs
+# quoted_fields_edge_cases). Binaries (png, ttf, icns, …) are auto-detected.
+* text=auto eol=lf

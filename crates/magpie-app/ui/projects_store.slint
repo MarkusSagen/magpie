@@ -1,0 +1,70 @@
+import { ProjectListRow, ProjTaskRow, TaskRow, BoardColumn } from "types.slint";
+
+// Local-projects state (screens 25/26). A global; Rust scans + populates, the
+// ProjectsView reads it directly.
+export global ProjectsStore {
+    in-out property <[ProjectListRow]> found;     // "Found · not added yet"
+    in-out property <[ProjectListRow]> projects;
+    in-out property <int> selected;
+    in-out property <bool> has-selection;
+    // Detail.
+    in-out property <string> detail-name;
+    in-out property <string> detail-path;
+    in-out property <string> detail-branch;
+    in-out property <string> detail-tag;
+    in-out property <string> detail-tags;   // from .magpie/project.toml, e.g. "#hobby #house"
+    in-out property <string> detail-week;
+    // The project's TODOs/tasks (merged: note tasks tagged with the project +
+    // on-disk project-file tasks). `detail-tasks` now holds only the read-only
+    // EXTRAS shown below the task hub (project notes + code-comment TODO/FIXME).
+    in-out property <[ProjTaskRow]> detail-tasks;
+    in-out property <string> scanning;
+    // ---- Per-project task hub (List / Board scoped to the selected project) ----
+    in-out property <string> detail-view: "list";   // "list" | "board"
+    in-out property <bool> detail-show-done;
+    in-out property <[TaskRow]> detail-task-rows;    // List body
+    in-out property <[BoardColumn]> detail-board;    // Board body
+    in-out property <int> detail-task-selected;
+    // Inline title-edit state for the project List.
+    in-out property <int> task-edit-note: -1;
+    in-out property <int> task-edit-line: -1;
+    in-out property <string> task-edit-draft;
+    // Project Board controls (mirror the Tasks-tab Board).
+    in-out property <int> board-group: 0;
+    in-out property <int> board-layout: 0;
+    in-out property <int> board-sort: 0;
+    in-out property <bool> board-hide-done: false;
+    in-out property <bool> board-drag-active;
+    in-out property <int> board-drag-line;
+    in-out property <int> board-drag-note;
+    in-out property <string> board-drag-title;
+    in-out property <length> board-drag-x;
+    in-out property <length> board-drag-y;
+    // Sync conflict banner + Review (Phase 18b, PNG 25).
+    in-out property <bool> detail-has-conflict;
+    in-out property <string> conflict-summary;
+    in-out property <bool> reviewing;   // Review expanded to show resolution choices
+
+    callback select(int);
+    callback add-found(int);
+    callback ignore-found(int);
+    callback toggle-task(int);
+    callback open-task(int);      // open the file at file:line in the editor
+    callback open-source(string); // open a read-only "rel:line" (code comment) in the editor
+    callback open-folder();
+    callback rescan();
+    callback review();            // toggle the Review choices open/closed
+    callback resolve-mine();      // keep Magpie's version
+    callback resolve-theirs();    // keep the disk version
+    callback resolve-edit();      // open the file in the editor to merge by hand
+    // ---- Task-hub actions (route by note_id sign: <0 = project file, else note) ----
+    callback set-detail-view(string);
+    callback task-toggle(int, int);          // note_id, line_index
+    callback task-open(int);                 // note_id → open its note/file
+    callback task-bookmark(int, int);
+    callback task-timer(int, string);
+    callback task-rename(int, int, string);  // note_id, line_index, new title
+    callback task-set-status(int, int, int); // note_id, line_index, status (0/1/2)
+    callback board-controls-changed();
+    callback toggle-show-done();
+}

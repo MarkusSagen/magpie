@@ -1,11 +1,14 @@
 import { LineEdit, ListView, TextEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { Icons } from "../icons.slint";
-import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow } from "../types.slint";
+import { EntryRow, Bar, ActionItem, SlotItem, AppItem, NoteRow, BookmarkRow, JournalRow, RefRow, TaskRow, BoardColumn, GraphNode, GraphEdge, ClipRow, TimeEntryRow, SearchNoteRow, SearchTaskRow, SearchBookmarkRow, SearchLine } from "../types.slint";
 import { TypeIcon, ActionIcon } from "../components/glyphs.slint";
 import { HBar } from "../components/hbar.slint";
 import { PopoverTaskRow } from "../components/task_row.slint";
 import { BoardCard } from "../components/board_card.slint";
+import { AnswerCard } from "../components/answer_card.slint";
+import { DateAnswerCard } from "../components/date_answer_card.slint";
+import { DateStore } from "../date_store.slint";
 
 export component ClipboardView inherits VerticalLayout {
     callback activate(int);
@@ -22,11 +25,27 @@ export component ClipboardView inherits VerticalLayout {
     in-out property <int> merge-sep;
     in-out property <string> mode;
     callback open-in-editor(int);
+    callback open-selected-url();
+    callback bookmark-selected();
     callback paste-slot(int);
     in-out property <length> preview-font-size;
     in property <bool> preview-has-image;
     in property <image> preview-image;
+    in property <bool> preview-is-color;
+    in property <[color]> color-scale;
+    in property <[color]> color-harmony;
+    in property <[string]> color-formats;
+    in property <color> color-inverted;
+    // Copy an arbitrary string (a color format) to the clipboard.
+    callback copy-text(string);
+    in property <bool> preview-is-link;
+    in property <string> preview-domain;
+    in property <image> preview-link-image;
+    in property <bool> preview-has-link-image;
     in property <[string]> preview-lines;
+    // Search-match highlight lines (pre/mid/post) + the first matching line index.
+    in property <[SearchLine]> preview-hl-lines;
+    in property <int> preview-hl-first;
     in property <string> preview-text;
     in property <bool> preview-truncated;
     in-out property <string> query;
@@ -48,65 +67,85 @@ export component ClipboardView inherits VerticalLayout {
     callback toggle-screenshare();
     in-out property <int> type-index;
     in-out property <string> view;
+    in property <bool> has-answer;
+    in property <string> answer-kind;
+    in property <string> answer-display;
+    in property <string> answer-explanation;
+    in property <[string]> answer-formats;
+    in property <int> answer-format-index;
+    in property <bool> answer-random;
                 spacing: Theme.sp2;
 
+                // Full date answer + calendar (screen 15) — replaces the list when
+                // the query resolves to a date/range.
+                if DateStore.has-date: DateAnswerCard {
+                    formats: root.answer-formats;
+                    format-index: root.answer-format-index;
+                    vertical-stretch: 1;
+                }
+
+                // Inline answer card (dates / math / units) above the results.
+                if root.has-answer && !DateStore.has-date: AnswerCard {
+                    kind: root.answer-kind;
+                    display: root.answer-display;
+                    explanation: root.answer-explanation;
+                    formats: root.answer-formats;
+                    format-index: root.answer-format-index;
+                    is-random: root.answer-random;
+                }
+
                 // Row 1 — filter + sort the clipboard list.
-                HorizontalLayout {
+                if !DateStore.has-date: HorizontalLayout {
                     spacing: 6px;
                     // Order must match `viewmodel::type_filter_from_index` /
                     // `runtime::TYPE_CHIPS`.
                     for label[i] in ["All", "Text", "Link", "Email", "Color", "Image", "File"]: Rectangle {
-                        height: 26px;
-                        width: 52px;
-                        background: i == root.type-index ? Theme.accent : (fta.has-hover ? Theme.border-strong : Theme.bg-elevated);
+                        height: 28px;
+                        width: 54px;
+                        background: i == root.type-index ? Theme.bg-elevated : (fta.has-hover ? Theme.bg-elevated : transparent);
                         border-radius: Theme.r-sm;
                         fta := TouchArea { clicked => { root.type-index = i; root.set-type-filter(i); } }
-                        Text { text: label; color: i == root.type-index ? Theme.on-accent : Theme.text-dim; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: label; color: i == root.type-index ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-body; font-weight: i == root.type-index ? 500 : 400;
+                            horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    for label[i] in ["Recent", "Most copied"]: Rectangle {
-                        height: 26px;
-                        width: i == 0 ? 62px : 92px;
-                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
-                        border-radius: Theme.r-sm;
-                        sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); } }
-                        Text { text: label; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                }
-
-                // Row 2 — utilities not covered by the left sidebar (screenshare
-                // mask, keyboard-shortcut help). Section navigation (Today/
-                // Journal/Notes/Tasks/Bookmarks/Board/Graph/Stats) now lives in
-                // the sidebar + its per-section view-switchers (Task 4).
-                HorizontalLayout {
-                    spacing: 6px;
-                    Rectangle { horizontal-stretch: 1; }
+                    // Sort as one "Recent ▾" menu (screen 01), replacing the two buttons.
                     Rectangle {
-                        width: 84px;
-                        height: 26px;
-                        background: root.screenshare ? Theme.danger : (lockta.has-hover ? Theme.bg-elevated : Theme.bg-panel);
+                        height: 28px;
+                        width: 128px;
                         border-radius: Theme.r-sm;
-                        lockta := TouchArea { clicked => { root.toggle-screenshare(); } }
+                        background: sortbtnta.has-hover ? Theme.bg-elevated : transparent;
+                        sortbtnta := TouchArea { clicked => { sortpop.show(); } }
                         HorizontalLayout {
-                            alignment: center;
-                            spacing: 4px;
-                            Image { source: Icons.lock; colorize: root.screenshare ? Theme.on-accent : Theme.text; width: 12px; height: 12px; image-fit: contain; }
-                            Text { text: root.screenshare ? "Masked" : "Mask"; color: root.screenshare ? Theme.on-accent : Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; }
+                            padding-left: 10px; padding-right: 8px;
+                            Text { text: root.sort-index == 0 ? "Recent" : "Most copied"; color: Theme.text-dim;
+                                font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: "▾"; color: Theme.text-faint; font-size: 11px; vertical-alignment: center; }
                         }
-                    }
-                    Rectangle {
-                        width: 34px;
-                        height: 26px;
-                        background: helpta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
-                        border-radius: Theme.r-sm;
-                        helpta := TouchArea { clicked => { root.mode = "help"; } }
-                        Text { text: "?"; color: Theme.text; font-size: Theme.fs-body; horizontal-alignment: center; vertical-alignment: center; }
+                        sortpop := PopupWindow {
+                            x: 0; y: 30px; width: 128px; height: 74px;
+                            Rectangle {
+                                background: Theme.bg-panel; border-color: Theme.line-strong; border-width: 1px; border-radius: Theme.r-md;
+                                VerticalLayout {
+                                    padding: 4px; spacing: 1px;
+                                    for label[i] in ["Recent", "Most copied"]: Rectangle {
+                                        height: 30px; border-radius: Theme.r-sm;
+                                        background: i == root.sort-index ? Theme.bg-elevated : (sta.has-hover ? Theme.bg-elevated : transparent);
+                                        sta := TouchArea { clicked => { root.sort-index = i; root.set-sort(i); sortpop.close(); } }
+                                        HorizontalLayout { padding-left: 10px;
+                                            Text { text: label; color: i == root.sort-index ? Theme.text : Theme.text-dim;
+                                                font-size: Theme.fs-body; vertical-alignment: center; } }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 // Screenshare mode is a big, silent change to every row — say so,
                 // otherwise a wall of dots reads as broken data.
-                if root.screenshare: Rectangle {
+                if root.screenshare && !DateStore.has-date: Rectangle {
                     height: 26px;
                     background: Theme.danger.with-alpha(0.16);
                     border-radius: Theme.r-sm;
@@ -125,7 +164,7 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                if root.all-tags.length > 0: HorizontalLayout {
+                if root.all-tags.length > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
                     for t in root.all-tags: Rectangle {
@@ -145,7 +184,7 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                if root.merge-count > 0: HorizontalLayout {
+                if root.merge-count > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
                     Text {
@@ -190,7 +229,7 @@ export component ClipboardView inherits VerticalLayout {
                 }
 
                 // Speed-dial: assigned slots (⌘1-9). Shown only when any is filled.
-                if root.slots.length > 0: HorizontalLayout {
+                if root.slots.length > 0 && !DateStore.has-date: HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
                     Text { text: "Slots ⌘S"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
@@ -211,7 +250,7 @@ export component ClipboardView inherits VerticalLayout {
                 }
 
                 // Two-pane body.
-                HorizontalLayout {
+                if !DateStore.has-date: HorizontalLayout {
                     spacing: 12px;
 
                     // Scroll-follow: mirror `selected` locally so the `changed`
@@ -244,7 +283,7 @@ export component ClipboardView inherits VerticalLayout {
                                     font-size: Theme.fs-sm;
                                     font-weight: 600;
                                 }
-                                Rectangle { height: 1px; background: Theme.border; }
+                                Rectangle { height: 1px; background: Theme.line; }
                             }
                             Rectangle {
                             height: 52px;
@@ -262,13 +301,22 @@ export component ClipboardView inherits VerticalLayout {
                                 // 1-9 quick-paste number on the LEFT, aligned with the
                                 // top line of the copied text; brightens while ⌘/Ctrl held.
                                 Rectangle {
-                                    width: 20px;
-                                    if i < 9: Text {
+                                    width: 30px;
+                                    // Selected row shows a real ⌘n keycap; others a ghost number
+                                    // that brightens while ⌘/Ctrl is held (screen 01).
+                                    if i < 9 && i == root.selected: Rectangle {
+                                        y: 7px; width: 28px; height: 18px; border-radius: 4px;
+                                        background: Theme.bg-elevated; border-width: 1px; border-color: Theme.line-strong;
+                                        Text { text: "⌘" + (i + 1); color: Theme.text; font-family: Theme.mono;
+                                            font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                    if i < 9 && i != root.selected: Text {
                                         y: 9px;
                                         text: i + 1;
-                                        color: root.cmd-held ? Theme.accent : Theme.border-strong;
+                                        color: root.cmd-held ? Theme.accent : Theme.text-ghost;
                                         font-size: 12px;
                                         horizontal-alignment: center;
+                                        width: 30px;
                                     }
                                 }
                                 // Leading visual, most content-specific first: the
@@ -296,6 +344,12 @@ export component ClipboardView inherits VerticalLayout {
                                     }
                                     if !row.has-thumb && !row.has-swatch && row.has-icon: Image { source: row.icon; y: 8px; width: 20px; height: 20px; }
                                     if !row.has-thumb && !row.has-swatch && !row.has-icon: TypeIcon { kind: row.kind; y: 8px; width: 20px; height: 20px; tint: Theme.text-dim; }
+                                    // Chain badge marks a web link (screen 04), bottom-right of the tile.
+                                    if row.domain != "": Rectangle {
+                                        x: 13px; y: 19px; width: 14px; height: 14px; border-radius: 4px;
+                                        background: Theme.bg-app; border-width: 1px; border-color: Theme.line-strong;
+                                        Image { source: Icons.type-link; colorize: Theme.accent; width: 9px; height: 9px; image-fit: contain; }
+                                    }
                                 }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
@@ -304,7 +358,16 @@ export component ClipboardView inherits VerticalLayout {
                                     HorizontalLayout {
                                         spacing: 6px;
                                         if row.pinned: Image { source: Icons.act-pin; colorize: Theme.text-dim; width: 11px; height: 11px; image-fit: contain; }
-                                        Text { text: row.title; color: Theme.text; font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        if row.is-secret: Image { source: Icons.lock; colorize: Theme.accent; width: 11px; height: 11px; image-fit: contain; }
+                                        Text { text: row.title;
+                                            // Links light up in the accent colour on hover.
+                                            color: (row.kind == "link" && rowta.has-hover) ? Theme.accent : Theme.text;
+                                            // Mono (Nerd Font) so copied Nerd-Font icons render in the row.
+                                            font-family: Theme.mono;
+                                            font-size: Theme.fs-md; overflow: elide; horizontal-stretch: 1; }
+                                        // Web links: an accent "domain ↗" so links stand out.
+                                        if row.domain != "": Text { text: row.domain + " ↗"; color: Theme.accent;
+                                            font-size: Theme.fs-sm; vertical-alignment: center; }
                                         if row.badge != "": Text { text: row.badge; color: Theme.text-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
                                     }
                                     Text { text: row.subtitle; color: Theme.text-dim; font-size: Theme.fs-sm; overflow: elide; }
@@ -380,7 +443,7 @@ export component ClipboardView inherits VerticalLayout {
                         Rectangle {
                             width: parent.width;
                             border-radius: 3px;
-                            background: sbta.pressed ? Theme.border-strong.brighter(0.3) : (sbta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                            background: sbta.pressed ? Theme.line-strong.brighter(0.3) : (sbta.has-hover ? Theme.line-strong.brighter(0.15) : Theme.line-strong);
                             height: max(30px, sb.height * (list.visible-height / list.viewport-height));
                             y: -list.viewport-y / list.viewport-height * sb.height;
                         }
@@ -428,7 +491,8 @@ export component ClipboardView inherits VerticalLayout {
                                     revta := TouchArea { clicked => { root.revealed = true; } }
                                     Text { text: "Reveal"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
-                                Rectangle {
+                                // Non-link entries open in the editor; links get browser + bookmark.
+                                if !(root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link"): Rectangle {
                                     height: 26px;
                                     width: 116px;
                                     background: oeta.has-hover ? Theme.bg-elevated : Theme.bg-panel;
@@ -436,13 +500,61 @@ export component ClipboardView inherits VerticalLayout {
                                     oeta := TouchArea { clicked => { root.open-in-editor(root.selected); } }
                                     Text { text: "↗ Open in editor"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                                 }
+                                // Web-link entries (screen 04): open in the browser + bookmark.
+                                if root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link": Rectangle {
+                                    height: 26px;
+                                    width: 148px;
+                                    background: obwa.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    obwa := TouchArea { clicked => { root.open-selected-url(); } }
+                                    Text { text: "↗ Open in browser  ⌘O"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if root.selected >= 0 && root.selected < entries.length && entries[root.selected].kind == "link": Rectangle {
+                                    height: 26px;
+                                    width: 96px;
+                                    background: obma.has-hover ? Theme.bg-elevated : Theme.bg-panel;
+                                    border-radius: Theme.r-sm;
+                                    obma := TouchArea { clicked => { root.bookmark-selected(); } }
+                                    Text { text: "Bookmark"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+
+                            // Web-link card (screen 04): a page-preview thumbnail
+                            // (cached OG image if bookmarked, else a placeholder),
+                            // the accent domain, and the full URL.
+                            if root.preview-is-link: VerticalLayout {
+                                vertical-stretch: 1;
+                                spacing: 10px;
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    min-height: 140px;
+                                    border-radius: Theme.r-md;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    background: Theme.bg-elevated;
+                                    clip: true;
+                                    if root.preview-has-link-image: Image {
+                                        source: root.preview-link-image;
+                                        width: parent.width; height: parent.height; image-fit: contain;
+                                    }
+                                    if !root.preview-has-link-image: Text {
+                                        text: "Page preview";
+                                        color: Theme.text-faint; font-size: Theme.fs-body;
+                                        horizontal-alignment: center; vertical-alignment: center;
+                                    }
+                                }
+                                Text { text: root.preview-domain; color: Theme.accent;
+                                    font-size: Theme.fs-md; font-weight: 600; overflow: elide; }
+                                Text { text: root.preview-text; color: Theme.text-dim;
+                                    font-family: Theme.mono; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                Rectangle { vertical-stretch: 1; }
                             }
 
                             // Detail preview — a VIRTUALIZED line list. Only the
                             // visible lines are shaped, so huge entries are instant.
                             // Rust pushes preview-lines (masked→bullets, else the
                             // real lines, bounded) for the selected entry.
-                            Rectangle {
+                            if !root.preview-is-link: Rectangle {
                                 min-height: 100px;
                                 vertical-stretch: 1;
                                 // Image entries: the bitmap itself, scaled to fit.
@@ -452,17 +564,87 @@ export component ClipboardView inherits VerticalLayout {
                                     height: parent.height;
                                     image-fit: contain;
                                 }
-                                // Colour entries: a large swatch above the value, so
-                                // "#333" is something you can actually see.
+                                // Colour entries (screen 17): swatch + format strings +
+                                // an OKLCH tint/shade scale + complement/triad harmonies.
                                 if !root.preview-has-image && root.selected < entries.length && entries[root.selected].has-swatch: VerticalLayout {
-                                    spacing: 8px;
+                                    spacing: 10px;
                                     alignment: start;
-                                    Rectangle {
-                                        height: 72px;
-                                        border-radius: 8px;
-                                        background: entries[root.selected].swatch;
-                                        border-width: 1px;
-                                        border-color: Theme.text-faint;
+                                    // Original + inverted swatches, side by side.
+                                    HorizontalLayout {
+                                        spacing: 8px; height: 96px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1; spacing: 4px;
+                                            Rectangle {
+                                                vertical-stretch: 1;
+                                                border-radius: Theme.r-md;
+                                                background: entries[root.selected].swatch;
+                                                border-width: 1px; border-color: Theme.line-strong;
+                                            }
+                                            Text { text: "Original"; color: Theme.text-faint; font-size: Theme.fs-xs;
+                                                horizontal-alignment: center; }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1; spacing: 4px;
+                                            Rectangle {
+                                                vertical-stretch: 1;
+                                                border-radius: Theme.r-md;
+                                                background: root.color-inverted;
+                                                border-width: 1px; border-color: Theme.line-strong;
+                                            }
+                                            Text { text: "Inverted"; color: Theme.text-faint; font-size: Theme.fs-xs;
+                                                horizontal-alignment: center; }
+                                        }
+                                    }
+                                    // Format strings (hex / rgb / rgba / hsl / oklch / oklab) — click to copy.
+                                    for f in root.color-formats: Rectangle {
+                                        height: 24px;
+                                        border-radius: Theme.r-xs;
+                                        background: cfmt.has-hover ? Theme.bg-elevated : transparent;
+                                        cfmt := TouchArea { clicked => { root.copy-text(f); } }
+                                        HorizontalLayout {
+                                            padding-left: 6px; padding-right: 6px;
+                                            Text { text: f; color: Theme.text-dim; font-family: Theme.mono;
+                                                font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; }
+                                            Text { text: cfmt.has-hover ? "Copy" : ""; color: Theme.text-faint;
+                                                font-size: Theme.fs-xs; vertical-alignment: center; }
+                                        }
+                                    }
+                                    if root.color-scale.length > 0: Text { text: "Scale"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    if root.color-scale.length > 0: HorizontalLayout {
+                                        spacing: 0px; height: 28px;
+                                        for c in root.color-scale: Rectangle { background: c; horizontal-stretch: 1; }
+                                    }
+                                    if root.color-harmony.length > 0: Text { text: "Complement · Triad"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
+                                    if root.color-harmony.length > 0: HorizontalLayout {
+                                        spacing: 6px; height: 28px; alignment: start;
+                                        for c in root.color-harmony: Rectangle { width: 40px; background: c; border-radius: Theme.r-xs; border-width: 1px; border-color: Theme.line; }
+                                    }
+                                }
+                                // Search active: a highlighted line list, scrolled to the
+                                // first match, so you SEE what/where you matched.
+                                if !root.preview-has-image && root.preview-hl-lines.length > 0: Rectangle {
+                                    hlist := ListView {
+                                        viewport-y: root.preview-hl-first > 0
+                                            ? -(root.preview-hl-first * root.preview-font-size * 1.6)
+                                            : 0px;
+                                        for hl in root.preview-hl-lines: Rectangle {
+                                            height: root.preview-font-size * 1.6;
+                                            HorizontalLayout {
+                                                alignment: start;
+                                                Text { text: hl.pre; color: Theme.text-dim; font-family: Theme.mono;
+                                                    font-size: root.preview-font-size; vertical-alignment: center; overflow: elide; }
+                                                if hl.mid != "": Rectangle {
+                                                    background: Theme.accent;
+                                                    border-radius: 2px;
+                                                    HorizontalLayout { padding-left: 1px; padding-right: 1px;
+                                                        Text { text: hl.mid; color: Theme.on-accent; font-family: Theme.mono;
+                                                            font-size: root.preview-font-size; vertical-alignment: center; } }
+                                                }
+                                                Text { text: hl.post; color: Theme.text-dim; font-family: Theme.mono;
+                                                    font-size: root.preview-font-size; vertical-alignment: center;
+                                                    overflow: elide; horizontal-stretch: 1; }
+                                            }
+                                        }
                                     }
                                 }
                                 // Normal-size entries: a selectable, scrollable,
@@ -470,14 +652,15 @@ export component ClipboardView inherits VerticalLayout {
                                 // Plain TextInput (not std TextEdit) so we control the
                                 // text color — the themed TextEdit rendered invisibly
                                 // on the dark pane.
-                                if !root.preview-has-image && root.preview-text != "": Flickable {
-                                    y: (root.selected < entries.length && entries[root.selected].has-swatch) ? 88px : 0px;
+                                if !root.preview-has-image && root.preview-hl-lines.length == 0 && root.preview-text != "" && !(root.selected < entries.length && entries[root.selected].has-swatch): Flickable {
+                                    y: 0px;
                                     viewport-width: self.width;
                                     viewport-height: pvtext.preferred-height;
                                     pvtext := TextInput {
                                         width: parent.width;
                                         text: root.preview-text;
                                         color: Theme.text;
+                                        font-family: Theme.mono;
                                         font-size: root.preview-font-size;
                                         read-only: true;
                                         single-line: false;
@@ -487,19 +670,21 @@ export component ClipboardView inherits VerticalLayout {
                                 // Huge entries: fast virtualized line list (not
                                 // selectable) so selection stays instant. Wrapped so
                                 // `plist` stays in scope for its custom scrollbar.
-                                if !root.preview-has-image && root.preview-text == "": Rectangle {
+                                if !root.preview-has-image && root.preview-hl-lines.length == 0 && root.preview-text == "": Rectangle {
                                     plist := ListView {
                                         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                        for ln in root.preview-lines: Rectangle {
-                                            height: root.preview-font-size * 1.5;
+                                        // Wrapping rows with dynamic height: readable long
+                                        // lines, still virtualized (only visible rows shaped)
+                                        // so scroll stays fast. Line length is capped in Rust.
+                                        for ln in root.preview-lines: VerticalLayout {
+                                            padding-top: 1px;
+                                            padding-bottom: 1px;
                                             Text {
-                                                x: 0;
-                                                width: parent.width;
                                                 text: ln;
                                                 color: Theme.text;
+                                                font-family: Theme.mono;
                                                 font-size: root.preview-font-size;
-                                                overflow: elide;
-                                                vertical-alignment: center;
+                                                wrap: word-wrap;
                                             }
                                         }
                                     }
@@ -512,7 +697,7 @@ export component ClipboardView inherits VerticalLayout {
                                         Rectangle {
                                             width: parent.width;
                                             border-radius: 3px;
-                                            background: pvta.pressed ? Theme.border-strong.brighter(0.3) : (pvta.has-hover ? Theme.border-strong.brighter(0.15) : Theme.border-strong);
+                                            background: pvta.pressed ? Theme.line-strong.brighter(0.3) : (pvta.has-hover ? Theme.line-strong.brighter(0.15) : Theme.line-strong);
                                             height: max(30px, pv.height * (plist.visible-height / plist.viewport-height));
                                             y: -plist.viewport-y / plist.viewport-height * pv.height;
                                         }
@@ -541,11 +726,11 @@ export component ClipboardView inherits VerticalLayout {
                             // window the block used to absorb the slack and its rows
                             // drifted apart unevenly. All spare height belongs to the
                             // preview area above.
-                            if entries.length > 0 && root.selected < entries.length: VerticalLayout {
+                            if entries.length > 0 && root.selected < entries.length && !root.preview-is-color: VerticalLayout {
                                 spacing: 5px;
                                 vertical-stretch: 0;
                                 alignment: start;
-                                Rectangle { height: 1px; background: Theme.border; }
+                                Rectangle { height: 1px; background: Theme.line; }
                                 Text { text: "Information"; color: Theme.text-dim; font-size: Theme.fs-body; }
                                 HorizontalLayout {
                                     height: 16px;
@@ -560,7 +745,18 @@ export component ClipboardView inherits VerticalLayout {
                                     height: 16px;
                                     spacing: 12px;
                                     Text { text: "Content type"; color: Theme.text-dim; font-size: Theme.fs-sm; horizontal-stretch: 1; }
-                                    Text { text: entries[root.selected].kind; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right; }
+                                    Text {
+                                        text: entries[root.selected].kind == "git_remote" ? "Git remote"
+                                            : entries[root.selected].kind == "link" ? "Link"
+                                            : entries[root.selected].kind == "email" ? "Email"
+                                            : entries[root.selected].kind == "color" ? "Color"
+                                            : entries[root.selected].kind == "image" ? "Image"
+                                            : entries[root.selected].kind == "file" ? "File"
+                                            : entries[root.selected].kind == "rtf" ? "Rich text"
+                                            : entries[root.selected].kind == "html" ? "HTML"
+                                            : "Text";
+                                        color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: right;
+                                    }
                                 }
                                 HorizontalLayout {
                                     height: 16px;
@@ -609,7 +805,7 @@ export component ClipboardView inherits VerticalLayout {
                                 for t in root.selected-tags: Rectangle {
                                     height: 22px;
                                     width: 74px;
-                                    background: chipta.has-hover ? Theme.border-strong : Theme.bg-elevated;
+                                    background: chipta.has-hover ? Theme.line-strong : Theme.bg-elevated;
                                     border-radius: 11px;
                                     chipta := TouchArea { clicked => { root.remove-tag(root.selected, t); } }
                                     Text {
@@ -647,38 +843,4 @@ export component ClipboardView inherits VerticalLayout {
                     }
                 }
 
-                // Bottom action bar.
-                Rectangle {
-                    height: 34px;
-                    background: Theme.bg-sidebar;
-                    border-radius: Theme.r-md;
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 12px;
-                        // "From <app>" — a bare app name here read as a stray word.
-                        Text {
-                            text: (entries.length > 0 && root.selected < entries.length) ? "From " + entries[root.selected].source : "";
-                            color: Theme.text-dim;
-                            font-size: Theme.fs-sm;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        // With nothing selected these keys do nothing, so don't
-                        // advertise them — the bar used to promise "⏎ Paste to X"
-                        // over an empty list.
-                        if entries.length > 0 && root.target-has-icon: Rectangle {
-                            width: 14px;
-                            Image { source: root.target-icon; width: 14px; height: 14px; }
-                        }
-                        if entries.length > 0: Text {
-                            text: root.target-app == "" ? "⏎ Paste" : "⏎ Paste to " + root.target-app;
-                            color: Theme.text-dim;
-                            font-size: Theme.fs-sm;
-                            vertical-alignment: center;
-                        }
-                        if entries.length > 0: Text { text: "⌘C Copy   ⌘K Actions"; color: Theme.text-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
-                        if entries.length == 0: Text { text: "⌘/ Shortcuts"; color: Theme.text-faint; font-size: Theme.fs-sm; vertical-alignment: center; }
-                    }
-                }
             }

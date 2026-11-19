@@ -1,0 +1,32 @@
+import { CalMonth, CalYearCell, CalMonthLabel } from "types.slint";
+
+// Date answer + calendar state (screen 15). A global so Rust populates it once
+// (`ui.global::<DateStore>()`) and the DateAnswerCard reads it directly, instead
+// of threading ~20 properties + nested models through MainView. Mirrors DataStore.
+export global DateStore {
+    // Whether the current query resolved to a date/range (show the calendar card).
+    in-out property <bool> has-date;
+
+    // Header + tile.
+    in-out property <string> kind-label;    // "Date · Christmas Day"
+    in-out property <string> tile-month;     // "DEC"
+    in-out property <string> tile-day;       // "25"
+    in-out property <string> tile-weekday;   // "Friday"
+    in-out property <string> headline;       // "91 days"
+    in-out property <string> subline;        // "13 weeks · Friday 25 December 2026 · week 52"
+    in-out property <string> readline;       // "today = Fri 25 Sep 2026 → christmas = 25 Dec"
+
+    // Region eve switch (christmas: 25 Dec / 24 Dec · Julafton). Hidden otherwise.
+    in-out property <bool> eve-has;
+    in-out property <string> primary-label;  // "25 Dec"
+    in-out property <string> eve-label;      // "24 Dec · Julafton"
+    in-out property <int> eve-selected;      // 0 primary, 1 eve
+    callback set-eve(int);
+
+    // Calendar: up to 4 month grids, then the year heatmap strip.
+    in-out property <[CalMonth]> months;
+    in-out property <string> year-title;     // "2026"
+    in-out property <[CalYearCell]> year-cells;   // cols*7, column-major
+    in-out property <int> year-cols;
+    in-out property <[CalMonthLabel]> year-month-labels;
+}

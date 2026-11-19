@@ -19,7 +19,7 @@ pub struct ThemeDef {
 pub const THEMES: &[ThemeDef] = &[
     ThemeDef {
         id: "dark",
-        name: "Dark",
+        name: "Graphite",
         dark: true,
     },
     ThemeDef {

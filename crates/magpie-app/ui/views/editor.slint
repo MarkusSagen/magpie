@@ -12,7 +12,7 @@ export component EditorView inherits Rectangle {
     in-out property <string> edit-mode;
     in-out property <string> edit-text;
     callback save-edit(string);
-            background: #000000cc;
+            background: Theme.scrim;
             TouchArea {} // swallow clicks behind the modal
             Rectangle {
                 width: 540px;
@@ -20,7 +20,7 @@ export component EditorView inherits Rectangle {
                 background: Theme.bg-app;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: Theme.border-strong;
+                border-color: Theme.line-strong;
                 VerticalLayout {
                     padding: 16px;
                     spacing: 10px;

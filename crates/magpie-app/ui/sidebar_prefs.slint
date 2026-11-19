@@ -1,0 +1,20 @@
+// Settings → Sidebar: which sections show in the sidebar (Phase 19 follow-up).
+// Rust owns the state (config `sidebar_hidden`) and keeps the per-section bools and
+// the Settings rows in sync. Hidden sections stay reachable via `G x` / `⌘K`.
+export struct SidebarToggle { key: string, label: string, shown: bool }
+
+export global SidebarPrefs {
+    in property <bool> snippets: true;
+    in property <bool> notes: true;
+    in property <bool> tasks: true;
+    in property <bool> projects: true;
+    in property <bool> bookmarks: true;
+    in property <bool> secrets: true;
+    in property <bool> files: true;
+    in property <bool> calculator: true;
+    in property <bool> data: true;
+    in property <bool> stats: true;
+    // Settings rows, in sidebar order.
+    in property <[SidebarToggle]> rows;
+    callback set-shown(string, bool);
+}

@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 magpie-core = { path = "../magpie-core" }
 magpie-platform = { path = "../magpie-platform" }
-slint = "1.8"
+slint = { version = "1.8", features = ["unstable-fontique-010"] }
 tray-icon = "0.24"
 global-hotkey = "0.6"
 serde = { version = "1", features = ["derive"] }
@@ -22,6 +22,22 @@ regex = "1"
 ureq = "2"
 serde_json = "1"
 plist = "1"
+open = "5.4.5"
+# File search (Phase 15): ripgrep's libraries — `ignore` for the parallel walk +
+# .gitignore/.ignore/global-excludes handling (supports custom ignore filenames),
+# and grep-{searcher,regex,matcher} for content matching. No external rg/fd binary.
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+# Live project file sync (Phase 18b): filesystem-event watcher for the specific
+# project task files (FSEvents/kqueue/inotify). Watched non-recursively per project
+# dir, so it never crawls whole roots.
+notify = "6"
+# Signal handler (SIGTERM/SIGINT/SIGHUP → mark the session clean before exit) so a
+# kill/pkill/Ctrl-C/logout isn't mistaken for a crash. Unix only; already in the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 slint-build = "1.8"

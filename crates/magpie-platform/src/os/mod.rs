@@ -1,8 +1,13 @@
 pub mod accessibility;
+pub mod color_picker;
 pub mod db_key;
+pub mod entropy;
 pub mod hotkeys;
+pub mod idle;
+pub mod keymonitor;
 pub mod notify;
 pub mod paste;
+pub mod scheduler;
 pub mod source_app;
 pub mod window;
 
