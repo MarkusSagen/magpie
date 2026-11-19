@@ -22,6 +22,7 @@ regex = "1"
 ureq = "2"
 serde_json = "1"
 plist = "1"
+open = "5.4.5"
 # File search (Phase 15): ripgrep's libraries — `ignore` for the parallel walk +
 # .gitignore/.ignore/global-excludes handling (supports custom ignore filenames),
 # and grep-{searcher,regex,matcher} for content matching. No external rg/fd binary.

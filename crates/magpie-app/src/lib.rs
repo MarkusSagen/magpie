@@ -8,6 +8,7 @@ pub mod bookmark_import;
 pub mod cli;
 pub mod color_view;
 pub mod config;
+pub mod desktop;
 pub mod diagnostics;
 pub mod external_editor;
 pub mod favicon;

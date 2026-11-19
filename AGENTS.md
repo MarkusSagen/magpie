@@ -18,6 +18,12 @@ env -u RUSTUP_TOOLCHAIN ~/.cargo/bin/cargo <cmd>     # matches `just`
 rustup run 1.97.1 cargo <cmd>                         # equivalent
 ```
 
+If the harness puts mise's `rustc` shim first in `PATH`, also set
+`RUSTC="$HOME/.cargo/bin/rustc" RUSTDOC="$HOME/.cargo/bin/rustdoc"` for these commands.
+Otherwise mise can honor a dependency's own toolchain file (for example
+`convert_case` pins 1.83.0) mid-build, producing `E0514` for incompatible compiler
+artifacts even though Cargo itself is 1.97.1.
+
 `just run` = `cargo run -p magpie-app` (fresh **debug** build — you always get
 current source, never a stale release binary).
 

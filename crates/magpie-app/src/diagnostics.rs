@@ -210,13 +210,9 @@ pub fn notify(title: &str, message: &str) {
     magpie_platform::notify(title, message);
 }
 
-/// Reveal a file/path in the OS. macOS: `open -R` (reveal in Finder).
-#[cfg(target_os = "macos")]
+/// Reveal a file in the platform's file manager.
 pub fn reveal(path: &Path) {
-    let _ = std::process::Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .spawn();
+    let _ = crate::desktop::reveal(path);
 }
 
 // Non-macOS stubs — behavior implemented per-OS later (see the install spec). We
@@ -230,8 +226,6 @@ pub fn alert(title: &str, message: &str, _buttons: &[&str]) -> Option<String> {
 pub fn notify(title: &str, message: &str) {
     eprintln!("[magpie] NOTIFY: {title} — {message}");
 }
-#[cfg(not(target_os = "macos"))]
-pub fn reveal(_path: &Path) {}
 
 /// Rate-limit gate for the panic alert: returns true at most once per 30s.
 fn alert_allowed() -> bool {

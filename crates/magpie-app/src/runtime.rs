@@ -3080,10 +3080,7 @@ fn open_project_task_by_id(state: &AppState, note_id: i32) -> bool {
         .ok()
         .and_then(|m| m.get(&note_id).cloned());
     if let Some(r) = r {
-        let _ = std::process::Command::new("open")
-            .arg("-t")
-            .arg(&r.file_abs)
-            .spawn();
+        let _ = magpie_app::desktop::edit(&r.file_abs);
         true
     } else {
         false
@@ -5642,24 +5639,20 @@ fn open_note_into_notes_mode(ui: &LauncherWindow, state: &Arc<AppState>, note_id
 /// Open `url` in the default browser and hide the launcher. Shared by the
 /// Bookmarks-mode row click and the "Find everywhere" palette's bookmark rows.
 fn open_url_and_hide(ui: &LauncherWindow, url: &str) {
-    let _ = std::process::Command::new("open").arg(url).spawn();
+    let _ = magpie_app::desktop::open(url);
     hide_launcher(ui);
 }
 
 /// Open a file `path` in its preferred application: the one configured for the
-/// path's category (`open -a <App>`) if set, else the system default (`open`).
+/// path's category if set, else the system default.
 fn open_path_with_app(state: &AppState, path: &str) {
     let category = magpie_core::openwith::category_for_path(path);
     match state.open_with.get(category) {
         Some(app) if !app.is_empty() => {
-            let _ = std::process::Command::new("open")
-                .arg("-a")
-                .arg(app)
-                .arg(path)
-                .spawn();
+            let _ = magpie_app::desktop::open_with(path, app);
         }
         _ => {
-            let _ = std::process::Command::new("open").arg(path).spawn();
+            let _ = magpie_app::desktop::open(path);
         }
     }
 }
@@ -7487,6 +7480,7 @@ pub fn start() {
                 }
             });
         }
+
         let w = ui.as_weak();
         let p = pending.clone();
         ui.global::<TimeStore>().on_idle_keep(move || {
@@ -8377,7 +8371,7 @@ pub fn start() {
                 .cloned();
             if let (Some(p), Some(ui)) = (path, w.upgrade()) {
                 hide_launcher(&ui);
-                let _ = std::process::Command::new("open").arg(&p).spawn();
+                let _ = magpie_app::desktop::open(&p);
             }
         });
     }
@@ -8392,7 +8386,7 @@ pub fn start() {
                 .get(i as usize)
                 .cloned();
             if let Some(p) = path {
-                let _ = std::process::Command::new("open").arg("-R").arg(&p).spawn();
+                let _ = magpie_app::desktop::reveal(std::path::Path::new(&p));
             }
         });
     }
@@ -8408,7 +8402,7 @@ pub fn start() {
                 .cloned();
             if let Some(p) = path {
                 // Open in the default text editor.
-                let _ = std::process::Command::new("open").arg("-t").arg(&p).spawn();
+                let _ = magpie_app::desktop::edit(&p);
             }
         });
     }
@@ -8888,7 +8882,7 @@ pub fn start() {
                     .map(|t| t.file_abs.clone())
             };
             if let Some(f) = file {
-                let _ = std::process::Command::new("open").arg("-t").arg(&f).spawn();
+                let _ = magpie_app::desktop::edit(&f);
             }
         });
     }
@@ -8913,10 +8907,7 @@ pub fn start() {
             if let Some(root) = root {
                 let s = source.to_string();
                 let rel = s.rsplit_once(':').map(|(p, _)| p).unwrap_or(&s);
-                let _ = std::process::Command::new("open")
-                    .arg("-t")
-                    .arg(root.join(rel))
-                    .spawn();
+                let _ = magpie_app::desktop::edit(root.join(rel));
             }
         });
     }
@@ -8937,7 +8928,7 @@ pub fn start() {
                     .map(|h| h.path.clone())
             };
             if let Some(p) = path {
-                let _ = std::process::Command::new("open").arg(&p).spawn();
+                let _ = magpie_app::desktop::open(&p);
             }
         });
     }
@@ -8993,7 +8984,7 @@ pub fn start() {
                 cs.iter().find(|c| c.root == rp).map(|c| c.file_abs.clone())
             });
             if let Some(f) = &file {
-                let _ = std::process::Command::new("open").arg("-t").arg(f).spawn();
+                let _ = magpie_app::desktop::edit(f);
                 let mut cs = s
                     .project_conflicts
                     .lock()
@@ -10449,7 +10440,7 @@ pub fn start() {
                     .ok()
                     .and_then(|m| m.get(&id).cloned());
                 if let Some(p) = path {
-                    let _ = std::process::Command::new("open").arg("-t").arg(&p).spawn();
+                    let _ = magpie_app::desktop::edit(&p);
                 }
                 return;
             }

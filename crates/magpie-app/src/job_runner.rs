@@ -35,20 +35,21 @@ pub fn execute_job(job: &Job) -> RunResult {
                 stderr: String::new(),
             }
         }
-        JobKind::Open | JobKind::Url => {
-            let mut c = Command::new(open_program());
-            c.arg(&job.command)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            spawn_with_timeout(c, 30)
-        }
+        JobKind::Open | JobKind::Url => match crate::desktop::open(&job.command) {
+            Ok(()) => RunResult {
+                exit_code: Some(0),
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            Err(e) => RunResult {
+                exit_code: None,
+                stdout: String::new(),
+                stderr: format!("open failed: {e}"),
+            },
+        },
         JobKind::Shell => {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-            let mut c = Command::new(shell);
-            c.arg("-lc")
-                .arg(&job.command)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+            let mut c = shell_command(&job.command);
+            c.stdout(Stdio::piped()).stderr(Stdio::piped());
             if !job.working_dir.is_empty() {
                 c.current_dir(&job.working_dir);
             }
@@ -57,24 +58,37 @@ pub fn execute_job(job: &Job) -> RunResult {
     }
 }
 
-fn open_program() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "open"
-    }
+fn shell_command(command: &str) -> Command {
     #[cfg(target_os = "windows")]
     {
-        "cmd" // handled below via /C start — see note
+        use std::os::windows::process::CommandExt;
+
+        let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+        let mut c = Command::new(shell);
+        // The saved action is shell source, not a C-runtime argument. Preserve
+        // its quoting (including quoted executable paths) for cmd's /S /C parser.
+        c.args(["/D", "/S", "/C"]).raw_arg(format!("\"{command}\""));
+        c
     }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     {
-        "xdg-open"
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+        let mut c = Command::new(shell);
+        c.args(["-lc", command]);
+        c
     }
 }
 
 /// Spawn `c`, draining stdout/stderr on threads (so a chatty child can't deadlock),
 /// and enforcing a wall-clock timeout (killed on expiry).
 fn spawn_with_timeout(mut c: Command, timeout_secs: u64) -> RunResult {
+    // A shell's children inherit its output pipes. Killing only the shell leaves
+    // readers blocked until those children exit, defeating the timeout.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        c.process_group(0);
+    }
     let mut child = match c.spawn() {
         Ok(ch) => ch,
         Err(e) => {
@@ -108,6 +122,7 @@ fn spawn_with_timeout(mut c: Command, timeout_secs: u64) -> RunResult {
             Ok(Some(st)) => break Some(st),
             Ok(None) => {
                 if Instant::now() >= deadline {
+                    kill_job_tree(child.id());
                     let _ = child.kill();
                     let _ = child.wait();
                     timed_out = true;
@@ -118,15 +133,60 @@ fn spawn_with_timeout(mut c: Command, timeout_secs: u64) -> RunResult {
             Err(_) => break None,
         }
     };
-    let stdout = out_h.join().unwrap_or_default();
-    let mut stderr = err_h.join().unwrap_or_default();
+    // A shell can also exit successfully while a background child still holds
+    // its pipes. Include output collection in the same deadline.
+    while (!out_h.is_finished() || !err_h.is_finished()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !out_h.is_finished() || !err_h.is_finished() {
+        if !timed_out {
+            kill_job_tree(child.id());
+        }
+        timed_out = true;
+        let drain_deadline = Instant::now() + Duration::from_millis(500);
+        while (!out_h.is_finished() || !err_h.is_finished()) && Instant::now() < drain_deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    // Never let an escaped descendant holding a pipe block the runner forever.
+    let stdout = if out_h.is_finished() {
+        out_h.join().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let mut stderr = if err_h.is_finished() {
+        err_h.join().unwrap_or_default()
+    } else {
+        String::new()
+    };
     if timed_out {
         stderr.push_str("\n[magpie] job timed out and was killed");
     }
     RunResult {
-        exit_code: status.and_then(|s| s.code().map(|c| c as i64)),
+        exit_code: if timed_out {
+            None
+        } else {
+            status.and_then(|s| s.code().map(|c| c as i64))
+        },
         stdout,
         stderr,
+    }
+}
+
+fn kill_job_tree(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: the child was placed in its own process group above. A negative
+    // pid addresses only that group, including descendants holding output pipes.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 }
 
