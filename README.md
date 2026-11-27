@@ -35,7 +35,7 @@ to plain **Markdown** you own.
   filters, **source-app attribution**, copy counts, pinning, and `⌘1–9` quick-paste.
 - **Text actions** — build a pipeline of transforms, preview each stage, and save it for reuse
   from the clipboard Transform view. On macOS, enable Accessibility for the contextual selection
-  bar in supported apps such as TextEdit.
+  bar in TextEdit and Apple Notes.
 - **Notes, org-flavored** — `[[wiki-links]]`, daily notes, backlinks, `#tags`, and a
   connection graph. Your notes are the source of truth.
 - **Tasks inside notes** — `- [ ]` lines with inline `!priority @due #project +recur`, a

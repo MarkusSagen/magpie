@@ -44,8 +44,8 @@ layouts; this does not certify native app behavior.
 | Shared action catalog and typed pipelines | Implemented | Implemented | Implemented | Unit tests; run CI on other OSes |
 | Saved cleaners (edit/reorder/disable, encrypted persistence) | Implemented | Implemented | Implemented | Encrypted reopen test; native save, load and settings edit verified |
 | Searchable palette and bounded previews | Implemented | Implemented | Implemented | Native workbench verification tracked below |
-| Automatic bar and contextual shortcuts | Implemented | Planned | Planned | TextEdit selection and bar inspected, including Split by click and contextual shortcut |
-| Selection identity and guarded plain-text replacement | Implemented | Planned | Planned | TextEdit quick Sort and workbench Replace verified with native Undo |
+| Automatic bar and contextual shortcuts | Implemented | Planned | Planned | TextEdit click and contextual shortcut verified; Apple Notes contextual shortcut verified |
+| Selection identity and guarded plain-text replacement | Implemented | Planned | Planned | TextEdit and Apple Notes workbench Replace and native Undo verified |
 | Per-app enablement, master toggle, bar/shortcut configuration | Implemented | Bar unavailable | Bar unavailable | Config validation tests |
 | Global selection-bar summon shortcut | Planned | Planned | Planned | After automatic bar is proven |
 | Internal note/scratch selection-only editing | Planned | Planned | Planned | Needs editor selection API; complete text uses shared engine |
@@ -57,7 +57,7 @@ layouts; this does not certify native app behavior.
 | App/context | Implementation | Capture/bar | Replace/Undo | Contextual keys / clipboard preservation |
 |---|---|---|---|---|
 | TextEdit, plain text | MVP target | Bar visually verified | Quick Sort and workbench Replace with native Undo verified | Split click and shortcut verified; text and multi-item RTF clipboard restored |
-| Apple Notes, editable body | MVP target | Pending | Pending | Pending |
+| Apple Notes, editable body | MVP target | Selection and Split preview verified | Split via Replace and native Undo verified | Contextual Split and newer clipboard copy verified |
 | Safari/Chrome, editable fields and read-only pages | Next phase | Not verified | Not verified | Not verified |
 | VS Code / Slack / TextMate | Later phase | Not verified | Not verified | Not verified |
 | Ghostty / Neovim / terminals | Separate later adapters | Not implemented | Not implemented | Not implemented |
@@ -69,9 +69,12 @@ layouts; this does not certify native app behavior.
 - [x] Fixed first-window collapse reported on Split/Transform; full editor and Split preview inspected at 900 × 660 client size.
 - [x] TextEdit selection → Split → load and edit a saved cleaner → Replace → native Undo.
 - [x] TextEdit Replace restored plain text, RTF, and a second pasteboard item byte for byte.
-- [ ] Apple Notes acceptance.
-- [ ] Newer user copy wins; internal transfers add no history.
-- [ ] Permission denial/revocation, source closed/changed, source focus preservation.
+- [x] Apple Notes selection → contextual Split → Replace → native Undo in a local note.
+- [x] A newer clipboard copy survived replacement. Isolated history captured the newer copy and omitted the replacement text.
+- [x] Reopened an encrypted cleaner after app restart and verified the selected step's input and output.
+- [x] Replacement declined after the active app changed.
+- [x] A LaunchServices run without Accessibility kept the automatic bar off and opened the shared workbench.
+- [ ] Permission revocation, source closed or selection edited.
 - [ ] Multi-display placement, screen edges, Retina scale, shortcut registration conflicts.
 - [ ] Browser adapters and tests after writing-app acceptance; developer apps next; terminals last.
 - [ ] Windows native selection backend; Linux X11/Wayland capability assessment and adapters.
