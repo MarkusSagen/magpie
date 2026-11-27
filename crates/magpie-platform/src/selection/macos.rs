@@ -77,6 +77,16 @@ fn value_range(value: &Owned) -> Option<Range> {
     };
     unsafe { AXValueGetValue(value.0, 4, (&mut r as *mut Range).cast()).then_some(r) }
 }
+fn distance_to_screen(point: NSPoint, frame: NSRect) -> f64 {
+    let x = point
+        .x
+        .clamp(frame.origin.x, frame.origin.x + frame.size.width);
+    let y = point
+        .y
+        .clamp(frame.origin.y, frame.origin.y + frame.size.height);
+    (point.x - x).hypot(point.y - y)
+}
+
 #[derive(Clone)]
 pub struct Target {
     pub text: String,
@@ -435,7 +445,9 @@ impl Controller {
             .next()
             .map(|s| s.frame().size.height)
             .unwrap_or(0.);
-        let has_bounds = target.bounds.size.width > 0.;
+        let has_bounds = target.bounds.size.width > 0.
+            && target.bounds.origin.x.is_finite()
+            && target.bounds.origin.y.is_finite();
         let anchor = if has_bounds {
             NSPoint::new(
                 target.bounds.origin.x,
@@ -444,13 +456,23 @@ impl Controller {
         } else {
             mouse
         };
-        let screen = screens.iter().find(|s| {
-            let r = s.frame();
-            anchor.x >= r.origin.x
-                && anchor.x < r.origin.x + r.size.width
-                && anchor.y >= r.origin.y
-                && anchor.y < r.origin.y + r.size.height
-        });
+        let screen = screens
+            .iter()
+            .find(|s| {
+                let r = s.frame();
+                anchor.x >= r.origin.x
+                    && anchor.x < r.origin.x + r.size.width
+                    && anchor.y >= r.origin.y
+                    && anchor.y < r.origin.y + r.size.height
+            })
+            .or_else(|| {
+                // A selection may start outside every display when its window
+                // is partially offscreen. Place the bar at the nearest edge.
+                screens.iter().min_by(|a, b| {
+                    distance_to_screen(anchor, a.frame())
+                        .total_cmp(&distance_to_screen(anchor, b.frame()))
+                })
+            });
         if let Some(screen) = screen {
             let r = screen.visibleFrame();
             let p = if has_bounds {
