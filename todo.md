@@ -61,7 +61,7 @@ layouts; this does not certify native app behavior.
 | Safari/Chrome, editable fields and read-only pages | Next phase | Not verified | Not verified | Not verified |
 | VS Code / Slack / TextMate | Later phase | Not verified | Not verified | Not verified |
 | Ghostty / Neovim / terminals | Separate later adapters | Not implemented | Not implemented | Not implemented |
-| Secure fields | Explicitly excluded | No bar intended | No replacement | Verify exclusion |
+| Secure fields | Explicitly excluded | Bar dismissed on secure field focus | No replacement | Contextual shortcut did not open the workbench |
 
 ### Remaining native acceptance
 
@@ -74,8 +74,12 @@ layouts; this does not certify native app behavior.
 - [x] Reopened an encrypted cleaner after app restart and verified the selected step's input and output.
 - [x] Replacement declined after the active app changed.
 - [x] A LaunchServices run without Accessibility kept the automatic bar off and opened the shared workbench.
-- [ ] Permission revocation, source closed or selection edited.
-- [ ] Multi-display placement, screen edges, Retina scale, shortcut registration conflicts.
+- [x] Moving the selection, editing its text at the same range, and closing the source window each blocked Replace without a document or clipboard write. Exiting the source app also blocked Replace before a clipboard write.
+- [x] Focusing a native secure text field dismissed the selection bar and its contextual shortcuts.
+- [x] An in-app shortcut registration conflict hid the affected hint and left the mouse action available. An external exclusive Carbon shortcut suppressed delivery until released. macOS still accepted the shared registration, so the hint remained visible for the external reservation.
+- [x] The bar stayed on a Retina display at the top/right edge and followed a selection that began offscreen on the left instead of reusing its old position.
+- [ ] Permission revocation while Magpie is running.
+- [ ] Placement on multiple physical displays.
 - [ ] Browser adapters and tests after writing-app acceptance; developer apps next; terminals last.
 - [ ] Windows native selection backend; Linux X11/Wayland capability assessment and adapters.
 - [ ] Recipe sharing/import and executable extensions are deferred, not implemented.
