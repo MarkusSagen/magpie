@@ -119,6 +119,11 @@ Summon the launcher with `⌘⇧Space` (configurable). Inside: `Enter` pastes in
 app, `⌘/Ctrl+Enter` copies without pasting, `⌘K` opens actions, and a bare `g` leads
 section jumps (clipboard · tasks · notes · bookmarks · stats).
 
+On macOS, TextEdit and Apple Notes are enabled for selection actions by default. To opt into
+browser selections, open **Settings → Selection actions** and add `com.apple.Safari` or
+`com.google.Chrome` to the comma-separated app bundle IDs. Page text can open a copy-only
+preview. Replace requires the browser to expose the original editable selection when Magpie returns.
+
 ## Privacy
 
 Magpie is **fully local** — no network, no telemetry. Sensitive copies are skipped at the

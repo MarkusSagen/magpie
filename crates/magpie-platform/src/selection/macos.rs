@@ -64,11 +64,35 @@ fn attr(e: Ref, name: &str) -> Option<Owned> {
         None
     }
 }
+fn parameterized_attr(element: Ref, name: &str, argument: &Owned) -> Option<Owned> {
+    let name = CFString::new(name);
+    let mut out = null();
+    let status = unsafe {
+        AXUIElementCopyParameterizedAttributeValue(
+            element,
+            name.as_concrete_TypeRef().cast(),
+            argument.0,
+            &mut out,
+        )
+    };
+    if status == 0 && !out.is_null() {
+        Some(Owned(out))
+    } else {
+        None
+    }
+}
+
 fn string(value: &Owned) -> Option<String> {
     unsafe {
         (CFGetTypeID(value.0) == CFStringGetTypeID())
             .then(|| CFString::wrap_under_get_rule(value.0.cast()).to_string())
     }
+}
+fn secure_text_field(element: Ref) -> bool {
+    attr(element, "AXSubrole")
+        .and_then(|value| string(&value))
+        .as_deref()
+        == Some("AXSecureTextField")
 }
 fn value_range(value: &Owned) -> Option<Range> {
     let mut r = Range {
@@ -77,6 +101,48 @@ fn value_range(value: &Owned) -> Option<Range> {
     };
     unsafe { AXValueGetValue(value.0, 4, (&mut r as *mut Range).cast()).then_some(r) }
 }
+
+#[derive(Clone)]
+struct SelectionRange {
+    value: Rc<Owned>,
+    numeric: Option<Range>,
+}
+
+impl SelectionRange {
+    fn same_as(&self, other: &Self) -> bool {
+        match (self.numeric, other.numeric) {
+            (Some(left), Some(right)) => left == right,
+            (None, None) => unsafe {
+                core_foundation::base::CFEqual(self.value.0, other.value.0) != 0
+            },
+            _ => false,
+        }
+    }
+}
+
+fn read_selection(element: Ref, use_markers: bool) -> Option<(String, SelectionRange)> {
+    let (text, value, numeric) = if use_markers {
+        let value = attr(element, "AXSelectedTextMarkerRange")?;
+        let text = parameterized_attr(element, "AXStringForTextMarkerRange", &value)?;
+        (text, value, None)
+    } else {
+        let text = attr(element, "AXSelectedText")?;
+        let value = attr(element, "AXSelectedTextRange")?;
+        let range = value_range(&value).filter(|range| range.length > 0)?;
+        (text, value, Some(range))
+    };
+    let text = string(&text).filter(|text| {
+        !text.is_empty() && text.len() <= magpie_core::transforms::MAX_INPUT_BYTES
+    })?;
+    Some((
+        text,
+        SelectionRange {
+            value: Rc::new(value),
+            numeric,
+        },
+    ))
+}
+
 fn distance_to_screen(point: NSPoint, frame: NSRect) -> f64 {
     let x = point
         .x
@@ -92,14 +158,14 @@ pub struct Target {
     pub text: String,
     pub editable: bool,
     element: Rc<Owned>,
-    range: Range,
+    range: SelectionRange,
     pid: i32,
     bounds: NSRect,
 }
 impl Target {
     pub fn same_as(&self, other: &Self) -> bool {
         self.pid == other.pid
-            && self.range == other.range
+            && self.range.same_as(&other.range)
             && self.text == other.text
             && unsafe { core_foundation::base::CFEqual(self.element.0, other.element.0) != 0 }
             && self.bounds == other.bounds
@@ -115,12 +181,13 @@ impl Target {
         let Some(focused) = attr(app.0, "AXFocusedUIElement") else {
             return false;
         };
-        if unsafe { core_foundation::base::CFEqual(focused.0, self.element.0) == 0 } {
+        if unsafe { core_foundation::base::CFEqual(focused.0, self.element.0) == 0 }
+            || secure_text_field(focused.0)
+        {
             return false;
         }
-        let text = attr(self.element.0, "AXSelectedText").and_then(|v| string(&v));
-        let range = attr(self.element.0, "AXSelectedTextRange").and_then(|v| value_range(&v));
-        text.as_deref() == Some(self.text.as_str()) && range == Some(self.range)
+        read_selection(focused.0, self.range.numeric.is_none())
+            .is_some_and(|(text, range)| text == self.text && self.range.same_as(&range))
     }
 }
 extern "C" fn changed(_: Ref, _: Ref, _: Ref, _: *mut c_void) {
@@ -293,7 +360,8 @@ impl Controller {
         }
         if self.settle > 0 {
             self.settle -= 1;
-            self.cached = self.capture(pid);
+            let browser = matches!(bundle.as_str(), "com.apple.Safari" | "com.google.Chrome");
+            self.cached = self.capture(pid, browser);
         }
         let target = self.cached.clone()?;
         if self
@@ -305,17 +373,13 @@ impl Controller {
         }
         Some(target)
     }
-    fn capture(&mut self, pid: i32) -> Option<Target> {
+    fn capture(&mut self, pid: i32, browser: bool) -> Option<Target> {
         let app_element = Owned(unsafe { AXUIElementCreateApplication(pid) });
         unsafe {
             AXUIElementSetMessagingTimeout(app_element.0, 0.12);
         }
         let element = Rc::new(attr(app_element.0, "AXFocusedUIElement")?);
-        if attr(element.0, "AXSubrole")
-            .and_then(|v| string(&v))
-            .as_deref()
-            == Some("AXSecureTextField")
-        {
+        if secure_text_field(element.0) {
             return None;
         }
         self.clear_observer();
@@ -340,21 +404,22 @@ impl Controller {
                 self.observer = Some(o);
             }
         }
-        let text = attr(element.0, "AXSelectedText").and_then(|v| string(&v))?;
-        if text.is_empty() || text.len() > magpie_core::transforms::MAX_INPUT_BYTES {
-            return None;
-        }
-        let range_value = attr(element.0, "AXSelectedTextRange")?;
-        let range = value_range(&range_value)?;
-        if range.length <= 0 {
-            return None;
-        }
         let role = attr(element.0, "AXRole")
             .and_then(|v| string(&v))
             .unwrap_or_default();
+        let (text, range) = read_selection(element.0, false).or_else(|| {
+            // WebKit exposes page selections as opaque text markers. A marker
+            // range can be revalidated for Copy, but never permits replacement.
+            if browser && matches!(role.as_str(), "AXWebArea" | "AXGroup" | "AXStaticText") {
+                read_selection(element.0, true)
+            } else {
+                None
+            }
+        })?;
         let name = CFString::new("AXValue");
         let mut settable = 0;
-        let editable = matches!(role.as_str(), "AXTextArea" | "AXTextField")
+        let editable = range.numeric.is_some()
+            && matches!(role.as_str(), "AXTextArea" | "AXTextField")
             && unsafe {
                 AXUIElementIsAttributeSettable(
                     element.0,
@@ -363,22 +428,15 @@ impl Controller {
                 )
             } == 0
             && settable != 0;
-        let name = CFString::new("AXBoundsForRange");
-        let mut raw = null();
+        let bounds_attribute = if range.numeric.is_some() {
+            "AXBoundsForRange"
+        } else {
+            "AXBoundsForTextMarkerRange"
+        };
         let mut bounds = NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.));
-        if unsafe {
-            AXUIElementCopyParameterizedAttributeValue(
-                element.0,
-                name.as_concrete_TypeRef().cast(),
-                range_value.0,
-                &mut raw,
-            )
-        } == 0
-            && !raw.is_null()
-        {
-            let v = Owned(raw);
+        if let Some(value) = parameterized_attr(element.0, bounds_attribute, &range.value) {
             unsafe {
-                AXValueGetValue(v.0, 3, (&mut bounds as *mut NSRect).cast());
+                AXValueGetValue(value.0, 3, (&mut bounds as *mut NSRect).cast());
             }
         }
         Some(Target {

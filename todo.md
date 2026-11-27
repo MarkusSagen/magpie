@@ -58,7 +58,9 @@ layouts; this does not certify native app behavior.
 |---|---|---|---|---|
 | TextEdit, plain text | MVP target | Bar visually verified | Quick Sort and workbench Replace with native Undo verified | Split click and shortcut verified; text and multi-item RTF clipboard restored |
 | Apple Notes, editable body | MVP target | Selection and Split preview verified | Split via Replace and native Undo verified | Contextual Split and newer clipboard copy verified |
-| Safari/Chrome, editable fields and read-only pages | Next phase | Not verified | Not verified | Not verified |
+| Safari 26.0.1, editable textarea and read-only page | Opt-in | Textarea preview and copy-only page preview verified | Safari focus handoff declined Replace in the textarea fixture | Contextual Split verified |
+| Chrome 158, editable textarea | Opt-in | Textarea preview verified | Replace and native Undo verified | Contextual Split verified |
+| Chrome 158, read-only page | Opt-in | Page preview verified | Copy-only preview verified | Contextual Split verified |
 | VS Code / Slack / TextMate | Later phase | Not verified | Not verified | Not verified |
 | Ghostty / Neovim / terminals | Separate later adapters | Not implemented | Not implemented | Not implemented |
 | Secure fields | Explicitly excluded | Bar dismissed on secure field focus | No replacement | Contextual shortcut did not open the workbench |
@@ -80,7 +82,11 @@ layouts; this does not certify native app behavior.
 - [x] The bar stayed on a Retina display at the top/right edge and followed a selection that began offscreen on the left instead of reusing its old position.
 - [ ] Permission revocation while Magpie is running.
 - [ ] Placement on multiple physical displays.
-- [ ] Browser adapters and tests after writing-app acceptance; developer apps next; terminals last.
+- [x] Added a read-only browser marker range path and verified Safari and Chrome page text in the copy-only workbench.
+- [x] Chrome opt-in textarea selection → Split → Replace → native Undo.
+- [x] Chrome and Safari password fields excluded from the bar and its contextual shortcuts.
+- [ ] Verify Safari editable Replace through focus handoff.
+- [ ] Developer apps next; terminals last.
 - [ ] Windows native selection backend; Linux X11/Wayland capability assessment and adapters.
 - [ ] Recipe sharing/import and executable extensions are deferred, not implemented.
 

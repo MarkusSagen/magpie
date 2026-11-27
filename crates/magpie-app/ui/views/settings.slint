@@ -97,7 +97,7 @@ export component SettingsView inherits Rectangle {
                     TouchArea { clicked => { SelectionPrefs.permission(); } }
                 }
             }
-            Text { text: "App bundle IDs, comma separated. MVP: TextEdit and Notes. Other apps are unverified."; color: Theme.text-faint; font-size: Theme.fs-xs; wrap: word-wrap; }
+            Text { text: "App bundle IDs, comma separated. Add com.apple.Safari or com.google.Chrome to enable browser selection actions."; color: Theme.text-faint; font-size: Theme.fs-xs; wrap: word-wrap; }
             Rectangle { height: 30px; background: Theme.bg-panel;
                 TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> SelectionPrefs.apps; color: Theme.text; font-size: Theme.fs-sm; single-line: true; vertical-alignment: center; }
             }
