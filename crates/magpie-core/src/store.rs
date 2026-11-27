@@ -200,6 +200,8 @@ const MIGRATIONS: &[&str] = &[
         created_at_ms INTEGER NOT NULL,
         updated_at_ms INTEGER NOT NULL
     );",
+    // v12: ordered, typed text cleaners; encrypted along with the rest of the DB.
+    "CREATE TABLE text_recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, steps TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);",
 ];
 
 fn run_migrations(conn: &Connection) -> Result<()> {
@@ -677,7 +679,7 @@ mod tests {
             .execute_batch(
                 "DROP TABLE favorites; DROP TABLE snippets; DROP TABLE project_sync; \
                  DROP TABLE jobs; DROP TABLE job_runs; DROP TABLE note_versions; \
-                 DROP TABLE secrets; \
+                 DROP TABLE secrets; DROP TABLE text_recipes; \
                  ALTER TABLE notes DROP COLUMN scratch; \
                  ALTER TABLE notes DROP COLUMN scratch_pinned; \
                  ALTER TABLE entries DROP COLUMN source_title; \

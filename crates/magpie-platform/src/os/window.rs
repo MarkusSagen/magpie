@@ -164,3 +164,30 @@ pub fn main_screen_size() -> Option<(i32, i32, i32)> {
 pub fn main_screen_size() -> Option<(i32, i32, i32)> {
     None
 }
+
+/// Raise one explicitly requested window without reactivating the launcher's
+/// other windows (selection actions use a separate palette).
+#[cfg(target_os = "macos")]
+pub fn raise_window_titled(title: &str) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindowCollectionBehavior};
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    for window in app.windows().iter() {
+        if window.title().to_string() == title {
+            window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
+            window.makeKeyAndOrderFront(None);
+            window.orderFrontRegardless();
+            break;
+        }
+    }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn raise_window_titled(_title: &str) {}

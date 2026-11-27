@@ -1,6 +1,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Pal } from "../theme.slint";
 import { SidebarPrefs } from "../sidebar_prefs.slint";
+import { SelectionPrefs } from "../text_tools.slint";
 import { Palette } from "../types.slint";
 
 // Settings → Appearance (screen 09). Opened via ⌘, and the sidebar Settings row.
@@ -83,6 +84,35 @@ export component SettingsView inherits Rectangle {
             Rectangle { height: 1px; background: Theme.line; }
             Text { text: "Features"; color: Theme.text-faint; font-size: Theme.fs-xs; font-weight: 600; }
 
+            Text { text: "Selection actions · macOS"; color: Theme.text; font-size: Theme.fs-body; }
+            Text { text: SelectionPrefs.status; color: Theme.text-dim; font-size: Theme.fs-sm; wrap: word-wrap; }
+            HorizontalLayout { height: 30px; spacing: 8px;
+                Text { text: "Automatic selection bar"; color: Theme.text-dim; font-size: Theme.fs-body; horizontal-stretch: 1; vertical-alignment: center; }
+                Rectangle { width: 68px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
+                    Text { text: SelectionPrefs.enabled ? "On" : "Off"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { SelectionPrefs.enabled = !SelectionPrefs.enabled; SelectionPrefs.save(); } }
+                }
+                Rectangle { width: 148px; background: Theme.bg-panel; border-radius: Theme.r-sm;
+                    Text { text: "Accessibility settings"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { SelectionPrefs.permission(); } }
+                }
+            }
+            Text { text: "App bundle IDs, comma separated. MVP: TextEdit and Notes. Other apps are unverified."; color: Theme.text-faint; font-size: Theme.fs-xs; wrap: word-wrap; }
+            Rectangle { height: 30px; background: Theme.bg-panel;
+                TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> SelectionPrefs.apps; color: Theme.text; font-size: Theme.fs-sm; single-line: true; vertical-alignment: center; }
+            }
+            Text { text: "Five bar action IDs (copy, action ID, transform or more)"; color: Theme.text-faint; font-size: Theme.fs-xs; }
+            Rectangle { height: 30px; background: Theme.bg-panel;
+                TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> SelectionPrefs.actions; color: Theme.text; font-size: Theme.fs-sm; single-line: true; vertical-alignment: center; }
+            }
+            Text { text: "Five contextual shortcuts, comma separated; registered only while the bar is visible"; color: Theme.text-faint; font-size: Theme.fs-xs; wrap: word-wrap; }
+            Rectangle { height: 30px; background: Theme.bg-panel;
+                TextInput { x: 8px; width: parent.width - 16px; height: parent.height; text <=> SelectionPrefs.shortcuts; color: Theme.text; font-size: Theme.fs-sm; single-line: true; vertical-alignment: center; }
+            }
+            Rectangle { height: 30px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
+                Text { text: "Save selection settings"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { SelectionPrefs.save(); } }
+            }
             // Quick-menu (tray popover) default tab.
             HorizontalLayout {
                 height: 30px; spacing: 8px;

@@ -1,0 +1,426 @@
+import { ComboBox, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct TextActionRow { id: string, label: string, group: string }
+export global TextBarTheme {
+    out property <color> background: Theme.bg-panel;
+    out property <color> foreground: Theme.text;
+}
+export global SelectionPrefs {
+    in-out property <bool> enabled: true;
+    in-out property <string> apps;
+    in-out property <string> actions;
+    in-out property <string> shortcuts;
+    in-out property <string> status;
+    callback save();
+    callback permission();
+}
+component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    callback edited();
+    callback key(string, bool, bool, bool) -> bool;
+    height: 32px;
+    background: Theme.bg-panel;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
+    out property <bool> focused: input.has-focus;
+    public function focus-input() { input.focus(); }
+    if root.text == "": Text {
+        x: 10px; width: parent.width - 20px; height: parent.height;
+        text: root.placeholder; color: Theme.text-faint; font-size: 14px;
+        vertical-alignment: center;
+    }
+    input := TextInput {
+        x: 10px; width: parent.width - 20px; height: parent.height;
+        text <=> root.text; color: Theme.text; font-size: 14px;
+        single-line: true; vertical-alignment: center;
+        edited => { root.edited(); }
+        key-pressed(e) => {
+            if root.key(e.text, e.modifiers.control, e.modifiers.shift, e.modifiers.alt) { return accept; }
+            return reject;
+        }
+    }
+}
+component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <string> hint;
+    in property <bool> enabled: true;
+    in property <bool> primary;
+    in property <bool> selected;
+    callback clicked();
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    min-width: 32px; height: 32px;
+    border-radius: 6px;
+    background: root.primary && root.enabled ? Theme.accent : root.selected || (touch.has-hover && root.enabled) ? Theme.bg-elevated : transparent;
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 10px; spacing: 8px; alignment: center;
+        Text {
+            text: root.text; color: !root.enabled ? Theme.text-faint : root.primary ? Theme.on-accent : Theme.text;
+            font-size: 14px; vertical-alignment: center;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            color: root.primary && root.enabled ? Theme.on-accent : Theme.text-faint;
+            font-size: 12px; vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+component Preview inherits Rectangle {
+    in property <[string]> lines;
+    in property <string> empty-text;
+    background: Theme.bg-panel;
+    border-radius: 8px;
+    border-width: 1px; border-color: Theme.line;
+    if root.lines.length == 0: Text {
+        text: root.empty-text; color: Theme.text-faint; font-size: 16px;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    ListView {
+        x: 20px; y: 18px; width: parent.width - 40px; height: parent.height - 36px;
+        for line in root.lines: Text {
+            text: line; color: Theme.text; font-family: Theme.mono; font-size: 18px;
+            wrap: word-wrap; min-height: 28px;
+        }
+    }
+}
+export component TextToolsWindow inherits Window {
+    title: "Magpie — Text actions";
+    default-font-family: "Geist";
+    preferred-width: 960px; preferred-height: 680px;
+    min-width: 760px; min-height: 540px;
+    background: Theme.bg-app;
+    in-out property <int> theme-index;
+    in property <string> primary-key;
+    init => { Theme.index = root.theme-index; }
+    changed theme-index => { Theme.index = root.theme-index; }
+    in-out property <string> search;
+    in-out property <string> category: "All commands";
+    in property <[string]> categories;
+    private property <int> action-selected: 0;
+    private property <bool> replacing-step;
+    private property <bool> step-menu-open;
+    private property <bool> keys-open;
+    in-out property <bool> example-open;
+    in property <string> example-title;
+    in property <[string]> example-before;
+    in property <[string]> example-after;
+    in-out property <bool> saving-open;
+    in property <bool> can-case;
+    in property <bool> can-regex;
+    in property <[TextActionRow]> actions;
+    in property <[string]> steps;
+    in property <[string]> original;
+    in property <[string]> result;
+    in property <string> error;
+    in property <bool> ready;
+    in property <bool> can-replace;
+    in property <bool> saved;
+    in property <bool> step-enabled;
+    in property <int> selected-step: -1;
+    in-out property <bool> stage-preview;
+    in property <string> first-label;
+    in property <string> second-label;
+    in-out property <string> first;
+    in-out property <string> second;
+    in-out property <bool> sensitive: true;
+    in-out property <bool> regex;
+    in-out property <string> name;
+    callback filter(); callback choose(string, bool); callback select-step(int);
+    callback configure(); callback move-step(int); callback remove-step(); callback toggle-step();
+    callback duplicate-step(); callback undo(); callback redo(); callback preview-stage();
+    callback example(string);
+    callback reset(); callback save(); callback delete-recipe();
+    callback copy-result(); callback replace-result(); callback dismiss();
+
+    public function prepare() {
+        root.replacing-step = false;
+        root.step-menu-open = false;
+        root.keys-open = false;
+        root.example-open = false;
+        root.stage-preview = false;
+        root.category = "All commands";
+        root.action-selected = 0;
+        search-field.focus-input();
+    }
+
+    VerticalLayout {
+        padding: 16px; spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px; height: 32px;
+            Text {
+                text: root.saved ? root.name : "Text actions";
+                color: Theme.text; font-size: 20px; font-weight: 600;
+                vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+            }
+            ToolButton { text: "Undo"; clicked => { root.undo(); } }
+            ToolButton { text: "Redo"; clicked => { root.redo(); } }
+            ToolButton { text: "Keys"; selected: root.keys-open; clicked => { root.keys-open = !root.keys-open; } }
+        }
+        HorizontalLayout {
+            spacing: 12px; vertical-stretch: 1;
+            VerticalLayout {
+                width: 204px; spacing: 8px;
+                Text { text: root.replacing-step ? "Replace step" : "Commands"; color: search-field.focused ? Theme.accent : Theme.text; font-weight: 600; }
+                search-field := Field {
+                    text <=> root.search; placeholder: "Find a command…";
+                    edited => { root.refresh-catalog(); }
+                    key(k, primary, shift, alt) => { return root.shortcut(k, primary, shift, alt) || (!primary && root.catalog-key(k, alt)); }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    ComboBox {
+                        horizontal-stretch: 1;
+                        model: root.categories;
+                        current-value <=> root.category;
+                        selected => { root.refresh-catalog(); }
+                    }
+                    ToolButton { text: "Info"; enabled: root.actions.length > 0;
+                        clicked => { root.command-example(); } }
+                }
+                if root.replacing-step: ToolButton { text: "Cancel replacement"; clicked => { root.replacing-step = false; } }
+                catalog := ListView {
+                    vertical-stretch: 1;
+                    for action[i] in root.actions: Rectangle {
+                        height: 43px; border-radius: 5px;
+                        background: item.has-hover || root.action-selected == i ? Theme.bg-elevated : transparent;
+                        accessible-role: button; accessible-label: action.label;
+                        accessible-action-default => { root.pick(action.id, false); }
+                        VerticalLayout {
+                            padding-left: 8px; padding-right: 8px; alignment: center;
+                            Text { text: action.label; color: Theme.text; font-size: 13px; overflow: elide; }
+                            Text { text: action.group; color: Theme.text-dim; font-size: 11px; overflow: elide; }
+                        }
+                        item := TouchArea { clicked => { root.action-selected = i; root.pick(action.id, false); } }
+                    }
+                }
+            }
+            pipeline := FocusScope {
+                accessible-role: groupbox; accessible-label: "Pipeline";
+                width: 242px;
+                VerticalLayout {
+                    spacing: 8px;
+                    Text { text: "Pipeline"; color: pipeline.has-focus || first-field.focused || second-field.focused ? Theme.accent : Theme.text; font-weight: 600; }
+                    if root.steps.length == 0: Text {
+                        text: "Choose a command to add a step.";
+                        color: Theme.text-dim; font-size: 13px; wrap: word-wrap;
+                    }
+                    step-list := ListView {
+                        max-height: Math.min(174px, root.steps.length * 36px);
+                        vertical-stretch: 1;
+                        for step[i] in root.steps: Rectangle {
+                            height: 36px; border-radius: 5px;
+                            background: root.selected-step == i || row.has-hover ? Theme.bg-elevated : transparent;
+                            border-width: 1px;
+                            border-color: root.selected-step == i && pipeline.has-focus ? Theme.accent : transparent;
+                            accessible-role: button; accessible-label: step;
+                            accessible-action-default => { root.focus-step(i); }
+                            Text { x: 8px; width: parent.width - 16px; height: parent.height;
+                                text: step; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                            row := TouchArea { clicked => { root.focus-step(i); } }
+                        }
+                    }
+                    if root.selected-step >= 0: HorizontalLayout {
+                        spacing: 4px;
+                        ToolButton { text: "↑"; width: 34px; enabled: root.selected-step > 0; clicked => { root.move-step(-1); pipeline.focus(); } }
+                        ToolButton { text: "↓"; width: 34px; enabled: root.selected-step < root.steps.length - 1; clicked => { root.move-step(1); pipeline.focus(); } }
+                        ToolButton { text: "More"; horizontal-stretch: 1; selected: root.step-menu-open; clicked => { root.step-menu-open = !root.step-menu-open; } }
+                        ToolButton { text: "Remove"; clicked => { root.remove-step(); pipeline.focus(); } }
+                    }
+                    if root.step-menu-open && root.selected-step >= 0: VerticalLayout {
+                        spacing: 4px;
+                        ToolButton { text: "Replace step"; clicked => { root.begin-replacement(); } }
+                        ToolButton { text: "Example"; clicked => { root.example(""); root.step-menu-open = false; pipeline.focus(); } }
+                        ToolButton { text: "Duplicate"; clicked => { root.duplicate-step(); root.step-menu-open = false; pipeline.focus(); } }
+                        ToolButton { text: root.step-enabled ? "Disable" : "Enable"; clicked => { root.toggle-step(); root.step-menu-open = false; pipeline.focus(); } }
+                    }
+                    if root.first-label != "": Text { text: root.first-label; color: Theme.text-dim; font-size: 13px; }
+                    first-field := Field {
+                        visible: root.first-label != ""; height: root.first-label != "" ? 32px : 0px; text <=> root.first;
+                        edited => { root.configure(); }
+                        key(k, primary, shift, alt) => { return root.shortcut(k, primary, shift, alt); }
+                    }
+                    if root.second-label != "": Text { text: root.second-label; color: Theme.text-dim; font-size: 13px; }
+                    second-field := Field {
+                        visible: root.second-label != ""; height: root.second-label != "" ? 32px : 0px; text <=> root.second;
+                        edited => { root.configure(); }
+                        key(k, primary, shift, alt) => { return root.shortcut(k, primary, shift, alt); }
+                    }
+                    if root.can-case || root.can-regex: HorizontalLayout {
+                        spacing: 4px;
+                        if root.can-case: ToolButton { text: "Match case"; selected: root.sensitive; clicked => { root.sensitive = !root.sensitive; root.configure(); } }
+                        if root.can-regex: ToolButton { text: "Regex"; selected: root.regex; clicked => { root.regex = !root.regex; root.configure(); } }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+                key-pressed(e) => {
+                    if root.shortcut(e.text, e.modifiers.control, e.modifiers.shift, e.modifiers.alt) { return accept; }
+                    if pipeline.has-focus && root.pipeline-key(e.text, e.modifiers.control, e.modifiers.shift, e.modifiers.alt) { return accept; }
+                    return reject;
+                }
+            }
+            preview := FocusScope {
+                accessible-role: groupbox; accessible-label: "Preview";
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    spacing: 8px;
+                    Text { text: root.stage-preview ? "Before step " + (root.selected-step + 1) : "Before"; color: preview.has-focus ? Theme.accent : Theme.text; font-weight: 600; }
+                    Preview { vertical-stretch: 1; lines: root.original; empty-text: "No input text"; }
+                    HorizontalLayout {
+                        Text { text: root.stage-preview ? "After step " + (root.selected-step + 1) : "After"; color: Theme.text; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                        ToolButton { text: root.stage-preview ? "Selected step" : "Final result"; enabled: root.selected-step >= 0;
+                            clicked => { root.change-stage(); preview.focus(); } }
+                    }
+                    Preview { vertical-stretch: 1; lines: root.result; empty-text: root.steps.length == 0 ? "Add a step to preview the result" : ""; }
+                }
+                key-pressed(e) => {
+                    if root.shortcut(e.text, e.modifiers.control, e.modifiers.shift, e.modifiers.alt) { return accept; }
+                    if e.modifiers.control && e.text == "c" && root.ready { root.copy-result(); return accept; }
+                    return reject;
+                }
+            }
+        }
+        if root.keys-open: Text {
+            text: root.primary-key + "F Find · " + root.primary-key + "1–3 Focus panes · ↑↓ Select · Alt+↑↓ Move · Space Toggle · Delete Remove · Alt+P Preview · " + root.primary-key + "S Save";
+            color: Theme.text-dim; font-size: 12px; wrap: word-wrap;
+        }
+        if root.error != "": Text { text: root.error; color: Theme.text-dim; font-size: 13px; wrap: word-wrap; }
+        HorizontalLayout {
+            height: 32px; spacing: 8px;
+            ToolButton { text: "Start over"; enabled: root.steps.length > 0; clicked => { root.reset(); } }
+            if root.saved: ToolButton { text: "Delete cleaner"; clicked => { root.delete-recipe(); } }
+            cleaner-name := Field {
+                visible: root.saving-open; horizontal-stretch: 1; width: root.saving-open ? 158px : 0px; text <=> root.name; placeholder: "Cleaner name";
+                key(k, primary, shift, alt) => {
+                    if !primary && k == Key.Return { root.save(); return true; }
+                    return root.shortcut(k, primary, shift, alt);
+                }
+            }
+            if root.saving-open: ToolButton { text: "Cancel"; clicked => { root.saving-open = false; pipeline.focus(); } }
+            if !root.saving-open: Rectangle { horizontal-stretch: 1; }
+            ToolButton { text: root.saving-open ? "Save" : "Save cleaner…"; enabled: root.steps.length > 0;
+                clicked => { if root.saving-open { root.save(); } else { root.begin-save(); } } }
+            ToolButton { text: "Copy"; hint: root.primary-key + "⇧C"; primary: !root.can-replace; enabled: root.ready; clicked => { root.copy-result(); } }
+            if root.can-replace: ToolButton { text: "Replace"; hint: root.primary-key + "⏎"; primary: true;
+                enabled: root.ready && !root.stage-preview; clicked => { root.replace-result(); } }
+        }
+    }
+
+    if root.example-open: Rectangle {
+        background: #0008;
+        TouchArea { clicked => { root.example-open = false; } }
+        Rectangle {
+            width: Math.min(520px, parent.width - 32px); height: 330px;
+            border-radius: 8px; border-width: 1px; border-color: Theme.line-strong; background: Theme.bg-app;
+            TouchArea { }
+            VerticalLayout {
+                padding: 16px; spacing: 8px;
+                HorizontalLayout {
+                    Text { text: root.example-title + " example"; color: Theme.text; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                    ToolButton { text: "Close"; clicked => { root.example-open = false; } }
+                }
+                Text { text: "Before"; color: Theme.text; }
+                Preview { lines: root.example-before; vertical-stretch: 1; }
+                Text { text: "After"; color: Theme.text; }
+                Preview { lines: root.example-after; vertical-stretch: 1; }
+            }
+        }
+    }
+    changed selected-step => {
+        if root.selected-step < 0 { root.step-menu-open = false; root.replacing-step = false; root.stage-preview = false; }
+        else {
+            if root.selected-step * 36px < -step-list.viewport-y { step-list.viewport-y = -root.selected-step * 36px; }
+            if (root.selected-step + 1) * 36px > -step-list.viewport-y + step-list.height {
+                step-list.viewport-y = step-list.height - (root.selected-step + 1) * 36px;
+            }
+        }
+    }
+    changed action-selected => {
+        if root.action-selected * 43px < -catalog.viewport-y { catalog.viewport-y = -root.action-selected * 43px; }
+        if (root.action-selected + 1) * 43px > -catalog.viewport-y + catalog.height {
+            catalog.viewport-y = catalog.height - (root.action-selected + 1) * 43px;
+        }
+    }
+    function refresh-catalog() { root.action-selected = 0; catalog.viewport-y = 0px; root.filter(); }
+    function begin-save() { root.saving-open = true; cleaner-name.focus-input(); }
+    function begin-replacement() { root.replacing-step = true; root.step-menu-open = false; search-field.focus-input(); }
+    function focus-step(i: int) { root.step-menu-open = false; root.select-step(i); pipeline.focus(); }
+    function change-stage() { root.stage-preview = !root.stage-preview; root.preview-stage(); }
+    function pick(id: string, replace: bool) {
+        root.choose(id, replace || root.replacing-step);
+        root.replacing-step = false;
+    }
+    function command-example() {
+        if root.actions.length > 0 && root.actions[root.action-selected].group != "Saved cleaner"
+            && root.actions[root.action-selected].group != "Output actions" {
+            root.example(root.actions[root.action-selected].id);
+        }
+    }
+    function shortcut(k: string, primary: bool, shift: bool, alt: bool) -> bool {
+        if k == Key.Escape {
+            if root.example-open { root.example-open = false; }
+            else if root.replacing-step { root.replacing-step = false; }
+            else if root.step-menu-open { root.step-menu-open = false; }
+            else if root.keys-open { root.keys-open = false; }
+            else if root.saving-open { root.saving-open = false; pipeline.focus(); }
+            else { root.dismiss(); }
+            return true;
+        }
+        if root.example-open { return true; }
+        if k == Key.F1 {
+            if search-field.focused { root.command-example(); }
+            else if root.selected-step >= 0 { root.example(""); }
+            return true;
+        }
+        if primary && (k == "1" || k == "f" || k == "k" || k == "K") {
+            if shift && (k == "k" || k == "K") && root.selected-step >= 0 { root.begin-replacement(); }
+            else { root.replacing-step = false; search-field.focus-input(); }
+            return true;
+        }
+        if primary && k == "2" { pipeline.focus(); return true; }
+        if primary && k == "3" { preview.focus(); return true; }
+        if primary && k == "s" && root.steps.length > 0 {
+            if root.saving-open { root.save(); } else { root.begin-save(); }
+            return true;
+        }
+        if primary && shift && (k == "c" || k == "C") && root.ready { root.copy-result(); return true; }
+        if primary && k == Key.Return && root.ready && root.can-replace && !root.stage-preview { root.replace-result(); return true; }
+        if alt && (k == "p" || k == "π") && root.selected-step >= 0 { root.change-stage(); return true; }
+        if primary && k == "/" { root.keys-open = !root.keys-open; return true; }
+        return false;
+    }
+    function pipeline-key(k: string, primary: bool, shift: bool, alt: bool) -> bool {
+        if k == Key.UpArrow || k == Key.DownArrow {
+            if root.steps.length > 0 {
+                if alt { root.move-step(k == Key.UpArrow ? -1 : 1); }
+                else { root.focus-step(Math.clamp(root.selected-step + (k == Key.UpArrow ? -1 : 1), 0, root.steps.length - 1)); }
+            }
+            return true;
+        }
+        if root.selected-step >= 0 {
+            if k == Key.Return {
+                if root.first-label != "" { first-field.focus-input(); }
+                else { root.example(""); }
+                return true;
+            }
+            if k == Key.Backspace || k == Key.Delete { root.remove-step(); return true; }
+            if k == " " { root.toggle-step(); return true; }
+            if primary && k == "d" { root.duplicate-step(); return true; }
+        }
+        if primary && k == "c" && root.ready { root.copy-result(); return true; }
+        if primary && (k == "z" || k == "Z") { if shift { root.redo(); } else { root.undo(); } return true; }
+        if !primary && k == "/" { search-field.focus-input(); return true; }
+        return false;
+    }
+    function catalog-key(k: string, alt: bool) -> bool {
+        if k == Key.UpArrow { root.action-selected = Math.max(0, root.action-selected - 1); return true; }
+        if k == Key.DownArrow { root.action-selected = Math.max(0, Math.min(root.actions.length - 1, root.action-selected + 1)); return true; }
+        if k == Key.Return && root.actions.length > 0 { root.pick(root.actions[root.action-selected].id, alt); return true; }
+        return false;
+    }
+}

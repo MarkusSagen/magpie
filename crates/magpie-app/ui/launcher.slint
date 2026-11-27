@@ -94,6 +94,7 @@ export component LauncherWindow inherits Window {
     in-out property <int> transform-selected;
     pure callback transform-input-summary(string) -> string;
     callback transform-action(string, int);
+    callback open-text-tools();
     // Inline answer card (dates / math / units) shown above the clipboard results.
     in-out property <bool> has-answer;
     in-out property <string> answer-kind;
@@ -808,6 +809,7 @@ export component LauncherWindow inherits Window {
             cycle-scratch-hotkey() => { root.cycle-scratch-hotkey(); }
         }
         if root.mode == "transform": TransformsView {
+            open-text-tools => { root.open-text-tools(); }
             mode <=> root.mode;
             transform-selected <=> root.transform-selected;
             transform-input: root.transform-input;
@@ -920,3 +922,5 @@ export { Popover } from "views/popover.slint";
 export { ScratchWindow } from "views/scratch.slint";
 export { ScratchStore } from "scratch_store.slint";
 export { ScheduleStore } from "schedule_store.slint";
+
+export { TextToolsWindow, TextActionRow, SelectionPrefs, TextBarTheme } from "text_tools.slint";

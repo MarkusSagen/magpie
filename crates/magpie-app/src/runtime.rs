@@ -6503,6 +6503,10 @@ fn spawn_dev_ui_hooks(weak: slint::Weak<LauncherWindow>, state: Arc<AppState>) {
                         "mask" => ui.invoke_toggle_screenshare(),
                         // Transforms (⌘T) palette with a representative input so the
                         // result pane is populated for screenshots.
+                        "text-tools" => {
+                            ui.set_transform_input("pear, apple, pear, banana".into());
+                            ui.invoke_open_text_tools();
+                        }
                         "transform" => {
                             ui.set_transform_input(SharedString::from(
                                 "banana\napple\napple\ncherry\n",
@@ -7302,6 +7306,9 @@ fn spawn_hotkeys(
         loop {
             if let Ok(ev) = rx.recv() {
                 if ev.state != global_hotkey::HotKeyState::Pressed {
+                    continue;
+                }
+                if magpie_platform::selection::route_hotkey(ev.id) {
                     continue;
                 }
                 match actions.get(&ev.id) {
@@ -11689,13 +11696,32 @@ pub fn start() {
         }
     }
 
+    let text_tools =
+        crate::text_tools::TextTools::new(&ui, state.clone(), &cfg).expect("create text tools");
+    {
+        let tools = text_tools.clone();
+        let w = ui.as_weak();
+        ui.on_open_text_tools(move || {
+            if let Some(ui) = w.upgrade() {
+                let input = ui.get_transform_input().to_string();
+                let tools = tools.clone();
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    tools.open(
+                        input,
+                        None,
+                        Some(magpie_core::text_actions::Action::SortAscending),
+                    )
+                });
+            }
+        });
+    }
     // Opt-in dev hooks (MAGPIE_SHOW_ON_LAUNCH / MAGPIE_UI_TOUR); no-op otherwise.
     spawn_dev_ui_hooks(weak.clone(), state.clone());
 
     // Start hidden (background tray daemon); the launcher hotkey shows the window.
     // We deliberately do NOT call `ui.run()` (which would show the window on
     // launch) — `run_event_loop` keeps us alive with the tray icon only.
-    slint::run_event_loop().expect("run event loop");
+    slint::run_event_loop_until_quit().expect("run event loop");
 
     // Reached only on a real quit (tray Quit → quit_event_loop). Mark the session
     // clean so the next launch doesn't report a false crash.
