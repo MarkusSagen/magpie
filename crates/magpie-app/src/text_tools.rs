@@ -426,7 +426,7 @@ impl TextTools {
         p.set_apps(s.settings.apps.join(", ").into());
         p.set_actions(s.settings.actions.join(", ").into());
         p.set_shortcuts(s.settings.shortcuts.join(", ").into());
-        p.set_status(if !selection::supported(){"Selection bar: not implemented on this OS. Text actions and cleaners are available."}else if !magpie_platform::accessibility_trusted(){"Accessibility permission is needed. Writing-app MVP: TextEdit and Notes."}else{"Writing-app MVP: TextEdit and Notes. Browser, developer and terminal support is unverified."}.into());
+        p.set_status(if !selection::supported(){"Selection bar: not implemented on this OS. Text actions and cleaners are available."}else if !magpie_platform::accessibility_trusted(){"Accessibility permission is needed."}else{"The selection bar is on for the apps below."}.into());
     }
     fn tick(self: &Rc<Self>, ui: &LauncherWindow) {
         self.window.set_theme_index(ui.get_theme_index());
@@ -460,9 +460,9 @@ impl TextTools {
             } else if !settings.enabled {
                 "Automatic selection bar is off."
             } else if !trusted {
-                "Accessibility permission is needed. MVP targets: TextEdit and Notes."
+                "Accessibility permission is needed."
             } else {
-                "MVP targets: TextEdit and Notes. Other apps are unverified."
+                "The selection bar is on for the apps below."
             }
             .into(),
         );
