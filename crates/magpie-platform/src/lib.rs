@@ -35,3 +35,5 @@ pub use os::window::{
 pub use policy::{CapturePolicy, Decision, SkipReason};
 pub use traits::{Autostart, Clipboard, ClipboardSnapshot, Paster, SourceApp};
 pub use watcher::Watcher;
+
+pub mod selection;

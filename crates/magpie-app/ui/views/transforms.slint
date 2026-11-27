@@ -40,6 +40,7 @@ export component TransformsView inherits Rectangle {
     in-out property <int> transform-selected;
     in property <string> transform-input;
     pure callback transform-input-summary(string) -> string;
+    callback open-text-tools();
     callback transform-action(string, int); // 0=paste, 1=copy, 2=save-as-entry
 
     property <[TxRow]> rows: [
@@ -85,6 +86,10 @@ export component TransformsView inherits Rectangle {
         VerticalLayout {
             padding: 14px;
             spacing: 12px;
+            Rectangle { height: 30px; background: Theme.bg-elevated; border-radius: Theme.r-sm;
+                Text { text: "All text actions & saved cleaners…"; color: Theme.text; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.open-text-tools(); } }
+            }
             // Header: input-preview chip + "Transform" label.
             HorizontalLayout {
                 spacing: 12px;

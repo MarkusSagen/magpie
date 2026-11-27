@@ -3,6 +3,8 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub selection: SelectionSettings,
     pub launcher_hotkey: String,
     pub quick_paste_hotkeys: Vec<String>,
     pub paste_on_select: bool,
@@ -209,6 +211,7 @@ impl Default for Config {
             project_sync_conflict: default_project_sync_conflict(),
             projects_keep_magpie_out_of_git: false,
             scratch_hotkey: default_scratch_hotkey(),
+            selection: SelectionSettings::default(),
         }
     }
 }
@@ -380,5 +383,70 @@ mod tests {
             .collect();
         let old: Config = toml::from_str(&text).unwrap();
         assert!(old.sidebar_hidden.is_empty());
+    }
+}
+
+/// Automatic selection actions. Non-macOS backends explicitly report unavailable.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SelectionSettings {
+    pub enabled: bool,
+    pub apps: Vec<String>,
+    pub actions: Vec<String>,
+    pub shortcuts: Vec<String>,
+}
+impl Default for SelectionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            apps: vec!["com.apple.TextEdit".into(), "com.apple.Notes".into()],
+            actions: ["copy", "sort_ascending", "split", "join", "transform"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            shortcuts: (1..=5).map(|n| format!("ctrl+shift+{n}")).collect(),
+        }
+    }
+}
+
+impl SelectionSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.actions.len() != 5 || self.shortcuts.len() != 5 {
+            return Err("Choose five actions and five contextual shortcuts".into());
+        }
+        for id in &self.actions {
+            if !matches!(id.as_str(), "copy" | "transform" | "more")
+                && magpie_core::text_actions::Action::from_id(id).is_none()
+            {
+                return Err(format!("Unknown bar action: {id}"));
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        for key in &self.shortcuts {
+            let spec = magpie_platform::parse_hotkey(key).map_err(|e| e.to_string())?;
+            if !(spec.mods.ctrl || spec.mods.alt || spec.mods.meta) {
+                return Err("Bar shortcuts need Control, Option or Command; ordinary typing is never captured".into());
+            }
+            let hk = magpie_platform::os::hotkeys::to_global_hotkey(&spec)?;
+            if !seen.insert(hk.id()) {
+                return Err("Each contextual shortcut must be different".into());
+            }
+        }
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn selection_defaults_and_validation() {
+        let mut settings = SelectionSettings::default();
+        assert!(settings.enabled);
+        assert!(settings.validate().is_ok());
+        settings.shortcuts[1] = settings.shortcuts[0].clone();
+        assert!(settings.validate().is_err());
+        settings = SelectionSettings::default();
+        settings.actions[0] = "execute-shell".into();
+        assert!(settings.validate().is_err());
     }
 }

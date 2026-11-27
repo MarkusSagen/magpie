@@ -1,6 +1,24 @@
 use crate::hotkey::HotkeySpec;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::GlobalHotKeyManager;
+use std::{cell::RefCell, rc::Rc};
+thread_local! { static SHARED_MANAGER: RefCell<Option<Rc<GlobalHotKeyManager>>> = const { RefCell::new(None) }; }
+
+// Carbon rejects installing the same event handler twice. Launcher and selection
+// shortcuts must share the main-thread manager, while owning distinct registrations.
+pub(crate) fn shared_manager() -> Result<Rc<GlobalHotKeyManager>, String> {
+    SHARED_MANAGER.with(|slot| {
+        let mut manager = slot.borrow_mut();
+        if manager.is_none() {
+            *manager = Some(Rc::new(
+                GlobalHotKeyManager::new().map_err(|e| e.to_string())?,
+            ));
+        }
+        manager
+            .clone()
+            .ok_or_else(|| "Hotkey manager unavailable".into())
+    })
+}
 
 pub fn to_global_hotkey(spec: &HotkeySpec) -> Result<HotKey, String> {
     let mut mods = Modifiers::empty();
@@ -75,13 +93,13 @@ fn key_to_code(key: &str) -> Result<Code, String> {
 }
 
 pub struct Hotkeys {
-    manager: GlobalHotKeyManager,
+    manager: Rc<GlobalHotKeyManager>,
 }
 
 impl Hotkeys {
     pub fn new() -> Result<Self, String> {
         Ok(Hotkeys {
-            manager: GlobalHotKeyManager::new().map_err(|e| e.to_string())?,
+            manager: shared_manager()?,
         })
     }
 

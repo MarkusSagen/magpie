@@ -100,7 +100,9 @@ impl MacClipboard {
 impl Clipboard for MacClipboard {
     fn snapshot(&mut self) -> ClipboardSnapshot {
         let change_token = Self::change_count() as u64;
-        let concealed = Self::is_concealed();
+        let concealed = Self::is_concealed()
+            || change_token as isize
+                == crate::selection::RESTORED_CHANGE.load(std::sync::atomic::Ordering::Acquire);
         // File URLs first: copying files in Finder also exposes a plain-text
         // filename fallback, which we must NOT prefer over the actual files.
         let content = if let Some(files) = file_urls_on_pasteboard() {

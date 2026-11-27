@@ -73,3 +73,5 @@ pub use store::{
 pub use vault::{
     reconcile_vault, resolve_action, sync_vault, ReconcileReport, SyncReport, VaultAction,
 };
+
+pub mod text_actions;
